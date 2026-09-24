@@ -41,7 +41,8 @@ shared/domain/     чистые правила: время, ставки, нац
 app/utils/         чистые помощники страниц, покрыты тестами: установка, контекст встройки,
                    замер места, свежесть токена фрейма (frameToken), параллельные чтения
                    (concurrency), сбор страниц (paging), разбор пакета (b24Batch), итог
-                   записи в счёт (writeOutcome), что не настроено на сервере (serverHealth)
+                   записи в счёт (writeOutcome), что не настроено на сервере (serverHealth),
+                   названия единиц измерения (measures)
 app/composables/   связь с порталом и сервером: useB24 (фрейм, REST v2 и v3), useApi (наш
                    /api), useAppSettings, useInvoiceFill (сценарий счёта), useCatalog
                    (единицы измерения), useUsers, useStorageProbe (замер места)
