@@ -75,7 +75,11 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
 
   it('task.elapseditem.getlist: CREATED_DATE, заданная задним числом, — дата записи (решение #3)', async () => {
     const { entries } = await fetchEntries(portal, fx!.tasks.design)
-    expect(entries.map(e => e.date).sort()).toEqual(['2026-08-20', new Date().toISOString().slice(0, 10)].sort())
+    // «Сегодня» — по часовому поясу ПОРТАЛА (portalDate), поэтому сравнение не с датой машины,
+    // а «после смены ставки»: иначе прогон около полуночи UTC краснел бы ложно.
+    const dates = entries.map(e => e.date).sort()
+    expect(dates[0]).toBe('2026-08-20')
+    expect(dates[1]! >= '2026-09-01').toBe(true)
   })
 
   it('crm.item.productrow.list: 55 позиций — страницы по 50', async () => {
