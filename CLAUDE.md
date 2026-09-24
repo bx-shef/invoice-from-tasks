@@ -29,11 +29,11 @@ pnpm build            # сборка сервера .output/server/index.mjs
 | `shared/domain/` | **чистые правила**: `time` (округление), `rates` (ставки по датам), `markup` (наценки), `fill` (сборка строк, тип 1/2), `tasks` (разбор задач и времени, привязка к CRM), `invoice`, `settings` (формат настроек), `storageBudget` (место в app.option), `prompts` (BitrixGPT), `activity` (дело консультации) |
 | `app/pages/` | `index` (публичная), `install` (установка), `app` (главная в портале), `settings`, `invoice` (встройка в карточку счёта) |
 | `app/composables/` | `useB24` (фрейм и REST), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog`, `useUsers`, `useStorageProbe` |
-| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением) |
+| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере) |
 | `app/config/b24.ts` | права, встройка, события — одно место |
 | `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` |
-| `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела, частота событий) |
-| `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits`, `llm` + `aiGateway` + `rateLimit` (BitrixGPT) |
+| `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
+| `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |
 | `tests/` | юнит-тесты (vitest, node); `tests/server/` — серверные модули; `repoGuards` — гарды репо |
 
 Подробно: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), правила расчёта —
@@ -50,7 +50,8 @@ pnpm build            # сборка сервера .output/server/index.mjs
 - **Чистые функции отдельно**, с тестами; REST и запись — тонким слоем поверх. Серверные модули
   с автоимпортами Nitro (`useStorage`, `createError`) — только в обработчиках, `server/middleware/`
   и `requestContext.ts`, чтобы чистые модули импортировались в тестах. Решение обработчика —
-  в чистом модуле с внедряемыми зависимостями (`b24EventsHandler`, `optionWrites`).
+  в чистом модуле с внедряемыми зависимостями (`b24EventsHandler`, `optionWrites`, `aiRequests`,
+  `installerCall`); на клиенте — так же (`app/utils/paging`, `writeOutcome`, `b24Batch`).
 - **Если в задаче чего-то не хватает — стоп**: собрать все проблемы, ничего не писать в счёт.
 - **Права CRM не расширяем**: товары в счёт пишет сотрудник своими правами из фрейма. Токен
   установщика — только для записи ставок редактором.

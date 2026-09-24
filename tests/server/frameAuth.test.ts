@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { extractFrameAuth, isAuthRejection, resetFrameCache, VERIFY_CACHE_MS, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
+import { extractFrameAuth, isAuthRejection, resetFrameCache, VERIFY_CACHE_MAX, VERIFY_CACHE_MS, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
 import { saveInstall, type KeyValue } from '../../server/utils/tokenStore'
 
 const APP = 'local.ours'
@@ -134,6 +134,21 @@ describe('verifyFrame', () => {
     now += 1
     await verifyFrame(auth, deps)
     expect(call).toHaveBeenCalledTimes(4)
+  })
+
+  it('переполнение кэша вытесняет старые записи, а не сбрасывает всё', async () => {
+    const kv = await installedKv()
+    const call = portal()
+    const deps = { kv, call, appCode: APP, now: () => 1_000 }
+    for (let i = 0; i < VERIFY_CACHE_MAX + 1; i++) await verifyFrame({ ...auth, accessToken: `t${i}` }, deps)
+    const before = call.mock.calls.length
+    // Свежие токены, записанные ДО переполнения, всё ещё в кэше — полного сброса не было.
+    await verifyFrame({ ...auth, accessToken: `t${VERIFY_CACHE_MAX - 1}` }, deps)
+    await verifyFrame({ ...auth, accessToken: `t${VERIFY_CACHE_MAX}` }, deps)
+    expect(call.mock.calls.length).toBe(before)
+    // Самый старый вытеснен — проверяется заново.
+    await verifyFrame({ ...auth, accessToken: 't0' }, deps)
+    expect(call.mock.calls.length).toBe(before + 2)
   })
 
   it('isAuthRejection отличает отказ от сбоя', () => {

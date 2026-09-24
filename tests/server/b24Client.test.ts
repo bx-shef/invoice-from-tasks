@@ -9,6 +9,11 @@ describe('oauthParams', () => {
     expect(p).toMatchObject({ domain: 'demo.bitrix24.ru', clientEndpoint: 'https://demo.bitrix24.ru/rest/', expires: 10_000, expiresIn: 6000 })
   })
 
+  it('сервер авторизации — свой у портала, по умолчанию — текущий', () => {
+    expect(oauthParams({ ...token, oauthHost: 'oauth.bitrix.info' }, 0).serverEndpoint).toBe('https://oauth.bitrix.info/rest/')
+    expect(oauthParams(token, 0).serverEndpoint).toBe('https://oauth.bitrix24.tech/rest/')
+  })
+
   it('просроченный токен — expiresIn 0, а не отрицательный', () => {
     expect(oauthParams(token, 20_000_000).expiresIn).toBe(0)
   })

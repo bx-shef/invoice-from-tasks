@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { backoffMs, BITRIXGPT_DEFAULTS, chatWithRetry, describeLlmFailure, extractJson, isTransient, makeChatFn, normaliseError, resolveLlmConfig } from '../../server/utils/llm'
-import { AI_LIMITS, SlidingWindow } from '../../server/utils/rateLimit'
 
 describe('конфигурация BitrixGPT', () => {
   it('по умолчанию — AI Router Вайбкода и модель BitrixGPT', () => {
@@ -78,26 +77,5 @@ describe('отказы BitrixGPT для сотрудника', () => {
     expect(describeLlmFailure('429 rate limit').kind).toBe('quota')
     expect(describeLlmFailure('maximum context length exceeded').kind).toBe('too-long')
     expect(describeLlmFailure('странное').kind).toBe('unknown')
-  })
-})
-
-describe('лимит обращений', () => {
-  it('отказ по лимиту портала не съедает лимит сотрудника', () => {
-    const w = new SlidingWindow()
-    const portal = { max: 1, windowMs: 60_000 }
-    expect(w.take([['u1', AI_LIMITS.user], ['p', portal]], 0)).toBe(true)
-    expect(w.take([['u2', AI_LIMITS.user], ['p', portal]], 1)).toBe(false)
-    // u2 не засчитан: после окна портала он проходит с полным запасом.
-    for (let i = 0; i < AI_LIMITS.user.max; i++) expect(w.take([['u2', AI_LIMITS.user]], 70_000 + i)).toBe(true)
-    expect(w.take([['u2', AI_LIMITS.user]], 70_000 + AI_LIMITS.user.max)).toBe(false)
-  })
-
-  it('окно скользит', () => {
-    const w = new SlidingWindow()
-    const lim = { max: 2, windowMs: 1000 }
-    expect(w.take([['k', lim]], 0)).toBe(true)
-    expect(w.take([['k', lim]], 10)).toBe(true)
-    expect(w.take([['k', lim]], 20)).toBe(false)
-    expect(w.take([['k', lim]], 1001)).toBe(true)
   })
 })

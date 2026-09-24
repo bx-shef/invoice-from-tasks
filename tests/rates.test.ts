@@ -80,6 +80,12 @@ describe('coerceRateEntries — тело запроса', () => {
     expect(coerceRateEntries([{ userId: 5, rate: 1, from: '2026-01-01', productId: null }])?.[0]).not.toHaveProperty('productId')
   })
 
+  it('ставка строкой с запятой проходит, как и в normalizeRate', () => {
+    const entries = coerceRateEntries([{ userId: 5, rate: '12,5', from: '2026-01-01' }])!
+    expect(entries[0]?.rate).toBe(12.5)
+    expect(validateRates(entries)).toEqual([])
+  })
+
   it('ставка 0 — ошибка проверки, а не «бесплатный сотрудник»', () => {
     const entries = coerceRateEntries([{ userId: 5, rate: 0, from: '2026-01-01' }])!
     expect(validateRates(entries)).toEqual([{ index: 0, message: expect.stringMatching(/больше 0/) }])

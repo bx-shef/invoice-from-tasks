@@ -8,8 +8,9 @@ describe('chunk', () => {
     expect(chunk([], 3)).toEqual([])
   })
 
-  it('размер меньше 1 — ошибка, а не бесконечный цикл', () => {
+  it('размер меньше 1 — ошибка, а не бесконечный цикл; размер 1 — по одному', () => {
     expect(() => chunk([1], 0)).toThrow()
+    expect(chunk([1, 2], 1)).toEqual([[1], [2]])
   })
 })
 
@@ -41,5 +42,23 @@ describe('mapLimit', () => {
       if (n === 2) throw new Error('boom')
       return n
     })).rejects.toThrow('boom')
+  })
+
+  it('после первой ошибки новые вызовы не начинаются', async () => {
+    const started: number[] = []
+    await expect(mapLimit(Array.from({ length: 20 }, (_, i) => i), 4, async (n) => {
+      started.push(n)
+      await new Promise(r => setTimeout(r, 1))
+      if (n === 1) throw new Error('boom')
+      return n
+    })).rejects.toThrow('boom')
+    await new Promise(r => setTimeout(r, 20))
+    // Уже запущенные (0–3) доработали, но за ними ничего нового не стартовало.
+    expect(started.length).toBeLessThanOrEqual(4 + 3)
+    expect(started.length).toBeLessThan(20)
+  })
+
+  it('limit меньше 1 — работает как 1, а не молча пропускает всё', async () => {
+    expect(await mapLimit([1, 2, 3], 0, async n => n * 2)).toEqual([2, 4, 6])
   })
 })

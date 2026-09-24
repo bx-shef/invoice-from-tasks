@@ -58,7 +58,25 @@ export interface VerifyDeps {
 /** Кэш проверок: один и тот же токен не гоняем в портал на каждый запрос. Ключ — хэш токена. */
 const cache = new Map<string, { until: number, verdict: FrameVerdict }>()
 export const VERIFY_CACHE_MS = 60_000
-const CACHE_MAX = 5000
+export const VERIFY_CACHE_MAX = 5000
+
+/**
+ * Запоминает решение. Кэш полон — сначала снимаются истёкшие, потом самые старые записи до 90 %
+ * потолка. Раньше кэш очищался ЦЕЛИКОМ: все сотрудники разом шли на живую проверку и упирались в
+ * её лимит по IP — ложные 429 (находка отдела безопасности панели).
+ */
+function remember(key: string, entry: { until: number, verdict: FrameVerdict }, now: number): void {
+  if (cache.size >= VERIFY_CACHE_MAX) {
+    for (const [k, v] of cache) {
+      if (v.until <= now) cache.delete(k)
+    }
+    for (const k of cache.keys()) {
+      if (cache.size < VERIFY_CACHE_MAX * 0.9) break
+      cache.delete(k)
+    }
+  }
+  cache.set(key, entry)
+}
 
 function cacheKey(auth: FrameAuth): string {
   return createHash('sha256').update(`${auth.domain}|${auth.accessToken}`).digest('hex')
@@ -103,7 +121,6 @@ export async function verifyFrame(auth: FrameAuth, deps: VerifyDeps): Promise<Fr
       ? { ok: false, status: 401, error: 'frame token rejected' }
       : { ok: false, status: 502, error: 'portal unavailable' }
   }
-  if (cache.size >= CACHE_MAX) cache.clear()
-  cache.set(key, { until: now + VERIFY_CACHE_MS, verdict })
+  remember(key, { until: now + VERIFY_CACHE_MS, verdict }, now)
   return verdict
 }

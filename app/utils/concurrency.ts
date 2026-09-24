@@ -12,15 +12,23 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
 
 /**
  * `Promise.all` с ограничением одновременных вызовов. Порядок результатов — как у входа.
- * Первая ошибка отклоняет весь вызов (как у `Promise.all`); уже запущенные вызовы доработают.
+ * Первая ошибка отклоняет весь вызов (как у `Promise.all`); уже запущенные вызовы доработают, а
+ * НОВЫЕ не начинаются: иначе после отказа сбор строк ещё долго читал бы задачи в фоне, соревнуясь
+ * с повторной попыткой за лимиты портала (находка /code-review). `limit` меньше 1 считается 1.
  */
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length)
   let next = 0
+  let failed = false
   async function worker(): Promise<void> {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++
-      results[index] = await fn(items[index]!, index)
+      try {
+        results[index] = await fn(items[index]!, index)
+      } catch (e) {
+        failed = true
+        throw e
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker))

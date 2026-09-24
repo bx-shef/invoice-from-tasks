@@ -26,23 +26,30 @@ const installAuth = {
   application_token: 'app-secret',
   access_token: 'sent-access',
   refresh_token: 'sent-refresh',
-  expires_in: '3600'
+  expires_in: '3600',
+  server_endpoint: 'https://oauth.bitrix24.tech/rest/'
 }
 
 /** OAuth-сервер, который знает один настоящий грант: портал m1 на demo.bitrix24.ru. */
 const realGrant = { access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_in: 3600, member_id: 'm1', client_endpoint: 'https://demo.bitrix24.ru/rest/' }
 
-function deps(over: Partial<EventDeps> = {}): EventDeps & { kv: ReturnType<typeof memoryKv>, lines: string[] } {
+type TestDeps = EventDeps & { kv: ReturnType<typeof memoryKv>, lines: string[], warnings: string[] }
+
+function deps(over: Partial<EventDeps> = {}): TestDeps {
   const lines: string[] = []
+  const warnings: string[] = []
   return {
     kv: memoryKv(),
     envToken: '',
     creds: { clientId: 'cid', clientSecret: 'csecret' },
     refresh: vi.fn(async () => realGrant),
+    env: {},
     log: line => lines.push(line),
+    warn: line => warnings.push(line),
     ...over,
-    lines
-  } as EventDeps & { kv: ReturnType<typeof memoryKv>, lines: string[] }
+    lines,
+    warnings
+  } as TestDeps
 }
 
 beforeEach(() => {
@@ -60,6 +67,22 @@ describe('события, которые мы не обрабатываем', ()
     expect(await handleB24Event('', d)).toEqual({ status: 200, body: { ok: true, ignored: 'empty' } })
     expect(d.kv.data.size).toBe(0)
   })
+
+  it('посторонние события НЕ тратят лимит установок', async () => {
+    const allowEvent = vi.fn(() => true)
+    const d = deps({ allowEvent })
+    for (let i = 0; i < 100; i++) await handleB24Event(body('ONTASKUPDATE', installAuth), d)
+    expect(allowEvent).not.toHaveBeenCalled()
+    expect((await handleB24Event(body('ONAPPINSTALL', installAuth), d)).status).toBe(200)
+    expect(allowEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('лимит установок исчерпан — 429, в OAuth не ходим, ничего не пишем', async () => {
+    const d = deps({ allowEvent: () => false })
+    expect(await handleB24Event(body('ONAPPINSTALL', installAuth), d)).toEqual({ status: 429, body: { error: 'too many install events' } })
+    expect(d.refresh).not.toHaveBeenCalled()
+    expect(d.kv.data.size).toBe(0)
+  })
 })
 
 describe('установка (ONAPPINSTALL)', () => {
@@ -67,7 +90,7 @@ describe('установка (ONAPPINSTALL)', () => {
     const d = deps()
     const res = await handleB24Event(body('ONAPPINSTALL', installAuth), d)
     expect(res).toEqual({ status: 200, body: { ok: true } })
-    expect(d.refresh).toHaveBeenCalledWith('sent-refresh')
+    expect(d.refresh).toHaveBeenCalledWith('sent-refresh', 'oauth.bitrix24.tech')
     const saved = (await getPortalByDomain(d.kv, 'demo.bitrix24.ru'))!
     expect(accessTokenOf(saved)).toBe('rotated-access')
     expect(refreshTokenOf(saved)).toBe('rotated-refresh')
@@ -90,11 +113,28 @@ describe('установка (ONAPPINSTALL)', () => {
     expect(d.kv.data.size).toBe(0)
   })
 
-  it('без B24_CLIENT_ID/SECRET установка НЕ сохраняется — 503 (fail-closed)', async () => {
+  it('без B24_CLIENT_ID/SECRET установка НЕ сохраняется — 503 (fail-closed), в журнал ошибок', async () => {
     const d = deps({ creds: { clientId: '', clientSecret: '' } })
     expect((await handleB24Event(body('ONAPPINSTALL', installAuth), d)).status).toBe(503)
     expect(d.refresh).not.toHaveBeenCalled()
     expect(d.kv.data.size).toBe(0)
+    expect(d.warnings.join('\n')).toMatch(/B24_CLIENT_ID/)
+  })
+
+  it('сервер авторизации — тот, что назвал портал, если он из списка; сохраняется с установкой', async () => {
+    const d = deps()
+    await handleB24Event(body('ONAPPINSTALL', { ...installAuth, server_endpoint: 'https://oauth.bitrix.info/rest/' }), d)
+    expect(d.refresh).toHaveBeenCalledWith('sent-refresh', 'oauth.bitrix.info')
+    expect((await getPortal(d.kv, 'm1'))?.oauthHost).toBe('oauth.bitrix.info')
+  })
+
+  it('сервер авторизации не из списка — 403, в OAuth не ходим, предупреждение в журнал', async () => {
+    const d = deps()
+    const res = await handleB24Event(body('ONAPPINSTALL', { ...installAuth, server_endpoint: 'https://evil.com/rest/' }), d)
+    expect(res.status).toBe(403)
+    expect(d.refresh).not.toHaveBeenCalled()
+    expect(d.kv.data.size).toBe(0)
+    expect(d.warnings.join('\n')).toMatch(/not allow-listed/)
   })
 
   it('чужой member_id со своим грантом — 403, запись жертвы не тронута', async () => {

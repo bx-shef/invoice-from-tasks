@@ -4,18 +4,25 @@
 
 import { oauthCredsFromEnv } from '../../utils/b24Client'
 import { handleB24Event } from '../../utils/b24EventsHandler'
-import { portalStore } from '../../utils/requestContext'
+import { SlidingWindow } from '../../utils/rateLimit'
+import { clientIp, portalStore } from '../../utils/requestContext'
+import { EVENTS_GLOBAL, EVENTS_PER_IP } from '../../utils/requestLimits'
 import { rawOauthRefresh, type OAuthFetchFn } from '../../utils/verifyInstallMember'
+
+const eventWindows = new SlidingWindow()
 
 export default defineEventHandler(async (event) => {
   const creds = oauthCredsFromEnv()
+  const ip = clientIp(event)
   try {
     const result = await handleB24Event((await readRawBody(event)) || '', {
       kv: portalStore(),
       envToken: process.env.B24_APPLICATION_TOKEN?.trim() || '',
       creds,
       refresh: rawOauthRefresh(globalThis.fetch as unknown as OAuthFetchFn, creds),
-      log: line => console.info(`[b24-events] ${line}`)
+      allowEvent: () => eventWindows.take([[`ev:${ip}`, EVENTS_PER_IP], ['ev:*', EVENTS_GLOBAL]]),
+      log: line => console.info(`[b24-events] ${line}`),
+      warn: line => console.error(`[b24-events] ${line}`)
     })
     setResponseStatus(event, result.status)
     return result.body

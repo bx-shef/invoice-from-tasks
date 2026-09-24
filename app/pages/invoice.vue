@@ -174,7 +174,7 @@ async function consult(promptId: string) {
           <B24Button
             color="air-primary-success"
             label="Заменить товары в счёте"
-            :loading="fill.step.value === 'writing'"
+            :loading="fill.writing.value === 'replace'"
             :disabled="busy"
             data-testid="fill-replace"
             @click="write(true)"
@@ -182,6 +182,7 @@ async function consult(promptId: string) {
           <B24Button
             color="air-secondary"
             label="Добавить к товарам счёта"
+            :loading="fill.writing.value === 'append'"
             :disabled="busy"
             data-testid="fill-append"
             @click="write(false)"

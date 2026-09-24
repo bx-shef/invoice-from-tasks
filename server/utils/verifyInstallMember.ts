@@ -16,13 +16,17 @@
 // ответа — хост СЕРВЕРА АВТОРИЗАЦИИ (`oauth.bitrix24.tech` в примере документации), не портала:
 // сверять по нему нельзя.
 //
-// Хост OAuth фиксированный (не из запроса) — SSRF здесь нет; секреты идут в теле, не в URL
+// Сервер авторизации — тот, что назвал портал в `auth[server_endpoint]`, но только из белого
+// списка (`b24Host.ts → resolveOAuthHost`): SSRF здесь нет. Секреты идут в теле, не в URL
 // (документация показывает GET со строкой запроса, тело принимается — проверено авторами
 // b24jssdk, oauth/auth.mjs; так же шлёт и сам SDK).
 
-/** Адрес продления токена — по текущей документации; эталон использовал прежний `oauth.bitrix.info`. */
-export const OAUTH_TOKEN_URL = 'https://oauth.bitrix24.tech/oauth/token/'
 export const INSTALL_VERIFY_TIMEOUT_MS = 15_000
+
+/** Адрес продления токена на сервере авторизации. */
+export function oauthTokenUrl(oauthHost: string): string {
+  return `https://${oauthHost}/oauth/token/`
+}
 
 /** Коды OAuth, означающие «грант поддельный» → 403. Остальное — «не можем проверить» → 503. */
 const GRANT_REJECTION_CODES = new Set(['invalid_grant', 'invalid_token', 'expired_token'])
@@ -34,10 +38,14 @@ export interface OAuthCreds {
 
 export type OAuthFetchFn = (url: string, init: { method: string, headers: Record<string, string>, body: string, signal?: AbortSignal }) => Promise<{ json: () => Promise<unknown> }>
 
-/** Сырой POST обновления токена. Секреты — в теле формы, не в строке запроса (не попадут в логи). */
+/**
+ * Сырой POST обновления токена. Секреты — в теле формы, не в строке запроса (не попадут в логи).
+ * Хост обязан прийти из `resolveOAuthHost`; здесь — только защита от мусора в адресе.
+ */
 export function rawOauthRefresh(fetchFn: OAuthFetchFn, creds: OAuthCreds, timeoutMs = INSTALL_VERIFY_TIMEOUT_MS) {
-  return async (refreshToken: string): Promise<unknown> => {
-    const res = await fetchFn(OAUTH_TOKEN_URL, {
+  return async (refreshToken: string, oauthHost: string): Promise<unknown> => {
+    if (!/^[a-z0-9.-]+$/.test(oauthHost)) throw new Error('oauth host is not a plain hostname')
+    const res = await fetchFn(oauthTokenUrl(oauthHost), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({

@@ -54,6 +54,36 @@ export function assertPortalHost(host: string, env: Record<string, string | unde
 }
 
 /**
+ * Серверы авторизации облака. `oauth.bitrix24.tech` — текущая документация (статьи об OAuth и
+ * пример события ONAPPINSTALL); `oauth.bitrix.info` — прежний адрес: на него ходили эталоны, и на
+ * нём, возможно, живут порталы других зон. Какой сервер у портала, говорит `auth[server_endpoint]`
+ * события установки («Адрес сервера авторизации для обновления токена» — документация события).
+ */
+export const B24_OAUTH_HOSTS = ['oauth.bitrix24.tech', 'oauth.bitrix.info'] as const
+/** Сервер авторизации, если событие его не назвало (у старых записей о портале его тоже нет). */
+export const DEFAULT_OAUTH_HOST = 'oauth.bitrix24.tech'
+
+/**
+ * Сервер авторизации установки из `auth[server_endpoint]` события.
+ * • Облачный — только из {@link B24_OAUTH_HOSTS}.
+ * • Коробочный (из `B24_SELFHOSTED_HOSTS`) — только если это сам портал установки: коробка может
+ *   ручаться лишь за себя, иначе её владелец выпускал бы «гранты» с member_id и доменом чужих
+ *   облачных порталов, и сверка установки их бы приняла.
+ * • Поля нет — {@link DEFAULT_OAUTH_HOST}.
+ *
+ * @param portalHost домен установки, уже прошедший {@link assertPortalHost}
+ * @returns хост или `null` — сервер не из разрешённых (SSRF и подделка гранта)
+ */
+export function resolveOAuthHost(serverEndpoint: string, portalHost: string, env: Record<string, string | undefined> = process.env): string | null {
+  if (!serverEndpoint.trim()) return DEFAULT_OAUTH_HOST
+  const host = portalHostname(serverEndpoint)
+  if (!host) return null
+  if ((B24_OAUTH_HOSTS as readonly string[]).includes(host)) return host
+  if (host === portalHost && parseSelfHostedHosts(env.B24_SELFHOSTED_HOSTS).has(host)) return host
+  return null
+}
+
+/**
  * Значение CSP `frame-ancestors` для страниц: встраивать их могут только порталы Битрикс24.
  * Тот же список зон, что у SSRF-гарда, — один источник, чтобы они не разъехались.
  */

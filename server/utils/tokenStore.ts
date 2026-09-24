@@ -9,6 +9,7 @@
 // Оба токена шифруются (secretCrypto.ts): access-токен живёт час, но это час прав администратора
 // портала — при утечке тома он не должен читаться (находка отдела безопасности панели).
 
+import { DEFAULT_OAUTH_HOST } from './b24Host'
 import { decryptSecret, encryptSecret } from './secretCrypto'
 
 export interface PortalRecord {
@@ -23,6 +24,8 @@ export interface PortalRecord {
   /** Секрет подписи событий портала; пишется один раз — при первой установке. */
   applicationToken: string
   installedAt: number
+  /** Сервер авторизации портала (из `auth[server_endpoint]` установки); у старых записей нет. */
+  oauthHost?: string
 }
 
 /**
@@ -64,6 +67,8 @@ export interface SaveInstallInput {
   refreshToken: string
   expiresIn: number
   applicationToken: string
+  /** Сервер авторизации; не задан — {@link DEFAULT_OAUTH_HOST}. */
+  oauthHost?: string
 }
 
 /**
@@ -79,7 +84,8 @@ export async function saveInstall(kv: KeyValue, input: SaveInstallInput, now = D
     refreshTokenEnc: input.refreshToken ? encryptSecret(input.refreshToken) : '',
     expiresAt: now + input.expiresIn * 1000,
     applicationToken: prev?.applicationToken || input.applicationToken,
-    installedAt: prev?.installedAt ?? now
+    installedAt: prev?.installedAt ?? now,
+    oauthHost: input.oauthHost || DEFAULT_OAUTH_HOST
   }
   if (prev && prev.domain !== record.domain) await removeDomainIfOwned(kv, prev.domain, record.memberId)
   await kv.setItem(portalKey(record.memberId), record)

@@ -75,3 +75,19 @@ export function stalePlacements(siteUrl: string, existing: unknown): Array<{ PLA
     .filter(p => String(p.placement ?? '').toUpperCase() === INVOICE_PLACEMENT && String(p.handler ?? '') !== handler)
     .map(p => ({ PLACEMENT: INVOICE_PLACEMENT, HANDLER: String(p.handler ?? '') }))
 }
+
+/**
+ * Подписки нашего приложения на события установки и удаления со СТАРЫМ адресом (переезд
+ * сервера) — их снимаем `event.unbind` (`event`, `handler` — документация метода). Раньше
+ * переустановка только дописывала новые подписки, и старые оставались мёртвым грузом (находка
+ * ревьюера документации). `event.get` отдаёт подписки только нашего приложения.
+ */
+export function staleEventHandlers(siteUrl: string, existing: unknown): Array<{ event: string, handler: string }> {
+  const handler = absoluteHandler(siteUrl, EVENTS_HANDLER_PATH)
+  if (!handler) return []
+  const ours = new Set<string>(BOUND_EVENTS)
+  return (Array.isArray(existing) ? existing : [])
+    .map(e => e as { event?: unknown, handler?: unknown })
+    .filter(e => ours.has(String(e.event ?? '').toUpperCase()) && String(e.handler ?? '') !== '' && String(e.handler) !== handler)
+    .map(e => ({ event: String(e.event).toUpperCase(), handler: String(e.handler) }))
+}

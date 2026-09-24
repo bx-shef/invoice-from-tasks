@@ -59,6 +59,16 @@ describe('урезание до отправки', () => {
     expect(clipNamingItem({ key: 'e1', title: 'a', text: 'b' })).toEqual({ key: 'e1', title: 'a', text: 'b' })
   })
 
+  it('clipNamingItem: ровно предел — без изменений, на символ больше — с многоточием', () => {
+    const exact = clipNamingItem({ key: 't1', title: 'з'.repeat(MAX_ITEM_TITLE), text: 'о'.repeat(MAX_ITEM_TEXT) })
+    expect(exact.title).toHaveLength(MAX_ITEM_TITLE)
+    expect(exact.title.endsWith('…')).toBe(false)
+    expect(exact.text).toHaveLength(MAX_ITEM_TEXT)
+    const over = clipNamingItem({ key: 't1', title: 'з'.repeat(MAX_ITEM_TITLE + 1), text: 'о'.repeat(MAX_ITEM_TEXT + 1) })
+    expect(over.title.endsWith('…')).toBe(true)
+    expect(over.text.endsWith('…')).toBe(true)
+  })
+
   it('fitConsultContext: влезает — без изменений и без пометки', () => {
     const ctx = { invoice: { title: 'Счёт' }, rows: [{ n: 1 }], tasks: [{ id: 1 }] }
     expect(fitConsultContext(ctx)).toEqual(ctx)

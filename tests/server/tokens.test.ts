@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decryptSecret, encryptSecret, loadEncKey } from '../../server/utils/secretCrypto'
 import { accessTokenOf, getPortal, getPortalByDomain, refreshTokenOf, removePortal, saveInstall, updateTokens, type KeyValue } from '../../server/utils/tokenStore'
-import { OAUTH_SERVER_ENDPOINT } from '../../server/utils/b24Client'
-import { endpointHost, OAUTH_TOKEN_URL, rawOauthRefresh, verifyInstallMember } from '../../server/utils/verifyInstallMember'
+import { endpointHost, rawOauthRefresh, verifyInstallMember } from '../../server/utils/verifyInstallMember'
 
 function memoryKv(): KeyValue & { data: Map<string, unknown> } {
   const data = new Map<string, unknown>()
@@ -43,6 +42,14 @@ describe('шифрование секретов', () => {
 
 describe('хранилище установок', () => {
   const install = { memberId: 'M1', domain: 'Demo.bitrix24.ru', accessToken: 'AT', refreshToken: 'RT', expiresIn: 3600, applicationToken: 'app1' }
+
+  it('сервер авторизации: из установки, по умолчанию — текущий', async () => {
+    const kv = memoryKv()
+    await saveInstall(kv, { ...install, oauthHost: 'oauth.bitrix.info' })
+    expect((await getPortal(kv, 'm1'))?.oauthHost).toBe('oauth.bitrix.info')
+    await saveInstall(kv, { ...install, memberId: 'M2', domain: 'b.bitrix24.ru' })
+    expect((await getPortal(kv, 'm2'))?.oauthHost).toBe('oauth.bitrix24.tech')
+  })
 
   it('сохраняет, находит по домену, шифрует ОБА токена', async () => {
     const kv = memoryKv()
@@ -179,12 +186,12 @@ describe('сверка member_id и домена при установке', () 
 })
 
 describe('запрос продления токена', () => {
-  it('POST формой на фиксированный хост; секреты — в теле, не в адресе', async () => {
+  it('POST формой на сервер авторизации портала; секреты — в теле, не в адресе', async () => {
     const fetchFn = vi.fn(async () => ({ json: async () => ({ ok: 1 }) }))
     const refresh = rawOauthRefresh(fetchFn, { clientId: 'cid', clientSecret: 'csecret' })
-    expect(await refresh('rt-1')).toEqual({ ok: 1 })
+    expect(await refresh('rt-1', 'oauth.bitrix.info')).toEqual({ ok: 1 })
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, { method: string, headers: Record<string, string>, body: string }]
-    expect(url).toBe(OAUTH_TOKEN_URL)
+    expect(url).toBe('https://oauth.bitrix.info/oauth/token/')
     expect(url).not.toMatch(/csecret|rt-1/)
     expect(init.method).toBe('POST')
     expect(init.headers['Content-Type']).toBe('application/x-www-form-urlencoded')
@@ -193,7 +200,12 @@ describe('запрос продления токена', () => {
     })
   })
 
-  it('сверка установки и SDK ходят на один и тот же сервер авторизации', () => {
-    expect(new URL(OAUTH_TOKEN_URL).host).toBe(new URL(OAUTH_SERVER_ENDPOINT).host)
+  it('хост с путём, портом или userinfo — отказ до запроса', async () => {
+    const fetchFn = vi.fn()
+    const refresh = rawOauthRefresh(fetchFn, { clientId: 'cid', clientSecret: 'csecret' })
+    for (const host of ['evil.com/x', 'a@evil.com', 'evil.com:8080', '']) {
+      await expect(refresh('rt', host)).rejects.toThrow()
+    }
+    expect(fetchFn).not.toHaveBeenCalled()
   })
 })

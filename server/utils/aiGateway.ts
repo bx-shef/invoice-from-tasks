@@ -6,6 +6,13 @@ import { chatWithRetry, describeLlmFailure, makeChatFn, resolveLlmConfig, type C
 import { AI_LIMITS, SlidingWindow } from './rateLimit'
 import type { FrameUser } from './frameAuth'
 
+export interface AiLimitOptions {
+  /** Вес обращения в единицах лимита: число строк в запросе названий, `CONSULT_WEIGHT` для консультации. */
+  weight?: number
+  window?: SlidingWindow
+  now?: number
+}
+
 /** Отказ AI-шлюза с HTTP-кодом и текстом для сотрудника (без сырого текста провайдера). */
 export class AiGatewayError extends Error {
   constructor(readonly statusCode: 429 | 502, message: string) {
@@ -17,11 +24,11 @@ export class AiGatewayError extends Error {
 const windows = new SlidingWindow()
 
 /** Бросает {@link AiGatewayError} 429, если сотрудник или портал исчерпали лимит обращений. */
-export function enforceAiLimit(user: FrameUser, window: SlidingWindow = windows, now = Date.now()): void {
-  const ok = window.take([
+export function enforceAiLimit(user: FrameUser, opts: AiLimitOptions = {}): void {
+  const ok = (opts.window ?? windows).take([
     [`u:${user.portal.memberId}:${user.userId}`, AI_LIMITS.user],
     [`p:${user.portal.memberId}`, AI_LIMITS.portal]
-  ], now)
+  ], opts.now ?? Date.now(), opts.weight ?? 1)
   if (!ok) throw new AiGatewayError(429, 'Слишком много обращений к BitrixGPT. Попробуйте позже.')
 }
 

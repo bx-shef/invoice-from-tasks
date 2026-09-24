@@ -18,7 +18,10 @@ import {
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
+import { B24CallError } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
+import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
+import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
 
 /** Поля задачи, которые мы читаем (tasks.task.list, REST v2). */
 export const TASK_SELECT = ['ID', 'TITLE', 'DESCRIPTION', 'RESPONSIBLE_ID', 'UF_CRM_TASK', 'TIME_SPENT_IN_LOGS']
@@ -31,6 +34,8 @@ const MAX_ELAPSED_PAGES = 100
 const PRODUCT_ROWS_PAGE = 50
 /** Потолок позиций счёта, которые читаем: 200 страниц × 50. */
 const MAX_PRODUCT_ROWS = 10_000
+/** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
+const MAX_CONSULT_TITLE = 500
 /** Глубина обхода папок каталога вверх — страховка от циклов в данных. */
 const MAX_SECTION_DEPTH = 20
 /** Сколько задач читаем одновременно: SDK всё равно выравнивает вызовы под лимит REST портала. */
@@ -52,29 +57,31 @@ export function useInvoiceFill() {
   const problems = ref<string[]>([])
   const step = ref<Step>('idle')
   const error = ref('')
-  /** Предупреждение после записи (например, счёт не удалось перечитать) — запись при этом прошла. */
+  /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
   const notice = ref('')
+  /** Какая запись идёт сейчас — чтобы индикатор крутился на нажатой кнопке, а не на соседней. */
+  const writing = ref<WriteMode | null>(null)
 
   const canWrite = computed(() => step.value === 'preview' && !!result.value && result.value.errors.length === 0 && result.value.rows.length > 0)
   const total = computed(() => rowsTotal(result.value?.rows ?? []))
 
   /**
-   * Все позиции счёта, постранично: у счёта их может быть больше страницы. Упёрлись в потолок —
-   * ошибка, а не тихо неполный список: по нему считается порядок новых строк и «добавлено N».
+   * Все позиции счёта, постранично (paging.ts, покрыт тестом): у счёта их может быть больше
+   * страницы. Упёрлись в потолок — ошибка, а не тихо неполный список: по нему считается порядок
+   * новых строк и итог записи.
    */
   async function fetchExistingRows(id: number): Promise<ExistingRow[]> {
-    const out: ExistingRow[] = []
-    for (let start = 0; ; start += PRODUCT_ROWS_PAGE) {
-      if (start >= MAX_PRODUCT_ROWS) throw new Error(`в счёте #${id} больше ${MAX_PRODUCT_ROWS} позиций — такой счёт приложение не обрабатывает`)
-      const res = await b24.call<{ productRows?: unknown[] }>('crm.item.productrow.list', {
+    const raw = await collectOffsetPages(
+      async start => (await b24.call<{ productRows?: unknown[] }>('crm.item.productrow.list', {
         filter: { '=ownerType': INVOICE_OWNER_TYPE, '=ownerId': id },
         order: { id: 'asc' },
         start
-      })
-      const page = res?.productRows ?? []
-      out.push(...parseExistingRows(page))
-      if (page.length < PRODUCT_ROWS_PAGE) return out
-    }
+      }))?.productRows ?? [],
+      PRODUCT_ROWS_PAGE,
+      MAX_PRODUCT_ROWS,
+      `в счёте #${id} больше ${MAX_PRODUCT_ROWS} позиций — такой счёт приложение не обрабатывает`
+    )
+    return parseExistingRows(raw)
   }
 
   /** Счёт и его позиции. Состояние шага не трогает — это делают вызывающие. */
@@ -128,26 +135,32 @@ export function useInvoiceFill() {
   }
 
   /**
-   * Все записи времени задачи, постранично. Параметры — позиционные, как в примере документации.
-   * Упёрлись в потолок страниц — ошибка, а не тихо неполная сумма (находка ревью).
+   * Все записи времени задачи, постранично (paging.ts, покрыт тестом). Параметры — позиционные,
+   * как в примере документации. Конец — по СЫРЫМ строкам и `total`, потолок — ошибка, а не тихо
+   * неполная сумма. Записи дедуплицируются по ID: если старый метод отдаст страницу повторно,
+   * время не задвоится.
    */
   async function fetchEntries(taskId: number): Promise<TimeEntry[]> {
-    const out: TimeEntry[] = []
-    for (let page = 1; ; page++) {
-      if (page > MAX_ELAPSED_PAGES) throw new Error(`в задаче #${taskId} больше ${MAX_ELAPSED_PAGES * ELAPSED_PAGE} записей времени — такой объём приложение не считает`)
-      const res = await b24.getOrThrow().actions.v2.call.make({
-        method: 'task.elapseditem.getlist',
-        params: [taskId, { ID: 'asc' }, {}, ['*'], { NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: page } }] as unknown as Record<string, unknown>
-      })
-      if (!res.isSuccess) throw new B24CallError('task.elapseditem.getlist', res.getErrorMessages())
-      const rows = listRows(res.getData()?.result)
-      for (const row of rows) {
-        const entry = parseTimeEntry(row)
-        if (entry) out.push(entry)
-      }
-      if (rows.length < ELAPSED_PAGE || out.length >= res.getTotal()) break
+    const raw = await collectNumberedPages(
+      async (page) => {
+        const res = await b24.getOrThrow().actions.v2.call.make({
+          method: 'task.elapseditem.getlist',
+          params: [taskId, { ID: 'asc' }, {}, ['*'], { NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: page } }] as unknown as Record<string, unknown>
+        })
+        if (!res.isSuccess) throw new B24CallError('task.elapseditem.getlist', res.getErrorMessages())
+        // getTotal() без поля `total` в ответе даёт 0 — collectNumberedPages считает это «неизвестно».
+        return { rows: listRows(res.getData()?.result), total: res.getTotal() }
+      },
+      ELAPSED_PAGE,
+      MAX_ELAPSED_PAGES,
+      `в задаче #${taskId} больше ${MAX_ELAPSED_PAGES * ELAPSED_PAGE} записей времени — такой объём приложение не считает`
+    )
+    const byId = new Map<number, TimeEntry>()
+    for (const row of raw) {
+      const entry = parseTimeEntry(row)
+      if (entry) byId.set(entry.id, entry)
     }
-    return out
+    return [...byId.values()]
   }
 
   /** Отчёты (результаты) задачи — контекст для названий в режиме ИИ. Не обязательны: сбой не останавливает. */
@@ -255,49 +268,46 @@ export function useInvoiceFill() {
    * • «Добавить» — crm.item.productrow.add по одной строке: set с неполными полями обнулил бы
    *   цены существующих строк («Если не передана, цена будет равна 0» — документация).
    *   ⚠ Пакет add не транзакция: при ошибке посередине часть строк уже добавлена. Поэтому пакет
-   *   останавливается на первой ошибке, счёт перечитывается, человеку говорится, СКОЛЬКО строк
-   *   добавилось, а предпросмотр сбрасывается — повторное нажатие не задвоит строки (находка
-   *   /code-review этого PR).
+   *   останавливается на первой ошибке.
+   * Автоматические повторы SDK на время записи выключены (useB24.withoutWriteRetry), а итог
+   * определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
+   * нет ли лишних строк, можно ли повторять.
    */
   async function write(replace: boolean): Promise<void> {
     const inv = invoice.value
     if (!inv || !canWrite.value || !result.value) return
+    const mode: WriteMode = replace ? 'replace' : 'append'
     step.value = 'writing'
+    writing.value = mode
     error.value = ''
     notice.value = ''
+    const draft = result.value.rows
     const before = existing.value.length
-    const planned = result.value.rows.length
+    const planned = draft.length
+    let failure: string | null = null
     try {
-      if (replace) {
-        await b24.call('crm.item.productrow.set', { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, productRows: toProductRows(result.value.rows, settings.value) })
-      } else {
-        const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
-        const rows = toProductRows(result.value.rows, settings.value, sortStart)
-        await b24.batch(rows.map(fields => ['crm.item.productrow.add', { fields: { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, ...fields } }]), { haltOnError: true })
-      }
+      await b24.withoutWriteRetry(async () => {
+        if (replace) {
+          await b24.call('crm.item.productrow.set', { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, productRows: toProductRows(draft, settings.value) })
+        } else {
+          const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
+          const rows = toProductRows(draft, settings.value, sortStart)
+          await b24.batch(rows.map(fields => ['crm.item.productrow.add', { fields: { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, ...fields } }]), { haltOnError: true })
+        }
+      })
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      if (replace) {
-        error.value = `Счёт не изменён: ${message}`
-        step.value = 'preview'
-        return
-      }
-      // Сколько успело добавиться — по перечитанному счёту. Не перечитался — так и говорим,
-      // а не «добавлено 0»: строки могли уйти.
-      const reread = await readInvoice(inv.id).then(() => true, () => false)
-      const done = reread
-        ? `Добавлено ${Math.max(0, existing.value.length - before)} из ${planned} строк`
-        : `Сколько строк из ${planned} успело добавиться, проверить не удалось`
-      error.value = `${done}, дальше — ошибка: ${message}. Проверьте счёт; чтобы не задвоить строки, соберите их заново.`
-      result.value = null
-      step.value = 'idle'
+      failure = e instanceof Error ? e.message : String(e)
+    }
+    const after = await readInvoice(inv.id).then(() => existing.value.length, () => null)
+    const verdict = describeWrite({ mode, planned, before, after, error: failure })
+    writing.value = null
+    if (verdict.resetPreview) result.value = null
+    if (verdict.kind === 'error') {
+      error.value = verdict.message
+      step.value = result.value ? 'preview' : 'idle'
       return
     }
-    try {
-      await readInvoice(inv.id)
-    } catch {
-      notice.value = 'Строки записаны, но счёт не удалось перечитать — обновите карточку счёта.'
-    }
+    notice.value = verdict.kind === 'warn' ? verdict.message : ''
     step.value = 'done'
   }
 
@@ -307,7 +317,7 @@ export function useInvoiceFill() {
     if (!inv) throw new Error('Счёт не загружен')
     // Урезаем до того, что сервер отдаст модели: большой счёт иначе упёрся бы в предел тела запроса.
     const context = fitConsultContext({
-      invoice: { title: inv.title, currency: inv.currencyId, amount: inv.opportunity },
+      invoice: { title: inv.title.slice(0, MAX_CONSULT_TITLE), currency: inv.currencyId, amount: inv.opportunity },
       rows: existing.value.map(r => ({ name: r.productName, quantity: r.quantity, price: r.price })),
       tasks: tasks.value.map(t => ({ id: t.id, title: t.title, description: t.description.slice(0, 1000), hours: Math.round(t.timeSpentInLogs / 36) / 100 }))
     })
@@ -322,5 +332,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, step, error, notice, canWrite, total, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, step, error, notice, writing, canWrite, total, loadInvoice, reset, collect, write, consult }
 }

@@ -6,18 +6,11 @@
 
 import { B24OAuth } from '@bitrix24/b24jssdk'
 import type { B24OAuthParams } from '@bitrix24/b24jssdk'
-import { assertPortalHost } from './b24Host'
+import { assertPortalHost, DEFAULT_OAUTH_HOST } from './b24Host'
 import type { OAuthCreds } from './verifyInstallMember'
 
 /** Вызов REST-метода: результат (`result` конверта) или исключение с текстом ошибок портала. */
 export type RestCall = (method: string, params?: Record<string, unknown>) => Promise<unknown>
-
-/**
- * Сервер авторизации — по текущей документации (статья «Автоматическое продление токенов
- * OAuth 2.0»: `server_endpoint` = `…oauth.bitrix24.tech/rest/`). Эталон использовал прежний
- * `oauth.bitrix.info`. SDK шлёт рефреш на `<serverEndpoint без /rest/>/oauth/token/`.
- */
-export const OAUTH_SERVER_ENDPOINT = 'https://oauth.bitrix24.tech/rest/'
 
 /** Сообщение, по которому видно, что фрейм-токен отвергнут (обновить его на сервере нельзя). */
 export const FRAME_TOKEN_REJECTED = 'frame token rejected'
@@ -29,9 +22,15 @@ interface TokenInput {
   refreshToken: string
   expiresAt: number
   applicationToken: string
+  /** Сервер авторизации портала (запись о портале); не задан — по умолчанию. */
+  oauthHost?: string
 }
 
-/** Параметры B24OAuth из нашей записи о токене. Хост проходит SSRF-гард. */
+/**
+ * Параметры B24OAuth из нашей записи о токене. Хост портала проходит SSRF-гард. Сервер
+ * авторизации — свой у портала (`auth[server_endpoint]` установки): SDK шлёт рефреш на
+ * `<serverEndpoint без /rest/>/oauth/token/`.
+ */
 export function oauthParams(token: TokenInput, nowMs: number): B24OAuthParams {
   const domain = assertPortalHost(token.domain)
   return {
@@ -45,7 +44,7 @@ export function oauthParams(token: TokenInput, nowMs: number): B24OAuthParams {
     scope: '',
     domain,
     clientEndpoint: `https://${domain}/rest/`,
-    serverEndpoint: OAUTH_SERVER_ENDPOINT,
+    serverEndpoint: `https://${token.oauthHost || DEFAULT_OAUTH_HOST}/rest/`,
     status: 'L'
   }
 }

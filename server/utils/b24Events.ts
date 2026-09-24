@@ -71,6 +71,8 @@ export interface EventAuth {
   accessToken: string
   refreshToken: string
   expiresIn: number
+  /** `auth[server_endpoint]` — сервер авторизации портала; `''`, если поля нет. */
+  serverEndpoint: string
 }
 
 /** Блок `auth` события. Бросает, если нет домена, member_id или application_token. */
@@ -89,6 +91,7 @@ export function parseEventAuth(payload: unknown): EventAuth {
     applicationToken,
     accessToken: str(a.access_token),
     refreshToken: str(a.refresh_token),
-    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600
+    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600,
+    serverEndpoint: str(a.server_endpoint)
   }
 }

@@ -40,22 +40,29 @@ function positiveInt(value: unknown): number | null {
  * ошибки «нет ставки» (находка /code-review этого PR).
  */
 export function normalizeRate(value: unknown): number | null {
-  const n = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
+  const n = toNumber(value)
   if (!Number.isFinite(n) || n <= 0 || n > MAX_RATE) return null
   const rounded = Math.round(n * 100) / 100
   return rounded > 0 ? rounded : null
 }
 
+/** Число из ввода: строка может быть с запятой — так вводят дробную часть в русской раскладке. */
+function toNumber(value: unknown): number {
+  return typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
+}
+
 /**
  * Записи ставок из тела запроса — только объекты; иначе `null` (400/422, а не падение на
- * `null.userId` в проверке — находка /code-review). Поля не нормализуются: это делает проверка.
+ * `null.userId` в проверке — находка /code-review). Поля приводятся к числам тем же правилом,
+ * что и в {@link normalizeRate} (запятая — десятичный разделитель: `"12,5"` не должно стать
+ * `NaN` раньше проверки — находка программиста панели); допустимость проверяет `validateRates`.
  */
 export function coerceRateEntries(raw: unknown): RateEntry[] | null {
   if (!Array.isArray(raw)) return null
   if (raw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return null
   return raw.map((item) => {
     const o = item as Record<string, unknown>
-    const entry: RateEntry = { userId: Number(o.userId), rate: Number(o.rate), from: String(o.from ?? '') }
+    const entry: RateEntry = { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? '') }
     if (o.productId !== undefined && o.productId !== null) entry.productId = Number(o.productId)
     return entry
   })

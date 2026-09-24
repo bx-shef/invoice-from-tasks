@@ -3,8 +3,12 @@
 // проверить права → встройка → подписка на события → installFinish.
 // ⚠ event.bind ДО installFinish: иначе ONAPPINSTALL (токены для записи ставок) не придёт.
 // ⚠ Встройка не видна в интерфейсе, пока установка не завершена (документация встройки).
+// ⚠ После installFinish портал перезагружает страницу — показывать что-то после него бесполезно
+//   (подсказка с кодом приложения поэтому живёт на главной, pages/app.vue).
+// Страницу можно открыть и после установки (смена адреса сервера): тогда встройка и подписки
+// обновляются, а installFinish не вызывается — вне режима установки SDK на нём падает.
 
-import { eventBindCalls, missingScopes, placementBindCall, stalePlacements } from '~/utils/install'
+import { eventBindCalls, missingScopes, placementBindCall, staleEventHandlers, stalePlacements } from '~/utils/install'
 
 type StepState = 'wait' | 'run' | 'ok' | 'warn' | 'fail'
 interface Step {
@@ -24,8 +28,6 @@ const steps = ref<Step[]>([
 ])
 const fatal = ref('')
 const done = ref(false)
-/** Код приложения (`app.info → CODE`): его вписывают в `B24_APP_CODE` сервера (docs/DEPLOY.md). */
-const appCode = ref('')
 
 function mark(key: string, state: StepState, note?: string) {
   const step = steps.value.find(s => s.key === key)
@@ -54,18 +56,20 @@ async function runInstall() {
 
   mark('events', 'run')
   const existing = await b24.call<unknown[]>('event.get')
+  for (const stale of staleEventHandlers(siteUrl, existing)) {
+    await b24.call('event.unbind', stale).catch(() => undefined)
+  }
   for (const ev of eventBindCalls(siteUrl, existing)) await b24.call(ev.method, ev.params)
   mark('events', 'ok')
 
   mark('finish', 'run')
-  await frame.installFinish()
-  mark('finish', 'ok')
+  if (frame.isInstallMode) {
+    await frame.installFinish()
+    mark('finish', 'ok')
+  } else {
+    mark('finish', 'ok', 'приложение уже было установлено — встройка и подписки обновлены')
+  }
   done.value = true
-
-  // Без B24_APP_CODE сервер не пускает к BitrixGPT и записи ставок — показываем, что вписать.
-  // Сбой здесь установку не портит: код виден и в карточке приложения в портале.
-  const info = await b24.call<{ CODE?: unknown }>('app.info').catch(() => null)
-  appCode.value = typeof info?.CODE === 'string' ? info.CODE : ''
 }
 
 onMounted(async () => {
@@ -124,18 +128,6 @@ const icon: Record<StepState, string> = { wait: '○', run: '…', ok: '✓', wa
         title="Готово"
         description="Администратор настраивает валюту и ставки в разделе приложения «Настройки». Затем в карточке счёта: верхняя кнопка → «Заполнить из задач»."
       />
-      <B24Alert
-        v-if="done && appCode"
-        color="air-primary"
-        title="Для администратора сервера"
-        data-testid="install-app-code"
-      >
-        <template #description>
-          Код приложения — <code class="font-mono">{{ appCode }}</code>. Он должен быть задан в
-          переменной <code class="font-mono">B24_APP_CODE</code> на сервере приложения: без неё сервер
-          не пускает к BitrixGPT и к записи ставок.
-        </template>
-      </B24Alert>
     </div>
   </InPortalGate>
 </template>

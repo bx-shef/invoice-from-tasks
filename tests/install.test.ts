@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { absoluteHandler, eventBindCalls, missingScopes, placementBindCall, stalePlacements } from '~/utils/install'
+import { absoluteHandler, eventBindCalls, missingScopes, placementBindCall, staleEventHandlers, stalePlacements } from '~/utils/install'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const SITE = 'https://invoice.example.com'
@@ -26,6 +26,18 @@ describe('подписки на события', () => {
   it('подписка на чужой адрес не считается', () => {
     const existing = [{ event: 'ONAPPINSTALL', handler: 'https://old.example.com/api/b24/events' }]
     expect(eventBindCalls(SITE, existing)).toHaveLength(2)
+  })
+
+  it('подписки со старым адресом снимаем; текущие и чужие события не трогаем', () => {
+    const existing = [
+      { event: 'onappinstall', handler: 'https://old.example.com/api/b24/events' },
+      { event: 'ONAPPUNINSTALL', handler: `${SITE}/api/b24/events` },
+      { event: 'ONCRMDEALADD', handler: 'https://old.example.com/x' },
+      { event: 'ONAPPUNINSTALL', handler: '' }
+    ]
+    expect(staleEventHandlers(SITE, existing)).toEqual([{ event: 'ONAPPINSTALL', handler: 'https://old.example.com/api/b24/events' }])
+    expect(staleEventHandlers('', existing)).toEqual([])
+    expect(staleEventHandlers(SITE, null)).toEqual([])
   })
 })
 

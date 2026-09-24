@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertPortalHost, frameAncestors, isAllowedPortalHost, parseSelfHostedHosts, portalHostname } from '../../server/utils/b24Host'
+import { assertPortalHost, DEFAULT_OAUTH_HOST, frameAncestors, isAllowedPortalHost, parseSelfHostedHosts, portalHostname, resolveOAuthHost } from '../../server/utils/b24Host'
 import { appTokenVerdict, parseBracketForm, parseEventAuth, safeEqual } from '../../server/utils/b24Events'
 
 describe('SSRF-гард адреса портала', () => {
@@ -72,5 +72,31 @@ describe('CSP для фрейма', () => {
     expect(csp).toContain('https://*.bitrix24.ru')
     expect(csp).toContain('https://crm.company.by')
     expect(csp).not.toContain('*.com ')
+  })
+})
+
+describe('сервер авторизации установки (auth[server_endpoint])', () => {
+  it('облачные — из списка, в любом виде адреса', () => {
+    expect(resolveOAuthHost('https://oauth.bitrix24.tech/rest/', 'demo.bitrix24.ru', {})).toBe('oauth.bitrix24.tech')
+    expect(resolveOAuthHost('http://oauth.bitrix.info/rest/', 'demo.bitrix24.com', {})).toBe('oauth.bitrix.info')
+  })
+
+  it('поля нет — сервер по умолчанию', () => {
+    expect(resolveOAuthHost('', 'demo.bitrix24.ru', {})).toBe(DEFAULT_OAUTH_HOST)
+  })
+
+  it('чужой хост, трюк с userinfo, похожее имя — null (SSRF и подделка гранта)', () => {
+    for (const ep of ['https://evil.com/rest/', 'https://oauth.bitrix24.tech@evil.com/rest/', 'https://oauth.bitrix24.tech.evil.com/', 'https://x.bitrix24.ru/rest/', 'не адрес']) {
+      expect(resolveOAuthHost(ep, 'demo.bitrix24.ru', {}), ep).toBeNull()
+    }
+  })
+
+  it('коробка — только сервер авторизации самой себя', () => {
+    const env = { B24_SELFHOSTED_HOSTS: 'crm.company.by' }
+    expect(resolveOAuthHost('https://crm.company.by/rest/', 'crm.company.by', env)).toBe('crm.company.by')
+    // Владелец коробки не может «выдать грант» облачному порталу.
+    expect(resolveOAuthHost('https://crm.company.by/rest/', 'victim.bitrix24.ru', env)).toBeNull()
+    // Хост, которого нет в списке коробок, не пройдёт, даже совпав с порталом.
+    expect(resolveOAuthHost('https://other.company.by/rest/', 'other.company.by', env)).toBeNull()
   })
 })

@@ -16,23 +16,28 @@ afterEach(() => {
 })
 
 describe('enforceAiLimit', () => {
-  it('сотрудник упирается в свой лимит, коллега — нет', () => {
-    const w = new SlidingWindow()
-    for (let i = 0; i < AI_LIMITS.user.max; i++) enforceAiLimit(user(1), w, 1000)
-    expect(() => enforceAiLimit(user(1), w, 1000)).toThrow(AiGatewayError)
-    expect(() => enforceAiLimit(user(2), w, 1000)).not.toThrow()
+  it('сотрудник упирается в свой лимит (в строках), коллега — нет', () => {
+    const window = new SlidingWindow()
+    enforceAiLimit(user(1), { window, now: 1000, weight: AI_LIMITS.user.max })
+    expect(() => enforceAiLimit(user(1), { window, now: 1000, weight: 1 })).toThrow(AiGatewayError)
+    expect(() => enforceAiLimit(user(2), { window, now: 1000, weight: 25 })).not.toThrow()
+  })
+
+  it('пакеты по 25 строк: счёт в 800 строк проходит целиком', () => {
+    const window = new SlidingWindow()
+    for (let i = 0; i < 32; i++) expect(() => enforceAiLimit(user(1), { window, now: i, weight: 25 })).not.toThrow()
   })
 
   it('отказ — 429 с текстом для сотрудника; окно истекло — снова можно', () => {
-    const w = new SlidingWindow()
-    for (let i = 0; i < AI_LIMITS.user.max; i++) enforceAiLimit(user(1), w, 0)
+    const window = new SlidingWindow()
+    enforceAiLimit(user(1), { window, now: 0, weight: AI_LIMITS.user.max })
     try {
-      enforceAiLimit(user(1), w, 0)
+      enforceAiLimit(user(1), { window, now: 0 })
       expect.unreachable()
     } catch (e) {
       expect(e).toMatchObject({ statusCode: 429, message: expect.stringMatching(/BitrixGPT/) })
     }
-    expect(() => enforceAiLimit(user(1), w, AI_LIMITS.user.windowMs + 1)).not.toThrow()
+    expect(() => enforceAiLimit(user(1), { window, now: AI_LIMITS.user.windowMs + 1 })).not.toThrow()
   })
 })
 

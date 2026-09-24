@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { API_BODY_LIMIT, bodyLimitFor, checkBodySize, EVENTS_BODY_LIMIT, pickClientIp } from '../../server/utils/requestLimits'
+import { API_BODY_LIMIT, bodyLimitFor, checkBodySize, EVENTS_BODY_LIMIT, isPrivateAddress, pickClientIp } from '../../server/utils/requestLimits'
 
 describe('bodyLimitFor', () => {
   it('события портала — 64 КБ, прочие POST к /api — 512 КБ', () => {
@@ -38,8 +38,27 @@ describe('pickClientIp', () => {
     expect(pickClientIp(' 203.0.113.7 ', '10.0.0.5', true)).toBe('203.0.113.7')
   })
 
+  it('соединение не из частной сети (мимо прокси) — заголовок игнорируется даже с TRUST_PROXY', () => {
+    expect(pickClientIp('1.2.3.4', '198.51.100.9', true)).toBe('198.51.100.9')
+    expect(pickClientIp('1.2.3.4', '2001:db8::1', true)).toBe('2001:db8::1')
+  })
+
   it('пустой заголовок или нет ничего — сокет или unknown', () => {
     expect(pickClientIp(', ,', '10.0.0.5', true)).toBe('10.0.0.5')
     expect(pickClientIp(undefined, undefined, true)).toBe('unknown')
+  })
+})
+
+describe('isPrivateAddress', () => {
+  it('частные и локальные адреса — да', () => {
+    for (const ip of ['10.1.2.3', '127.0.0.1', '172.16.0.1', '172.31.255.254', '192.168.1.1', '169.254.1.1', '100.64.0.1', '::1', '::ffff:10.0.0.1', 'fd00::1', 'fc12:3456::1', 'fe80::1']) {
+      expect(isPrivateAddress(ip), ip).toBe(true)
+    }
+  })
+
+  it('публичные и мусор — нет', () => {
+    for (const ip of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '100.63.0.1', '100.128.0.1', '2001:db8::1', '::ffff:8.8.8.8', 'fe00::1', '', 'unknown', '10.0.0']) {
+      expect(isPrivateAddress(ip), ip).toBe(false)
+    }
   })
 })

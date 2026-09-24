@@ -6,6 +6,7 @@ import type { H3Event } from 'h3'
 import { AiGatewayError } from './aiGateway'
 import { makeFrameCall, makePortalCall, oauthCredsFromEnv, type RestCall } from './b24Client'
 import { extractFrameAuth, verifyFrame, type FrameUser } from './frameAuth'
+import { makeInstallerCall } from './installerCall'
 import { SlidingWindow } from './rateLimit'
 import { FRAME_CHECKS_PER_IP, pickClientIp } from './requestLimits'
 import { accessTokenOf, refreshTokenOf, updateTokens, type KeyValue } from './tokenStore'
@@ -49,22 +50,29 @@ export async function requireFrameUser(event: H3Event): Promise<RequestContext> 
 /**
  * REST от имени администратора-установщика (сохранённый токен). Нужен только там, где права
  * пользователя недостаточны по документации, — сейчас это запись ставок не-администратором.
+ * Запись о портале читается заново на каждый вызов (`installerCall.ts`): в `FrameUser.portal` — копия
+ * из минутного кэша проверки фрейма, после рефреша в ней старые токены.
  */
 export function installerCall(user: FrameUser): RestCall {
   const kv = portalStore()
-  const p = user.portal
-  return makePortalCall(
-    {
-      domain: p.domain,
-      memberId: p.memberId,
-      accessToken: accessTokenOf(p),
-      refreshToken: refreshTokenOf(p),
-      expiresAt: p.expiresAt,
-      applicationToken: p.applicationToken
-    },
-    oauthCredsFromEnv(),
-    tokens => updateTokens(kv, p.memberId, tokens)
-  )
+  const creds = oauthCredsFromEnv()
+  return makeInstallerCall({
+    kv,
+    memberId: user.portal.memberId,
+    clientFor: p => makePortalCall(
+      {
+        domain: p.domain,
+        memberId: p.memberId,
+        accessToken: accessTokenOf(p),
+        refreshToken: refreshTokenOf(p),
+        expiresAt: p.expiresAt,
+        applicationToken: p.applicationToken,
+        oauthHost: p.oauthHost
+      },
+      creds,
+      tokens => updateTokens(kv, p.memberId, tokens)
+    )
+  })
 }
 
 /** Переводит отказ AI-шлюза в HTTP-ошибку h3; прочие ошибки пробрасывает как есть. */

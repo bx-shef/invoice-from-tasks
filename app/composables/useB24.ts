@@ -5,23 +5,14 @@
 // запросов. Опции `keepAuthFresh` из документации в установленной версии 2.2.0 ещё нет (проверено
 // по типам пакета), поэтому свежесть токена перед запросом к серверу обеспечивает useApi.ts.
 
-import { initializeB24Frame, type AjaxResult, type B24Frame, type Result } from '@bitrix24/b24jssdk'
+import { ApiVersion, initializeB24Frame, type AjaxResult, type B24Frame, type Result } from '@bitrix24/b24jssdk'
+import { B24CallError, unwrapBatchPart, type BatchCall, type BatchItem } from '~/utils/b24Batch'
 
 let frame: B24Frame | undefined
 let inFlight: Promise<B24Frame | undefined> | undefined
 
-/** Ошибка REST-вызова с кодом метода — чтобы в интерфейсе было видно, ЧТО не получилось. */
-export class B24CallError extends Error {
-  constructor(readonly method: string, readonly messages: string[]) {
-    super(`${method}: ${messages.join('; ') || 'неизвестная ошибка'}`)
-    this.name = 'B24CallError'
-  }
-}
-
 /** Максимум команд в одном batch-запросе REST v2 (документация BatchV2.make). */
 export const BATCH_MAX = 50
-
-export type BatchCall = [method: string, params: Record<string, unknown>]
 
 export function useB24() {
   const ready = useState('b24-ready', () => false)
@@ -87,16 +78,35 @@ export function useB24() {
         options: { isHaltOnError: opts.haltOnError ?? false, returnAjaxResult: true }
       }) as Result<AjaxResult<T>[]>
       if (!res.isSuccess) throw new B24CallError('batch', res.getErrorMessages())
-      const items = res.getData() ?? []
-      items.forEach((item, idx) => {
-        if (!item.isSuccess) throw new B24CallError(part[idx]?.[0] ?? 'batch', item.getErrorMessages())
-        out.push(item.getData()?.result as T)
-      })
-      // Портал остановил пакет — ответов меньше, чем команд: дальше не идём.
-      if (items.length < part.length) throw new B24CallError(part[items.length]?.[0] ?? 'batch', ['пакет остановлен порталом'])
+      // Ошибка команды или остановка пакета порталом — исключение (b24Batch.ts, покрыт тестом).
+      out.push(...unwrapBatchPart((res.getData() ?? []) as unknown as BatchItem<T>[], part))
     }
     return out
   }
 
-  return { ready, init, get, getOrThrow, call, callList, batch }
+  /**
+   * Выполняет запись без автоматических повторов SDK. По умолчанию SDK повторяет запрос при
+   * сетевой ошибке, таймауте и ответе 5xx (до 3 попыток, retryOnNetworkError — код пакета 2.2.0):
+   * запрос, который портал выполнил, но ответил поздно, ушёл бы ещё раз, и для
+   * crm.item.productrow.add это молчаливые дубли строк (находка /code-review). Отказы по лимитам
+   * портала (429, QUERY_LIMIT_EXCEEDED) SDK по-прежнему пережидает и повторяет: такой запрос
+   * портал не выполнял. После записи настройки возвращаются как были.
+   */
+  async function withoutWriteRetry<T>(fn: () => Promise<T>): Promise<T> {
+    const f = getOrThrow()
+    const saved = f.getHttpClient(ApiVersion.v2).getRestrictionManagerParams()
+    await f.setRestrictionManagerParams({
+      ...saved,
+      retryOnNetworkError: false,
+      // ERR_BAD_RESPONSE — так axios помечает ответ 5xx; без этого кода SDK счёл бы его временным.
+      hardErrorCodes: [...(saved.hardErrorCodes ?? []), 'ERR_BAD_RESPONSE']
+    })
+    try {
+      return await fn()
+    } finally {
+      await f.setRestrictionManagerParams(saved)
+    }
+  }
+
+  return { ready, init, get, getOrThrow, call, callList, batch, withoutWriteRetry }
 }
