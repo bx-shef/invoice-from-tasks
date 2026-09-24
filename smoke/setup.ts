@@ -23,7 +23,7 @@ export default async function setup(project: TestProject): Promise<void> {
   } catch {
     console.warn(`[smoke] нет файла ${file} — смок пропущен (docs/SMOKE.md)`)
   }
-  const env = text ? parseSmokeEnv(text, process.env) : null
+  const env = text ? parseSmokeEnv(text) : null
   if (!env) {
     project.provide('smokeEnv', null)
     project.provide('fixture', null)

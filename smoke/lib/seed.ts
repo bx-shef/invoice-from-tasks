@@ -35,6 +35,8 @@ export interface SmokeFixture {
     design: number
     /** Сделка; без тегов; длинная и короткая (10 мин) записи. */
     plain: number
+    /** Сделка; одна запись 15 мин — тип 1 к ближайшему часу даёт ноль. */
+    tiny: number
     /** Счёт `SI_`; тег «ЧЧ1»; одна запись. */
     invoiceSi: number
     /** Счёт `T1f_`; запись без описания. */
@@ -65,7 +67,8 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
 
 /** Создаёт данные прогона. Порядок вызовов — последовательный: портал выравнивает лимиты сам. */
 export async function seed(portal: Portal): Promise<SmokeFixture> {
-  const runTag = `IFT smoke ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
+  // До секунды: два прогона в одну минуту в портале должны различаться на глаз.
+  const runTag = `IFT smoke ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`
   const profile = await portal.call<{ ID?: unknown }>('profile')
   const userId = Number(profile?.ID)
   const currencies = await portal.call<Array<{ CURRENCY?: string, BASE?: string }>>('crm.currency.list', {})
@@ -86,6 +89,7 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
   const tasks = {
     design: await addTask(portal, { ...base, TITLE: `${runTag}: дизайн лендинга`, DESCRIPTION: 'Макет в Figma, адаптив', UF_CRM_TASK: [`D_${dealId}`], TAGS: ['Дизайн', 'Срочно'] }),
     plain: await addTask(portal, { ...base, TITLE: `${runTag}: настройка сервера`, DESCRIPTION: 'Сервер и домен', UF_CRM_TASK: [`D_${dealId}`] }),
+    tiny: await addTask(portal, { ...base, TITLE: `${runTag}: звонок клиенту`, UF_CRM_TASK: [`D_${dealId}`] }),
     invoiceSi: await addTask(portal, { ...base, TITLE: `${runTag}: консультация (SI_)`, UF_CRM_TASK: [`SI_${invoices.noDeal}`], TAGS: ['ЧЧ1'] }),
     invoiceT1f: await addTask(portal, { ...base, TITLE: `${runTag}: доработка (T1f_)`, UF_CRM_TASK: [`T1f_${invoices.noDeal}`] }),
     foreign: await addTask(portal, { ...base, TITLE: `${runTag}: чужая задача`, UF_CRM_TASK: ['D_999999999'] }),
@@ -97,6 +101,7 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
     [tasks.design, { SECONDS: 1800, COMMENT_TEXT: 'Правки по макету', CREATED_DATE: PAST_DATE }],
     [tasks.plain, { SECONDS: 5400, COMMENT_TEXT: 'Настройка сервера' }],
     [tasks.plain, { SECONDS: 600, COMMENT_TEXT: 'Короткая правка' }],
+    [tasks.tiny, { SECONDS: 900, COMMENT_TEXT: 'Звонок клиенту' }],
     [tasks.invoiceSi, { SECONDS: 2700, COMMENT_TEXT: 'Консультация клиента' }],
     [tasks.invoiceT1f, { SECONDS: 7200, COMMENT_TEXT: '' }]
   ]

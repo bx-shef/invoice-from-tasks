@@ -42,7 +42,7 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
   it('tasks.task.list: фильтр объектом, теги в том же списке (select TAGS)', async () => {
     const res = await portal.call<{ tasks?: unknown[] }>('tasks.task.list', { filter: { UF_CRM_TASK: `D_${fx!.dealId}` }, select: TASK_SELECT })
     const tasks = listRows(res, 'tasks').map(parseTask)
-    expect(tasks.map(t => t?.id).sort()).toEqual([fx!.tasks.design, fx!.tasks.plain].sort())
+    expect(tasks.map(t => t?.id).sort()).toEqual([fx!.tasks.design, fx!.tasks.plain, fx!.tasks.tiny].sort())
     // ⚠ Тег — одна запись на весь портал: уже существующий «дизайн» (любой регистр) портал подставляет
     // вместо «Дизайн» из запроса (замер 2026-09-24). Поэтому теги сравниваются без учёта регистра.
     expect(tasks.find(t => t?.id === fx!.tasks.design)?.tags.map(normalizeTag).sort()).toEqual(['дизайн', 'срочно'])
@@ -89,7 +89,7 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
 
   it('tasks.task.result.list (v3): фильтр тройкой, ответ { items }', async () => {
     const { method, params } = resultListCall(fx!.tasks.design)
-    const res = await portal.callV3(method, params as Record<string, unknown>)
+    const res = await portal.callV3(method, params)
     expect(listRows(res, 'items').map(r => r.text)).toEqual(['Сверстаны главная и адаптив'])
   })
 

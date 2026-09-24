@@ -23,10 +23,16 @@ export const MAX_PRODUCT_ROWS = 10_000
 /** Сколько результатов задачи берём в контекст названий — последние важнее. */
 export const MAX_RESULTS = 20
 
-/** Вызов REST: метод и параметры (позиционные у старых методов — массивом). */
+/** Вызов REST с именованными параметрами. */
 export interface RestCall {
   method: string
-  params: Record<string, unknown> | unknown[]
+  params: Record<string, unknown>
+}
+
+/** Вызов старого метода с ПОЗИЦИОННЫМИ параметрами — массивом (task.elapseditem.*). */
+export interface PositionalRestCall {
+  method: string
+  params: unknown[]
 }
 
 /** Курсорное листание tasks.task.list в b24jssdk (`actions.v2.callList`). */
@@ -54,7 +60,7 @@ export function taskListCall(code: string): RestCall {
 }
 
 /** Страница записей времени: task.elapseditem.getlist, параметры ПОЗИЦИОННЫЕ (документация). */
-export function elapsedListCall(taskId: number, page: number): RestCall {
+export function elapsedListCall(taskId: number, page: number): PositionalRestCall {
   return {
     method: 'task.elapseditem.getlist',
     params: [taskId, { ID: 'asc' }, {}, ['*'], { NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: page } }]

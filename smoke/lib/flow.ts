@@ -35,7 +35,7 @@ export async function fetchTasks(portal: Portal, source: TaskSource, invoice: In
   const rows: Record<string, unknown>[] = []
   for (const code of codes) {
     const { method, params } = taskListCall(code)
-    rows.push(...await portal.callList<Record<string, unknown>>(method, params as Record<string, unknown>, { ...TASK_LIST_OPTIONS }))
+    rows.push(...await portal.callList<Record<string, unknown>>(method, params, { ...TASK_LIST_OPTIONS }))
   }
   return tasksBoundTo(rows, codes)
 }

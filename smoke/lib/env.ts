@@ -2,8 +2,9 @@
 // проверяются юнит-тестом (tests/smokeEnv.test.ts) без сети.
 //
 // Подход — из ai-price-import (scripts/lib/envFile.mjs, testPortalGuard.mjs), с их граблями:
-// • адрес портала берётся ТОЛЬКО из git-ignored файла, не из переменной окружения: в оболочке
-//   разработчика может жить `B24_HOOK` другого (боевого!) портала — так в прайсах уже уходили не туда;
+// • адрес портала и ключ BitrixGPT берутся ТОЛЬКО из git-ignored файла, не из переменных окружения:
+//   в оболочке разработчика может жить `B24_HOOK` другого (боевого!) портала — так в прайсах уже
+//   уходили не туда; а `VIBE_API_KEY` другого проекта тратил бы чужую квоту (находка безопасности);
 // • последнее вхождение ключа (семантика dotenv), кавычки снимаются, `export KEY=` понимается,
 //   закомментированный `#KEY=` и ключ-суффикс (`OLD_B24_HOOK`) не подхватываются;
 // • смок ПИШЕТ в портал (сделки, счета, задачи, позиции, дела) — запуск только на портале из
@@ -40,9 +41,9 @@ export interface SmokeEnv {
 
 /**
  * Окружение из текста файла. Нет `B24_HOOK` — `null` (смок пропускается целиком). Ключ BitrixGPT —
- * из файла, иначе из окружения процесса (`BITRIXGPT_API_KEY`, затем `VIBE_API_KEY` — как у сервера).
+ * тоже только из файла: `BITRIXGPT_API_KEY`, затем `VIBE_API_KEY` (порядок — как у сервера).
  */
-export function parseSmokeEnv(fileText: string, env: Record<string, string | undefined> = {}): SmokeEnv | null {
+export function parseSmokeEnv(fileText: string): SmokeEnv | null {
   const hook = readEnvValue(fileText, 'B24_HOOK')
   if (!hook) return null
   let host: string
@@ -55,7 +56,6 @@ export function parseSmokeEnv(fileText: string, env: Record<string, string | und
     throw new Error('B24_HOOK в файле окружения смока — не https-адрес вебхука')
   }
   const aiKey = readEnvValue(fileText, 'BITRIXGPT_API_KEY') || readEnvValue(fileText, 'VIBE_API_KEY')
-    || env.BITRIXGPT_API_KEY?.trim() || env.VIBE_API_KEY?.trim() || ''
   return { hook, host, aiKey }
 }
 

@@ -4,6 +4,7 @@ import {
   elapsedListCall,
   ELAPSED_PAGE,
   invoiceGetCall,
+  MAX_RESULTS,
   productRowListCall,
   replaceRowsCall,
   resultListCall,
@@ -37,7 +38,11 @@ describe('параметры запросов сценария счёта', () =
   })
 
   it('результаты задачи: REST v3, фильтр тройкой по taskId', () => {
-    expect(resultListCall(2)).toMatchObject({ method: 'tasks.task.result.list', params: { filter: [['taskId', '=', 2]] } })
+    expect(resultListCall(2)).toEqual({
+      method: 'tasks.task.result.list',
+      params: { filter: [['taskId', '=', 2]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: MAX_RESULTS } }
+    })
+    expect(MAX_RESULTS).toBe(20)
   })
 
   it('запись: set — весь набор, add — одна позиция с ownerType и ownerId', () => {

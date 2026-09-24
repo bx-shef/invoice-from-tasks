@@ -1,7 +1,12 @@
 // Сценарий счёта на живом портале: чтение теми же запросами, что страница, расчёт чистыми
 // функциями приложения во всех сочетаниях настроек, запись «заменить»/«добавить», пакет с
-// ошибкой посередине, дело консультации. Ожидания — независимой таблицей, а не вызовом тех же
-// функций: иначе проверка повторяла бы ошибку кода.
+// ошибкой посередине, дело консультации.
+//
+// Что ожидается независимо от кода — таблицами по засеву: какие задачи и записи попадут, дата и
+// ставка каждой строки, наценка по первому совпадению, число строк, ошибки и предупреждения. Так
+// ловится «проводка»: не та ставка, не тот тег, не та задача. Арифметика строки (округление
+// секунд, цена, сумма) — та же формула-спецификация, что в коде: ошибку в самой формуле ловят
+// юнит-тесты с мутациями (tests/time.test.ts, tests/markup.test.ts, tests/fill.test.ts), а не смок.
 
 import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
@@ -31,9 +36,11 @@ const MARKUPS: Record<'none' | 'tags', MarkupSettings> = {
 }
 
 /** Ожидаемая наценка задачи — таблицей, по тегам из засева (smoke/lib/seed.ts). */
-function expectedMarkup(kind: keyof typeof MARKUPS, task: 'design' | 'plain' | 'invoiceSi' | 'invoiceT1f'): number {
+type SeededTask = 'design' | 'plain' | 'tiny' | 'invoiceSi' | 'invoiceT1f'
+
+function expectedMarkup(kind: keyof typeof MARKUPS, task: SeededTask): number {
   if (kind === 'none') return 0
-  return { design: 100, plain: 70, invoiceSi: 20, invoiceT1f: 70 }[task]
+  return { design: 100, plain: 70, tiny: 70, invoiceSi: 20, invoiceT1f: 70 }[task]
 }
 
 function expectedSeconds(seconds: number, step: RoundingStep, direction: RoundingDirection): number {
@@ -62,7 +69,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
   const invoices = new Map<string, InvoiceInfo>()
   const tasksBySource = new Map<TaskSource, TaskInfo[]>()
   const entries: TimeEntry[] = []
-  const nameOf = new Map<number, 'design' | 'plain' | 'invoiceSi' | 'invoiceT1f'>()
+  const nameOf = new Map<number, SeededTask>()
 
   function settingsFor(v: typeof VARIANTS[number]): AppSettings {
     return { ...defaultSettings(), currency: fx!.baseCurrency, rounding: v.step, roundingDirection: v.direction, markup: MARKUPS[v.markup], measureCode: 796 }
@@ -75,11 +82,11 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     tasksBySource.set('deal', await fetchTasks(portal, 'deal', invoices.get('usd')!))
     tasksBySource.set('invoice', await fetchTasks(portal, 'invoice', invoices.get('noDeal')!))
     for (const t of [...tasksBySource.get('deal')!, ...tasksBySource.get('invoice')!]) entries.push(...(await fetchEntries(portal, t.id)).entries)
-    for (const [name, id] of Object.entries(fx!.tasks)) if (name !== 'foreign' && name !== 'paging') nameOf.set(id, name as 'design')
+    for (const [name, id] of Object.entries(fx!.tasks)) if (name !== 'foreign' && name !== 'paging') nameOf.set(id, name as SeededTask)
   })
 
   it('задачи находятся по обоим источникам, чужая — нет; теги пришли из списка', () => {
-    expect(tasksBySource.get('deal')!.map(t => t.id).sort()).toEqual([fx!.tasks.design, fx!.tasks.plain].sort())
+    expect(tasksBySource.get('deal')!.map(t => t.id).sort()).toEqual([fx!.tasks.design, fx!.tasks.plain, fx!.tasks.tiny].sort())
     expect(tasksBySource.get('invoice')!.map(t => t.id).sort()).toEqual([fx!.tasks.invoiceSi, fx!.tasks.invoiceT1f].sort())
     // Регистр тега задаёт портал (тег — общая запись портала), поэтому сравнение — как в markup.ts.
     expect(tasksBySource.get('deal')!.find(t => t.id === fx!.tasks.design)?.tags.map(normalizeTag).sort()).toEqual(['дизайн', 'срочно'])
@@ -113,9 +120,11 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       expect(row.sum).toBe(Math.round(row.price * row.quantity * 100) / 100)
     }
 
-    // Строки, ошибки и предупреждения — по таблице засева.
-    const shortZero = v.mode === 'time' && v.src.source === 'deal' && v.step === 60 && v.direction === 'nearest'
-    const expectedRows = v.src.source === 'deal' ? (v.mode === 'task' ? 2 : shortZero ? 3 : 4) : (v.mode === 'task' ? 2 : 1)
+    // Строки, ошибки и предупреждения — по таблице засева. К ближайшему часу обнуляются: в типе 1 —
+    // «звонок» (15 мин), в типе 2 — он же и «короткая правка» (10 мин).
+    const nearestHour = v.src.source === 'deal' && v.step === 60 && v.direction === 'nearest'
+    const zeroed = nearestHour ? (v.mode === 'task' ? 1 : 2) : 0
+    const expectedRows = (v.src.source === 'deal' ? (v.mode === 'task' ? 3 : 5) : (v.mode === 'task' ? 2 : 1)) - zeroed
     expect(built.rows).toHaveLength(expectedRows)
     const emptyComment = v.mode === 'time' && v.src.source === 'invoice'
     expect(built.errors.map(e => e.taskId)).toEqual(emptyComment ? [fx!.tasks.invoiceT1f] : [])
@@ -123,7 +132,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     expect(warnings.some(w => w.startsWith('Цены пересчитаны'))).toBe(conversion !== null)
     if (conversion) expect(warnings[0]).toContain('проверьте курс')
     expect(warnings.some(w => w.includes('менялась за время задачи'))).toBe(v.mode === 'task' && v.src.source === 'deal')
-    expect(warnings.some(w => w.includes('после округления стало нулём'))).toBe(shortZero)
+    expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
   })
 
   it('источник «сделка» у счёта без сделки — остановка до чтения задач', () => {
@@ -140,7 +149,8 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
   it('нет ставки на дату — ошибка по каждой задаче, строк нет', () => {
     const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: [], settings: { ...defaultSettings(), currency: fx!.baseCurrency } })
     expect(built.rows).toEqual([])
-    expect(built.errors.map(e => e.message)).toEqual([expect.stringContaining('нет ставки'), expect.stringContaining('нет ставки')])
+    expect(built.errors).toHaveLength(3)
+    for (const e of built.errors) expect(e.message).toContain('нет ставки')
   })
 
   describe('запись в счёт (последовательно)', () => {
@@ -166,7 +176,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const sortStart = before.rows.reduce((m, r) => Math.max(m, r.sort), 0)
       const calls = toProductRows(built.rows, settings, sortStart).map((f): [string, Record<string, unknown>] => {
         const { method, params } = addRowCall(fx!.invoices.usd, f)
-        return [method, params as Record<string, unknown>]
+        return [method, params]
       })
       const res = await portal.batch(calls, true)
       expect(res.ok).toBe(true)

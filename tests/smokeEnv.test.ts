@@ -13,6 +13,10 @@ describe('smoke: чтение файла окружения', () => {
     expect(readEnvValue('', 'B24_HOOK')).toBe('')
   })
 
+  it('пустое значение последней строкой перебивает прежнее (семантика dotenv)', () => {
+    expect(readEnvValue('B24_HOOK=https://a.bitrix24.by/rest/1/a/\nB24_HOOK=', 'B24_HOOK')).toBe('')
+  })
+
   it('закомментированная или чужая строка ПОСЛЕ нужной не перебивает её', () => {
     const text = 'B24_HOOK=https://test.bitrix24.by/rest/1/a/\n#B24_HOOK=https://prod.bitrix24.ru/rest/1/b/\nOLD_B24_HOOK=https://old.bitrix24.ru/rest/1/c/'
     expect(readEnvValue(text, 'B24_HOOK')).toBe('https://test.bitrix24.by/rest/1/a/')
@@ -24,10 +28,10 @@ describe('smoke: чтение файла окружения', () => {
     expect(() => parseSmokeEnv('B24_HOOK=http://p.bitrix24.by/rest/1/secret/')).not.toThrow(/secret/)
   })
 
-  it('ключ BitrixGPT: из файла, иначе из окружения процесса; хост — в нижнем регистре', () => {
-    const env = parseSmokeEnv('B24_HOOK=https://P.Bitrix24.by/rest/1/x/\nVIBE_API_KEY=vibe_file', { VIBE_API_KEY: 'vibe_env' })
+  it('ключ BitrixGPT: только из файла (BITRIXGPT_API_KEY, затем VIBE_API_KEY); хост — в нижнем регистре', () => {
+    const env = parseSmokeEnv('B24_HOOK=https://P.Bitrix24.by/rest/1/x/\nVIBE_API_KEY=vibe_file')
     expect(env).toEqual({ hook: 'https://P.Bitrix24.by/rest/1/x/', host: 'p.bitrix24.by', aiKey: 'vibe_file' })
-    expect(parseSmokeEnv('B24_HOOK=https://p.bitrix24.by/rest/1/x/', { VIBE_API_KEY: 'vibe_env' })?.aiKey).toBe('vibe_env')
+    expect(parseSmokeEnv('B24_HOOK=https://p.bitrix24.by/rest/1/x/\nVIBE_API_KEY=v\nBITRIXGPT_API_KEY=b')?.aiKey).toBe('b')
     expect(parseSmokeEnv('B24_HOOK=https://p.bitrix24.by/rest/1/x/')?.aiKey).toBe('')
   })
 })

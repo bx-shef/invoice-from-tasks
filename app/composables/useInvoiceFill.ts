@@ -77,7 +77,7 @@ export function useInvoiceFill() {
     const raw = await collectOffsetPages(
       async (start) => {
         const { method, params } = productRowListCall(id, start)
-        return (await b24.call<{ productRows?: unknown[] }>(method, params as Record<string, unknown>))?.productRows ?? []
+        return (await b24.call<{ productRows?: unknown[] }>(method, params))?.productRows ?? []
       },
       PRODUCT_ROWS_PAGE,
       MAX_PRODUCT_ROWS,
@@ -90,7 +90,7 @@ export function useInvoiceFill() {
   async function readInvoice(id: number): Promise<void> {
     const get = invoiceGetCall(id)
     const [item, rows] = await Promise.all([
-      b24.call(get.method, get.params as Record<string, unknown>),
+      b24.call(get.method, get.params),
       fetchExistingRows(id)
     ])
     const parsed = parseInvoice(item)
@@ -130,7 +130,7 @@ export function useInvoiceFill() {
     for (const code of codes) {
       // Теги приходят в этом же списке (TASK_SELECT → TAGS), отдельных запросов нет.
       const { method, params } = taskListCall(code)
-      rows.push(...await b24.callList<Record<string, unknown>>(method, params as Record<string, unknown>, { ...TASK_LIST_OPTIONS }))
+      rows.push(...await b24.callList<Record<string, unknown>>(method, params, { ...TASK_LIST_OPTIONS }))
     }
     return tasksBoundTo(rows, codes)
   }
@@ -170,7 +170,7 @@ export function useInvoiceFill() {
   async function fetchResults(taskId: number): Promise<string> {
     try {
       const { method, params } = resultListCall(taskId)
-      const res = await b24.callV3<unknown>(method, params as Record<string, unknown>)
+      const res = await b24.callV3<unknown>(method, params)
       return listRows(res, 'items', 'results').map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')
     } catch {
       return ''
@@ -285,13 +285,13 @@ export function useInvoiceFill() {
     try {
       if (replace) {
         const { method, params } = replaceRowsCall(inv.id, toProductRows(draft, settings.value))
-        await b24.call(method, params as Record<string, unknown>)
+        await b24.call(method, params)
       } else {
         const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
         const rows = toProductRows(draft, settings.value, sortStart)
         const calls = rows.map((fields): BatchCall => {
           const { method, params } = addRowCall(inv.id, fields)
-          return [method, params as Record<string, unknown>]
+          return [method, params]
         })
         await b24.batch(calls, { haltOnError: true })
       }
