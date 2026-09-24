@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { extractFrameAuth, isAuthRejection, resetFrameCache, VERIFY_CACHE_MAX, VERIFY_CACHE_MS, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
+import { extractFrameAuth, frameCacheSize, isAuthRejection, resetFrameCache, VERIFY_CACHE_MAX, VERIFY_CACHE_MS, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
 import { saveInstall, type KeyValue } from '../../server/utils/tokenStore'
 
 const APP = 'local.ours'
@@ -149,6 +149,42 @@ describe('verifyFrame', () => {
     // Самый старый вытеснен — проверяется заново.
     await verifyFrame({ ...auth, accessToken: 't0' }, deps)
     expect(call.mock.calls.length).toBe(before + 2)
+  })
+
+  it('при переполнении сначала снимаются ВСЕ истёкшие записи, свежие не трогаются', async () => {
+    const kv = await installedKv()
+    const call = portal()
+    let now = 1_000
+    const deps = { kv, call, appCode: APP, now: () => now }
+    for (let i = 0; i < VERIFY_CACHE_MAX / 2; i++) await verifyFrame({ ...auth, accessToken: `old${i}` }, deps)
+    now += VERIFY_CACHE_MS
+    for (let i = 0; i < VERIFY_CACHE_MAX / 2; i++) await verifyFrame({ ...auth, accessToken: `new${i}` }, deps)
+    await verifyFrame({ ...auth, accessToken: 'trigger' }, deps)
+    // Истёкшая половина снята целиком (а не 10 % по порядку вставки), свежая — вся на месте.
+    expect(frameCacheSize()).toBe(VERIFY_CACHE_MAX / 2 + 1)
+    const before = call.mock.calls.length
+    await verifyFrame({ ...auth, accessToken: 'new0' }, deps)
+    expect(call.mock.calls.length).toBe(before)
+  })
+
+  it('перепроверенный токен считается свежим при вытеснении (порядок — по последней проверке)', async () => {
+    const kv = await installedKv()
+    const call = portal()
+    let now = 1_000
+    const deps = { kv, call, appCode: APP, now: () => now }
+    await verifyFrame({ ...auth, accessToken: 'active' }, deps)
+    // Наполнители вставлены позже, но проверены раньше, чем «active» будет перепроверен.
+    now += VERIFY_CACHE_MS / 2
+    for (let i = 0; i < VERIFY_CACHE_MAX - 2; i++) await verifyFrame({ ...auth, accessToken: `f${i}` }, deps)
+    now += VERIFY_CACHE_MS / 2
+    // Запись «active» истекла — живая проверка; теперь он свежее всех наполнителей.
+    await verifyFrame({ ...auth, accessToken: 'active' }, deps)
+    // Переполнение: вытесняются самые давно проверенные — наполнители, а не «active».
+    await verifyFrame({ ...auth, accessToken: 'x1' }, deps)
+    await verifyFrame({ ...auth, accessToken: 'x2' }, deps)
+    const before = call.mock.calls.length
+    await verifyFrame({ ...auth, accessToken: 'active' }, deps)
+    expect(call.mock.calls.length).toBe(before)
   })
 
   it('isAuthRejection отличает отказ от сбоя', () => {

@@ -11,6 +11,12 @@ describe('serverProblems', () => {
       .toEqual([{ variable: 'B24_APP_CODE', effect: expect.stringMatching(/отклоняет/), blocking: true }])
   })
 
+  it('без OAuth-реквизитов или ключа шифрования — блокирующие проблемы с именами переменных', () => {
+    const all = { appCode: true, oauth: true, tokenKey: true, bitrixGpt: true }
+    expect(serverProblems({ config: { ...all, oauth: false } })).toEqual([{ variable: 'B24_CLIENT_ID, B24_CLIENT_SECRET', effect: expect.stringMatching(/установка не сохраняется/), blocking: true }])
+    expect(serverProblems({ config: { ...all, tokenKey: false } })).toEqual([{ variable: 'B24_TOKEN_ENC_KEY', effect: expect.stringMatching(/установка не сохраняется/), blocking: true }])
+  })
+
   it('без ключа BitrixGPT — проблема, но не блокирующая', () => {
     expect(serverProblems({ config: { appCode: true, oauth: true, tokenKey: true, bitrixGpt: false } })[0]?.blocking).toBe(false)
   })

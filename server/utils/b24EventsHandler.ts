@@ -16,13 +16,18 @@ export interface EventDeps {
   /** Обновление refresh-токена на сервере авторизации `oauthHost` (verifyInstallMember.rawOauthRefresh). */
   refresh: (refreshToken: string, oauthHost: string) => Promise<unknown>
   /**
-   * Можно ли сейчас обработать событие установки или удаления; `false` — 429. Спрашивается ТОЛЬКО
-   * для этих двух событий: прочие не стоят ничего, и раньше они выжигали общий лимит — чужой
-   * портал, подписав наш адрес на поток своих событий, мог заблокировать чужие установки
-   * (находка /code-review).
+   * Лимит адреса отправителя: можно ли обработать событие установки или удаления; `false` — 429.
+   * Спрашивается ТОЛЬКО для этих двух событий: прочие не стоят ничего, и раньше они выжигали
+   * лимит — чужой портал, подписав наш адрес на поток своих событий, мог заблокировать чужие
+   * установки (находка /code-review).
    */
   allowEvent?: () => boolean
-  /** Окружение для `B24_SELFHOSTED_HOSTS` (коробочные серверы авторизации). */
+  /**
+   * Общий потолок сверок установки (`OAUTH_VERIFY_GLOBAL`): спрашивается прямо перед запросом к
+   * серверу авторизации, после всех проверок; `false` — 429. Мусор и удаления его не тратят.
+   */
+  allowVerification?: () => boolean
+  /** Окружение для SSRF-гарда (`B24_SELFHOSTED_HOSTS`). */
   env?: Record<string, string | undefined>
   /** Строка в журнал (без токенов). */
   log?: (line: string) => void
@@ -75,10 +80,14 @@ export async function handleB24Event(rawBody: string, deps: EventDeps): Promise<
     warn('B24_CLIENT_ID/B24_CLIENT_SECRET not set — install NOT stored')
     return { status: 503, body: { error: 'server not configured' } }
   }
-  const oauthHost = resolveOAuthHost(auth.serverEndpoint, domain, deps.env)
+  const oauthHost = resolveOAuthHost(auth.serverEndpoint)
   if (!oauthHost) {
     warn(`install member_id=${auth.memberId} rejected: authorization server not allow-listed`)
     return { status: 403, body: { error: 'authorization server not allowed' } }
+  }
+  if (deps.allowVerification && !deps.allowVerification()) {
+    warn('install verification capacity exhausted — install NOT stored, portal must retry')
+    return { status: 429, body: { error: 'too many install verifications' } }
   }
   const bound = await verifyInstallMember(auth.memberId, domain, auth.refreshToken, rt => deps.refresh(rt, oauthHost))
   if (!bound.ok || !bound.grant) {

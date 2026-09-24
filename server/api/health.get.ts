@@ -1,6 +1,8 @@
 // GET /api/health — жив ли сервер и сконфигурирован ли он. Без секретов: только флаги «задано / нет».
 
-export default defineEventHandler(() => ({
+import { forwardedStatus } from '../utils/requestLimits'
+
+export default defineEventHandler(event => ({
   ok: true,
   config: {
     siteUrl: Boolean(useRuntimeConfig().public.siteUrl),
@@ -10,5 +12,10 @@ export default defineEventHandler(() => ({
     appCode: Boolean(process.env.B24_APP_CODE?.trim()),
     trustProxy: process.env.TRUST_PROXY === '1',
     bitrixGpt: Boolean(process.env.BITRIXGPT_API_KEY || process.env.VIBE_API_KEY)
+  },
+  // Как сервер видит адрес ЭТОГО запроса (requestLimits.ts → forwardedStatus): запросите health
+  // через свой прокси — при TRUST_PROXY=1 здесь должно быть `used`.
+  request: {
+    forwardedFor: forwardedStatus(getRequestHeader(event, 'x-forwarded-for'), getRequestIP(event), process.env.TRUST_PROXY === '1')
   }
 }))

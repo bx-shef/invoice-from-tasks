@@ -77,6 +77,25 @@ describe('события, которые мы не обрабатываем', ()
     expect(allowEvent).toHaveBeenCalledTimes(1)
   })
 
+  it('общий потолок сверок тратят только сверки: мусор и удаления — нет', async () => {
+    const allowVerification = vi.fn(() => true)
+    const d = deps({ allowVerification })
+    await handleB24Event('event=ONAPPINSTALL', d)
+    await handleB24Event(body('ONAPPINSTALL', { ...installAuth, domain: 'evil.com' }), d)
+    await handleB24Event(body('ONAPPUNINSTALL', { domain: 'demo.bitrix24.ru', member_id: 'm1', application_token: 'x' }), d)
+    await handleB24Event(body('ONAPPINSTALL', { ...installAuth, server_endpoint: 'https://evil.com/rest/' }), d)
+    expect(allowVerification).not.toHaveBeenCalled()
+    await handleB24Event(body('ONAPPINSTALL', installAuth), d)
+    expect(allowVerification).toHaveBeenCalledTimes(1)
+  })
+
+  it('потолок сверок исчерпан — 429 и в журнал ошибок, в OAuth не ходим', async () => {
+    const d = deps({ allowVerification: () => false })
+    expect((await handleB24Event(body('ONAPPINSTALL', installAuth), d)).status).toBe(429)
+    expect(d.refresh).not.toHaveBeenCalled()
+    expect(d.warnings.join('\n')).toMatch(/verification capacity/)
+  })
+
   it('лимит установок исчерпан — 429, в OAuth не ходим, ничего не пишем', async () => {
     const d = deps({ allowEvent: () => false })
     expect(await handleB24Event(body('ONAPPINSTALL', installAuth), d)).toEqual({ status: 429, body: { error: 'too many install events' } })
@@ -111,6 +130,14 @@ describe('установка (ONAPPINSTALL)', () => {
     const d = deps({ envToken: 'expected' })
     expect((await handleB24Event(body('ONAPPINSTALL', installAuth), d)).status).toBe(403)
     expect(d.kv.data.size).toBe(0)
+  })
+
+  it('задан только один из B24_CLIENT_ID/SECRET — тоже 503, а не попытка сверки', async () => {
+    for (const creds of [{ clientId: 'cid', clientSecret: '' }, { clientId: '', clientSecret: 'cs' }]) {
+      const d = deps({ creds })
+      expect((await handleB24Event(body('ONAPPINSTALL', installAuth), d)).status).toBe(503)
+      expect(d.refresh).not.toHaveBeenCalled()
+    }
   })
 
   it('без B24_CLIENT_ID/SECRET установка НЕ сохраняется — 503 (fail-closed), в журнал ошибок', async () => {

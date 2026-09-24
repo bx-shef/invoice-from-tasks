@@ -45,21 +45,23 @@ async function runInstall() {
   const missing = missingScopes(granted)
   mark('scope', missing.length ? 'warn' : 'ok', missing.length ? `Не выданы права: ${missing.join(', ')} — добавьте их в карточке приложения` : undefined)
 
+  // Сначала — новое, потом снимаем старое: если регистрация упадёт, у приложения останется хотя
+  // бы прежний пункт меню и прежняя подписка на удаление (находка /code-review).
   mark('placement', 'run')
   const placements = await b24.call<unknown[]>('placement.get')
+  const bind = placementBindCall(siteUrl, placements)
+  if (bind) await b24.call(bind.method, bind.params)
   for (const stale of stalePlacements(siteUrl, placements)) {
     await b24.call('placement.unbind', stale).catch(() => undefined)
   }
-  const bind = placementBindCall(siteUrl, placements)
-  if (bind) await b24.call(bind.method, bind.params)
   mark('placement', 'ok', bind ? undefined : 'уже был зарегистрирован')
 
   mark('events', 'run')
   const existing = await b24.call<unknown[]>('event.get')
+  for (const ev of eventBindCalls(siteUrl, existing)) await b24.call(ev.method, ev.params)
   for (const stale of staleEventHandlers(siteUrl, existing)) {
     await b24.call('event.unbind', stale).catch(() => undefined)
   }
-  for (const ev of eventBindCalls(siteUrl, existing)) await b24.call(ev.method, ev.params)
   mark('events', 'ok')
 
   mark('finish', 'run')

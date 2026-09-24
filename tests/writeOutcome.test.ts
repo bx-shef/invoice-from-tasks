@@ -11,7 +11,7 @@ describe('describeWrite — «Добавить»', () => {
   it('ошибка посередине — «добавлено N из M» и сброс, чтобы повтор не задвоил', () => {
     const v = describeWrite({ ...base, after: 7, error: 'ACCESS_DENIED' })
     expect(v).toMatchObject({ kind: 'error', resetPreview: true })
-    expect(v.message).toContain('Добавлено 4 из 10 строк')
+    expect(v.message).toContain('добавлено 4 из 10 строк')
     expect(v.message).toContain('ACCESS_DENIED')
   })
 
@@ -33,7 +33,18 @@ describe('describeWrite — «Добавить»', () => {
   })
 
   it('перечитанных позиций меньше, чем было, — не отрицательное число', () => {
-    expect(describeWrite({ ...base, after: 1, error: 'x' }).message).toContain('Добавлено 0 из 10')
+    expect(describeWrite({ ...base, after: 1, error: 'x' }).message).toContain('добавлено 0 из 10')
+  })
+
+  it('ответ — ошибка, но все строки уже в счёте: предупреждение «повторять не нужно», а не «соберите заново»', () => {
+    const v = describeWrite({ ...base, after: 13, error: 'Request timeout exceeded' })
+    expect(v).toMatchObject({ kind: 'warn', resetPreview: true })
+    expect(v.message).toContain('повторять не нужно')
+    expect(v.message).not.toContain('соберите')
+  })
+
+  it('успех, но строк МЕНЬШЕ ожидаемого — тоже предупреждение, а не «готово»', () => {
+    expect(describeWrite({ ...base, after: 12, error: null })).toMatchObject({ kind: 'warn', resetPreview: true })
   })
 })
 

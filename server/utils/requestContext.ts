@@ -8,7 +8,7 @@ import { makeFrameCall, makePortalCall, oauthCredsFromEnv, type RestCall } from 
 import { extractFrameAuth, verifyFrame, type FrameUser } from './frameAuth'
 import { makeInstallerCall } from './installerCall'
 import { SlidingWindow } from './rateLimit'
-import { FRAME_CHECKS_PER_IP, pickClientIp } from './requestLimits'
+import { FRAME_CHECKS_PER_IP, ipBucketKey, pickClientIp } from './requestLimits'
 import { accessTokenOf, refreshTokenOf, updateTokens, type KeyValue } from './tokenStore'
 
 const frameCheckWindows = new SlidingWindow()
@@ -41,7 +41,7 @@ export async function requireFrameUser(event: H3Event): Promise<RequestContext> 
     call: (domain, token, method) => makeFrameCall(domain, token, creds)(method),
     appCode: process.env.B24_APP_CODE?.trim() || '',
     // Живая проверка — вызов в портал; поток случайных токенов не должен гонять нас туда без меры.
-    allowLiveCheck: () => frameCheckWindows.take([[`fv:${ip}`, FRAME_CHECKS_PER_IP]])
+    allowLiveCheck: () => frameCheckWindows.take([[`fv:${ipBucketKey(ip)}`, FRAME_CHECKS_PER_IP]])
   })
   if (!verdict.ok) throw createError({ statusCode: verdict.status, statusMessage: verdict.error })
   return { user: verdict.user, frameCall: makeFrameCall(auth.domain, auth.accessToken, creds) }

@@ -75,6 +75,9 @@ function remember(key: string, entry: { until: number, verdict: FrameVerdict }, 
       cache.delete(k)
     }
   }
+  // Удалить и вставить заново: `set` по существующему ключу оставил бы его на старом месте, и
+  // свежеперепроверенный токен вытеснялся бы первым (находка /code-review).
+  cache.delete(key)
   cache.set(key, entry)
 }
 
@@ -85,6 +88,11 @@ function cacheKey(auth: FrameAuth): string {
 /** Для тестов: сбросить кэш между сценариями. */
 export function resetFrameCache(): void {
   cache.clear()
+}
+
+/** Для тестов: сколько решений сейчас в кэше. */
+export function frameCacheSize(): number {
+  return cache.size
 }
 
 /** Похоже ли исключение на отказ в авторизации (а не на сбой сети/портала). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { API_BODY_LIMIT, bodyLimitFor, checkBodySize, EVENTS_BODY_LIMIT, isPrivateAddress, pickClientIp } from '../../server/utils/requestLimits'
+import { API_BODY_LIMIT, bodyLimitFor, checkBodySize, EVENTS_BODY_LIMIT, forwardedStatus, ipBucketKey, isPrivateAddress, pickClientIp } from '../../server/utils/requestLimits'
 
 describe('bodyLimitFor', () => {
   it('события портала — 64 КБ, прочие POST к /api — 512 КБ', () => {
@@ -51,7 +51,7 @@ describe('pickClientIp', () => {
 
 describe('isPrivateAddress', () => {
   it('частные и локальные адреса — да', () => {
-    for (const ip of ['10.1.2.3', '127.0.0.1', '172.16.0.1', '172.31.255.254', '192.168.1.1', '169.254.1.1', '100.64.0.1', '::1', '::ffff:10.0.0.1', 'fd00::1', 'fc12:3456::1', 'fe80::1']) {
+    for (const ip of ['10.1.2.3', '127.0.0.1', '172.16.0.1', '172.31.255.254', '192.168.1.1', '169.254.1.1', '100.64.0.1', '100.127.255.255', '::1', '::ffff:10.0.0.1', '::ffff:7f00:1', '::ffff:a00:1', 'fd00::1', 'fc12:3456::1', 'fe80::1']) {
       expect(isPrivateAddress(ip), ip).toBe(true)
     }
   })
@@ -60,5 +60,29 @@ describe('isPrivateAddress', () => {
     for (const ip of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '100.63.0.1', '100.128.0.1', '2001:db8::1', '::ffff:8.8.8.8', 'fe00::1', '', 'unknown', '10.0.0']) {
       expect(isPrivateAddress(ip), ip).toBe(false)
     }
+  })
+})
+
+describe('ipBucketKey', () => {
+  it('IPv4 — адрес целиком (и из IPv4-mapped формы)', () => {
+    expect(ipBucketKey('203.0.113.7')).toBe('203.0.113.7')
+    expect(ipBucketKey('::ffff:203.0.113.7')).toBe('203.0.113.7')
+  })
+
+  it('IPv6 — сеть /64: перебор адресов внутри неё не даёт новых ключей', () => {
+    expect(ipBucketKey('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64')
+    expect(ipBucketKey('2001:0db8:0001:0002:ffff:ffff:ffff:ffff')).toBe('2001:db8:1:2::/64')
+    expect(ipBucketKey('2001:db8::1')).toBe('2001:db8:0:0::/64')
+    expect(ipBucketKey('2001:db8:1:3::1')).not.toBe(ipBucketKey('2001:db8:1:2::1'))
+  })
+})
+
+describe('forwardedStatus — диагностика для /api/health', () => {
+  it('used — свой прокси из частной сети; ignored — заголовок есть, но не верим; absent — нет', () => {
+    expect(forwardedStatus('203.0.113.7', '10.0.0.5', true)).toBe('used')
+    expect(forwardedStatus('203.0.113.7', '10.0.0.5', false)).toBe('ignored')
+    expect(forwardedStatus('203.0.113.7', '198.51.100.9', true)).toBe('ignored')
+    expect(forwardedStatus('', '10.0.0.5', true)).toBe('absent')
+    expect(forwardedStatus(' , ', '10.0.0.5', true)).toBe('absent')
   })
 })

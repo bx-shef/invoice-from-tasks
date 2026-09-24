@@ -33,6 +33,13 @@ describe('withKeyLock', () => {
     expect(order.indexOf('b1:start')).toBeLessThan(order.indexOf('a1:end'))
   })
 
+  it('зависший вызов отклоняется по таймауту, и очередь идёт дальше', async () => {
+    const hung = withKeyLock('h', () => new Promise<never>(() => {}), 20)
+    const next = withKeyLock('h', async () => 'next', 20)
+    await expect(hung).rejects.toThrow(/timed out/)
+    expect(await next).toBe('next')
+  })
+
   it('ошибка одного вызова не блокирует очередь', async () => {
     await expect(withKeyLock('k', async () => {
       throw new Error('boom')
@@ -75,6 +82,19 @@ describe('makeInstallerCall', () => {
       }
     })
     await Promise.all([call('a'), call('b')])
+    expect(seen).toEqual(['A1', 'A1+'])
+  })
+
+  it('один портал — одна очередь, как бы ни был записан member_id', async () => {
+    const kv = memoryKv()
+    await saveInstall(kv, { memberId: 'm1', domain: 'demo.bitrix24.ru', accessToken: 'A1', refreshToken: 'R1', expiresIn: 3600, applicationToken: 't' })
+    const seen: string[] = []
+    const clientFor = (record: PortalRecord) => async () => {
+      seen.push(accessTokenOf(record))
+      await new Promise(r => setTimeout(r, 5))
+      await updateTokens(kv, 'm1', { accessToken: `${accessTokenOf(record)}+`, refreshToken: 'R2', expiresAt: 1 })
+    }
+    await Promise.all([makeInstallerCall({ kv, memberId: 'M1', clientFor })('a'), makeInstallerCall({ kv, memberId: 'm1', clientFor })('b')])
     expect(seen).toEqual(['A1', 'A1+'])
   })
 

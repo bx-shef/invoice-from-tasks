@@ -30,7 +30,7 @@ pnpm build            # сборка сервера .output/server/index.mjs
 | `app/pages/` | `index` (публичная), `install` (установка), `app` (главная в портале), `settings`, `invoice` (встройка в карточку счёта) |
 | `app/composables/` | `useB24` (фрейм и REST), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog`, `useUsers`, `useStorageProbe` |
 | `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере) |
-| `app/config/b24.ts` | права, встройка, события — одно место |
+| `app/config/b24.ts` | права, встройка, события, настройки SDK (без автоповторов записи) — одно место |
 | `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` |
 | `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
 | `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |

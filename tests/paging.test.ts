@@ -27,6 +27,10 @@ describe('collectOffsetPages', () => {
   it('больше потолка — ошибка, а не тихо неполный список', async () => {
     await expect(collectOffsetPages(offsetSource(201), 50, 200, 'в счёте слишком много позиций')).rejects.toThrow('в счёте слишком много позиций')
   })
+
+  it('потолок не кратен странице — ошибка программиста, а не неточная граница', async () => {
+    await expect(collectOffsetPages(offsetSource(10), 50, 120, 'много')).rejects.toThrow(/multiple/)
+  })
 })
 
 describe('collectNumberedPages', () => {
@@ -57,6 +61,16 @@ describe('collectNumberedPages', () => {
 
   it('упёрлись в потолок страниц, а данные есть — ошибка', async () => {
     await expect(collectNumberedPages(pages(250), 50, 4, 'слишком много записей')).rejects.toThrow('слишком много записей')
+    await expect(collectNumberedPages(pages(250, false), 50, 4, 'слишком много записей')).rejects.toThrow('слишком много записей')
     expect(await collectNumberedPages(pages(200), 50, 4, 'много')).toHaveLength(200)
+  })
+
+  it('ровно потолок без total — не ошибка: пробная страница пустая или повторяет последнюю', async () => {
+    expect(await collectNumberedPages(pages(200, false), 50, 4, 'много')).toHaveLength(200)
+    // Старый метод за концом отдаёт последнюю страницу ещё раз — распознаём по ключу.
+    const repeating = vi.fn(async (page: number) => ({ rows: Array.from({ length: 50 }, (_, i) => Math.min(page, 4) * 100 + i) }))
+    expect(await collectNumberedPages(repeating, 50, 4, 'много', row => row)).toHaveLength(200)
+    // Без ключа повтор не отличить от новых строк — честная ошибка.
+    await expect(collectNumberedPages(repeating, 50, 4, 'много')).rejects.toThrow('много')
   })
 })

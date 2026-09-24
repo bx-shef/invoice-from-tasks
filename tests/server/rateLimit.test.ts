@@ -13,6 +13,26 @@ describe('SlidingWindow', () => {
     expect(w.take([['u2', user]], 70_000 + user.max)).toBe(false)
   })
 
+  it('граница окна: попадание ровно windowMs назад уже не считается', () => {
+    const w = new SlidingWindow()
+    const lim = { max: 1, windowMs: 1000 }
+    expect(w.take([['k', lim]], 0)).toBe(true)
+    expect(w.take([['k', lim]], 999)).toBe(false)
+    expect(w.take([['k', lim]], 1000)).toBe(true)
+  })
+
+  it('у каждой проверки может быть свой вес', () => {
+    const w = new SlidingWindow()
+    const requests = { max: 2, windowMs: 1000 }
+    const rows = { max: 100, windowMs: 1000 }
+    expect(w.take([['r', requests, 1], ['w', rows, 60]], 0)).toBe(true)
+    // Строк не хватает — отказ, и запрос не засчитан.
+    expect(w.take([['r', requests, 1], ['w', rows, 41]], 1)).toBe(false)
+    expect(w.take([['r', requests, 1], ['w', rows, 40]], 2)).toBe(true)
+    // Запросов не хватает, хотя строк — с запасом.
+    expect(w.take([['r', requests, 1], ['w', rows, 0]], 3)).toBe(false)
+  })
+
   it('окно скользит', () => {
     const w = new SlidingWindow()
     const lim = { max: 2, windowMs: 1000 }
@@ -51,8 +71,9 @@ describe('SlidingWindow', () => {
   })
 
   it('пределы BitrixGPT: большой счёт называется целиком, консультация весит пакет', () => {
-    // 800 строк (32 пакета по 25) укладываются в лимит сотрудника с запасом на пересборку.
-    expect(AI_LIMITS.user.max).toBeGreaterThanOrEqual(800 * 2)
+    // 800 строк (32 пакета по 25) укладываются в лимиты сотрудника с запасом на пересборку.
+    expect(AI_LIMITS.userRows.max).toBeGreaterThanOrEqual(800 * 2)
+    expect(AI_LIMITS.userRequests.max).toBeGreaterThanOrEqual(32 * 2)
     expect(CONSULT_WEIGHT).toBe(25)
   })
 })

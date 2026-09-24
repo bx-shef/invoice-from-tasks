@@ -7,7 +7,7 @@ import { AI_LIMITS, SlidingWindow } from './rateLimit'
 import type { FrameUser } from './frameAuth'
 
 export interface AiLimitOptions {
-  /** Вес обращения в единицах лимита: число строк в запросе названий, `CONSULT_WEIGHT` для консультации. */
+  /** Сколько строк несёт обращение: число строк в запросе названий, `CONSULT_WEIGHT` для консультации. */
   weight?: number
   window?: SlidingWindow
   now?: number
@@ -25,10 +25,15 @@ const windows = new SlidingWindow()
 
 /** Бросает {@link AiGatewayError} 429, если сотрудник или портал исчерпали лимит обращений. */
 export function enforceAiLimit(user: FrameUser, opts: AiLimitOptions = {}): void {
+  // Два измерения сразу (rateLimit.ts): число вызовов модели и число строк в них.
+  const rows = opts.weight ?? 1
+  const who = `${user.portal.memberId}:${user.userId}`
   const ok = (opts.window ?? windows).take([
-    [`u:${user.portal.memberId}:${user.userId}`, AI_LIMITS.user],
-    [`p:${user.portal.memberId}`, AI_LIMITS.portal]
-  ], opts.now ?? Date.now(), opts.weight ?? 1)
+    [`ur:${who}`, AI_LIMITS.userRequests, 1],
+    [`uw:${who}`, AI_LIMITS.userRows, rows],
+    [`pr:${user.portal.memberId}`, AI_LIMITS.portalRequests, 1],
+    [`pw:${user.portal.memberId}`, AI_LIMITS.portalRows, rows]
+  ], opts.now ?? Date.now())
   if (!ok) throw new AiGatewayError(429, 'Слишком много обращений к BitrixGPT. Попробуйте позже.')
 }
 

@@ -1,39 +1,52 @@
 // Ограничение частоты: обращения к BitrixGPT (ключ стоит денег, а нажимать кнопку можно сколько
-// угодно), события портала и живые проверки фрейм-токена (ключи — IP клиента). Счётчик в памяти
+// угодно), события портала и живые проверки фрейм-токена (ключи — адрес клиента). Счётчик в памяти
 // процесса — у нас один экземпляр сервера; при горизонтальном масштабировании понадобится общий
 // (Redis), см. docs/ARCHITECTURE.md.
 
 export interface WindowLimit {
-  /** Сколько единиц разрешено в окне (запросов — или строк, если запрос весит больше 1). */
+  /** Сколько единиц разрешено в окне (запросов — или строк, если попытка весит больше 1). */
   max: number
   windowMs: number
 }
 
 /**
- * Пределы BitrixGPT: на сотрудника и на портал целиком. Единица — одна строка счёта в запросе
- * названий; консультация весит {@link CONSULT_WEIGHT}. Считать строки, а не запросы, пришлось
- * после того, как названия стали уходить пакетами по 25: лимит «30 запросов» не давал назвать
- * счёт длиннее 750 строк вообще (находка /code-review). 3000 строк за 10 минут — несколько
- * пересборок большого счёта; 30 000 за час — портал целиком.
+ * Пределы BitrixGPT — в двух измерениях сразу (находки /code-review):
+ * • запросы — каждый вызов модели несёт полный системный промпт, и без этого предела поток
+ *   запросов по одной строке давал бы тысячи вызовов;
+ * • строки счёта — названия уходят пакетами по 25, и лимит «30 запросов» без счёта строк не давал
+ *   назвать счёт длиннее 750 строк вообще. Консультация весит {@link CONSULT_WEIGHT} строк.
+ * 120 запросов и 3000 строк за 10 минут на сотрудника — большой счёт (800 строк = 32 запроса) можно
+ * пересобрать несколько раз; 1200 запросов и 30 000 строк за час — портал целиком.
  */
 export const AI_LIMITS = {
-  user: { max: 3000, windowMs: 10 * 60_000 },
-  portal: { max: 30_000, windowMs: 60 * 60_000 }
+  userRequests: { max: 120, windowMs: 10 * 60_000 },
+  userRows: { max: 3000, windowMs: 10 * 60_000 },
+  portalRequests: { max: 1200, windowMs: 60 * 60_000 },
+  portalRows: { max: 30_000, windowMs: 60 * 60_000 }
 } as const satisfies Record<string, WindowLimit>
 
-/** Вес консультации в единицах лимита — как полный пакет названий. */
+/** Вес консультации в строках — как полный пакет названий. */
 export const CONSULT_WEIGHT = 25
 
-/** Потолок ключей в памяти: поток запросов с тысяч адресов не должен съесть память. */
-export const MAX_WINDOW_KEYS = 50_000
+/**
+ * Потолок ключей в памяти: поток запросов с тысяч адресов не должен съесть память. Ключ хранит
+ * до `max` попаданий (время и вес — два числовых массива): 20 000 ключей × 60 попаданий — порядка
+ * 20 МБ.
+ */
+export const MAX_WINDOW_KEYS = 20_000
 /** Чистка устаревших ключей — раз в столько вызовов `take`, а не на каждом. */
 const PRUNE_EVERY = 256
 
 interface Bucket {
   windowMs: number
-  /** Попадания: момент и вес. */
-  hits: Array<[time: number, weight: number]>
+  /** Моменты попаданий по возрастанию. */
+  times: number[]
+  /** Вес каждого попадания (параллельно `times`). */
+  weights: number[]
 }
+
+/** Проверка одного окна: ключ, предел и (необязательно) свой вес попытки. */
+export type WindowCheck = [key: string, limit: WindowLimit, weight?: number]
 
 export class SlidingWindow {
   readonly #buckets = new Map<string, Bucket>()
@@ -47,26 +60,42 @@ export class SlidingWindow {
   }
 
   /**
-   * Учитывает попытку весом `weight` сразу во всех окнах. `false` — хотя бы в одном окне не
-   * хватает запаса, и тогда попытка не засчитывается НИГДЕ: иначе отказ по лимиту портала съедал
-   * бы лимит сотрудника.
+   * Учитывает попытку сразу во всех окнах; вес — свой у проверки или `weight`. `false` — хотя бы в
+   * одном окне не хватает запаса, и тогда попытка не засчитывается НИГДЕ: иначе отказ по лимиту
+   * портала съедал бы лимит сотрудника.
    */
-  take(checks: Array<[key: string, limit: WindowLimit]>, now = Date.now(), weight = 1): boolean {
-    const fresh = checks.map(([key, limit]) => {
-      const hits = (this.#buckets.get(key)?.hits ?? []).filter(([t]) => t > now - limit.windowMs)
-      const used = hits.reduce((sum, [, w]) => sum + w, 0)
-      return { key, limit, hits, used }
+  take(checks: WindowCheck[], now = Date.now(), weight = 1): boolean {
+    const fresh = checks.map(([key, limit, own]) => {
+      const bucket = this.#expire(this.#buckets.get(key), limit.windowMs, now)
+      const used = bucket.weights.reduce((sum, w) => sum + w, 0)
+      return { key, limit, bucket, used, w: own ?? weight }
     })
-    const ok = fresh.every(({ limit, used }) => used + weight <= limit.max)
-    for (const { key, limit, hits } of fresh) {
-      if (ok) hits.push([now, weight])
+    const ok = fresh.every(({ limit, used, w }) => used + w <= limit.max)
+    for (const { key, bucket, w } of fresh) {
+      if (ok) {
+        bucket.times.push(now)
+        bucket.weights.push(w)
+      }
       // Удалить и вставить заново: Map хранит порядок вставки, и свежие ключи уходят в конец —
       // при переполнении вытесняются давно не виденные.
       this.#buckets.delete(key)
-      if (hits.length) this.#buckets.set(key, { windowMs: limit.windowMs, hits })
+      if (bucket.times.length) this.#buckets.set(key, bucket)
     }
     if (++this.#calls % PRUNE_EVERY === 0 || this.#buckets.size > this.maxKeys) this.#prune(now)
     return ok
+  }
+
+  /** Отбрасывает попадания старше окна: попадание ровно `windowMs` назад уже не считается. */
+  #expire(prev: Bucket | undefined, windowMs: number, now: number): Bucket {
+    if (!prev) return { windowMs, times: [], weights: [] }
+    let drop = 0
+    while (drop < prev.times.length && prev.times[drop]! <= now - windowMs) drop++
+    if (drop) {
+      prev.times.splice(0, drop)
+      prev.weights.splice(0, drop)
+    }
+    prev.windowMs = windowMs
+    return prev
   }
 
   /**
@@ -77,7 +106,8 @@ export class SlidingWindow {
    */
   #prune(now: number): void {
     for (const [key, bucket] of this.#buckets) {
-      if (bucket.hits.every(([t]) => t <= now - bucket.windowMs)) this.#buckets.delete(key)
+      const last = bucket.times[bucket.times.length - 1]
+      if (last === undefined || last <= now - bucket.windowMs) this.#buckets.delete(key)
     }
     if (this.#buckets.size <= this.maxKeys) return
     const target = Math.floor(this.maxKeys * 0.9)

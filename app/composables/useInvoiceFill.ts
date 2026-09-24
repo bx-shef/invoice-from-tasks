@@ -153,7 +153,8 @@ export function useInvoiceFill() {
       },
       ELAPSED_PAGE,
       MAX_ELAPSED_PAGES,
-      `в задаче #${taskId} больше ${MAX_ELAPSED_PAGES * ELAPSED_PAGE} записей времени — такой объём приложение не считает`
+      `в задаче #${taskId} больше ${MAX_ELAPSED_PAGES * ELAPSED_PAGE} записей времени — такой объём приложение не считает`,
+      row => (row as { ID?: unknown }).ID
     )
     const byId = new Map<number, TimeEntry>()
     for (const row of raw) {
@@ -269,8 +270,8 @@ export function useInvoiceFill() {
    *   цены существующих строк («Если не передана, цена будет равна 0» — документация).
    *   ⚠ Пакет add не транзакция: при ошибке посередине часть строк уже добавлена. Поэтому пакет
    *   останавливается на первой ошибке.
-   * Автоматические повторы SDK на время записи выключены (useB24.withoutWriteRetry), а итог
-   * определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
+   * Автоматических повторов SDK при сетевых сбоях нет (config/b24.ts → sdkRestrictionParams), а
+   * итог определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
    * нет ли лишних строк, можно ли повторять.
    */
   async function write(replace: boolean): Promise<void> {
@@ -286,15 +287,13 @@ export function useInvoiceFill() {
     const planned = draft.length
     let failure: string | null = null
     try {
-      await b24.withoutWriteRetry(async () => {
-        if (replace) {
-          await b24.call('crm.item.productrow.set', { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, productRows: toProductRows(draft, settings.value) })
-        } else {
-          const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
-          const rows = toProductRows(draft, settings.value, sortStart)
-          await b24.batch(rows.map(fields => ['crm.item.productrow.add', { fields: { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, ...fields } }]), { haltOnError: true })
-        }
-      })
+      if (replace) {
+        await b24.call('crm.item.productrow.set', { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, productRows: toProductRows(draft, settings.value) })
+      } else {
+        const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
+        const rows = toProductRows(draft, settings.value, sortStart)
+        await b24.batch(rows.map(fields => ['crm.item.productrow.add', { fields: { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, ...fields } }]), { haltOnError: true })
+      }
     } catch (e) {
       failure = e instanceof Error ? e.message : String(e)
     }

@@ -64,23 +64,20 @@ export const B24_OAUTH_HOSTS = ['oauth.bitrix24.tech', 'oauth.bitrix.info'] as c
 export const DEFAULT_OAUTH_HOST = 'oauth.bitrix24.tech'
 
 /**
- * Сервер авторизации установки из `auth[server_endpoint]` события.
- * • Облачный — только из {@link B24_OAUTH_HOSTS}.
- * • Коробочный (из `B24_SELFHOSTED_HOSTS`) — только если это сам портал установки: коробка может
- *   ручаться лишь за себя, иначе её владелец выпускал бы «гранты» с member_id и доменом чужих
- *   облачных порталов, и сверка установки их бы приняла.
- * • Поля нет — {@link DEFAULT_OAUTH_HOST}.
+ * Сервер авторизации установки из `auth[server_endpoint]` события: только облачный, из
+ * {@link B24_OAUTH_HOSTS}; поля нет — {@link DEFAULT_OAUTH_HOST}.
  *
- * @param portalHost домен установки, уже прошедший {@link assertPortalHost}
+ * ⚠ Коробочный портал сервером авторизации не принимается, даже из `B24_SELFHOSTED_HOSTS`.
+ * Коробка ручается за свой домен, но `member_id` в её «гранте» может быть любым: её владелец
+ * перезаписал бы запись облачного портала-жертвы, а наш `client_secret` ушёл бы ему в запросе
+ * продления (находка /code-review). Приложение облачное; установка из коробки не сохраняется.
+ *
  * @returns хост или `null` — сервер не из разрешённых (SSRF и подделка гранта)
  */
-export function resolveOAuthHost(serverEndpoint: string, portalHost: string, env: Record<string, string | undefined> = process.env): string | null {
+export function resolveOAuthHost(serverEndpoint: string): string | null {
   if (!serverEndpoint.trim()) return DEFAULT_OAUTH_HOST
   const host = portalHostname(serverEndpoint)
-  if (!host) return null
-  if ((B24_OAUTH_HOSTS as readonly string[]).includes(host)) return host
-  if (host === portalHost && parseSelfHostedHosts(env.B24_SELFHOSTED_HOSTS).has(host)) return host
-  return null
+  return (B24_OAUTH_HOSTS as readonly string[]).includes(host) ? host : null
 }
 
 /**

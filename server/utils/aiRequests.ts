@@ -52,15 +52,22 @@ export function parseNamingRequest(body: unknown): Parsed<{ mode: FillMode, item
 }
 
 /**
- * Промпт консультации по `promptId` — из настроек ПОРТАЛА, а не из тела запроса: иначе эндпоинт
- * стал бы бесплатным доступом к модели с любым промптом. Контекст — как прислан (его урезают и
- * страница, и `buildConsultMessages`).
+ * Тело POST /api/ai/consult: id промпта и контекст. Проверяется ДО чтения настроек портала —
+ * некорректный запрос не должен стоить вызова в портал (находка /code-review). Контекст — как
+ * прислан (его урезают и страница, и `buildConsultMessages`).
  */
-export function findConsultPrompt(settings: AppSettings, body: unknown): Parsed<{ prompt: ConsultPrompt, context: unknown }> {
+export function parseConsultRequest(body: unknown): Parsed<{ promptId: string, context: unknown }> {
   const b = asObject(body)
   const promptId = typeof b.promptId === 'string' ? b.promptId : ''
   if (!promptId) return { ok: false, status: 400, error: 'promptId required' }
+  return { ok: true, value: { promptId, context: b.context ?? {} } }
+}
+
+/**
+ * Промпт консультации по id — из настроек ПОРТАЛА, а не из тела запроса: иначе эндпоинт стал бы
+ * бесплатным доступом к модели с любым промптом.
+ */
+export function findConsultPrompt(settings: AppSettings, promptId: string): Parsed<ConsultPrompt> {
   const prompt = settings.consultPrompts.find(p => p.id === promptId)
-  if (!prompt) return { ok: false, status: 404, error: 'prompt not found' }
-  return { ok: true, value: { prompt, context: b.context ?? {} } }
+  return prompt ? { ok: true, value: prompt } : { ok: false, status: 404, error: 'prompt not found' }
 }

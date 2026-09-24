@@ -52,8 +52,15 @@ export function describeWrite(r: WriteReport): WriteVerdict {
     }
     return { kind: 'done', message: `Добавлено строк: ${r.planned}.`, resetPreview: false }
   }
+  // Ответ — ошибка, но в счёте уже все строки: портал выполнил пакет, а ответ потерялся (таймаут,
+  // 5xx прокси). Это не сбой — и повторять «Добавить» нельзя, строки задвоятся (находка
+  // /code-review: раньше здесь была «ошибка» с советом собрать строки заново).
+  if (r.after !== null && r.after >= expected) {
+    return { kind: 'warn', message: `Портал ответил ошибкой (${r.error}), но все ${r.planned} строк уже в счёте — повторять не нужно. ${check}`, resetPreview: true }
+  }
+  // Сразу после таймаута портал может ещё дописывать пакет: число — на момент проверки.
   const done = r.after === null
     ? `Сколько строк из ${r.planned} успело добавиться, проверить не удалось`
-    : `Добавлено ${Math.max(0, r.after - r.before)} из ${r.planned} строк`
+    : `На момент проверки добавлено ${Math.max(0, r.after - r.before)} из ${r.planned} строк`
   return { kind: 'error', message: `${done}, дальше — ошибка: ${r.error}. ${check} Чтобы не задвоить строки, соберите их заново.`, resetPreview: true }
 }
