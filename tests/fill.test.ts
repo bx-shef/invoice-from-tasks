@@ -13,7 +13,8 @@ const task: TaskInfo = {
   description: 'Макет в Figma',
   responsibleId: 7,
   crmBindings: ['D_5'],
-  timeSpentInLogs: 5400
+  timeSpentInLogs: 5400,
+  tags: []
 }
 
 const entries: TimeEntry[] = [
@@ -34,7 +35,6 @@ function input(patch: Partial<FillInput> = {}): FillInput {
       { userId: 9, rate: 80, from: '2026-01-01' }
     ],
     settings: settings(),
-    products: new Map(),
     ...patch
   }
 }
@@ -53,10 +53,70 @@ describe('тип 1 — задача как строка', () => {
     expect(rows[0]?.quantity).toBe(2)
   })
 
+  it('округление к ближайшему — по настройке направления', () => {
+    // 1,5 ч к ближайшему часу — 2 ч (половина — вверх); 40 минут к ближайшим 30 — 30 минут.
+    expect(buildRows(input({ settings: settings({ rounding: 60, roundingDirection: 'nearest' }) })).rows[0]?.quantity).toBe(2)
+    const short = [{ ...entries[0]!, seconds: 2400 }]
+    expect(buildRows(input({ entries: short, settings: settings({ rounding: 30, roundingDirection: 'nearest' }) })).rows[0]?.quantity).toBe(0.5)
+  })
+
+  it('время задачи, ставшее нулём после округления к ближайшему, — пропуск с предупреждением', () => {
+    const tiny = [{ ...entries[1]!, userId: 7, seconds: 600 }]
+    const { rows, errors, warnings } = buildRows(input({ entries: tiny, settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
+    expect(errors).toEqual([])
+    expect(rows).toEqual([])
+    expect(warnings).toEqual([{ taskId: 10, message: 'время 10 мин после округления стало нулём — строка пропущена' }])
+  })
+
+  it('ставка менялась за время задачи — строка по последней записи и предупреждение', () => {
+    // Записи 10.05 (ставка 100 с 01.01) и 02.06 (ставка 200 с 01.06).
+    const { rows, warnings } = buildRows(input({ userNames: new Map([[7, 'Иван Петров']]) }))
+    expect(rows[0]?.baseRate).toBe(200)
+    expect(warnings).toEqual([{
+      taskId: 10,
+      message: 'ставка Иван Петров менялась за время задачи: 100 с 01.01.2026 → 200 с 01.06.2026; применена 200 — на дату последней записи'
+    }])
+  })
+
+  it('ставка не менялась — предупреждения нет', () => {
+    const { warnings } = buildRows(input({ rates: [{ userId: 7, rate: 150, from: '2026-01-01' }] }))
+    expect(warnings).toEqual([])
+  })
+
+  it('на ранние записи ставки не было — это тоже смена ставки', () => {
+    const { rows, warnings } = buildRows(input({ rates: [{ userId: 7, rate: 200, from: '2026-06-01' }] }))
+    expect(rows[0]?.baseRate).toBe(200)
+    expect(warnings[0]?.message).toContain('нет ставки → 200 с 01.06.2026')
+  })
+
+  it('нулевые записи не участвуют в выборе даты ставки', () => {
+    // Нулевая запись 01.07 не должна сдвинуть «последнюю запись» на 01.07.
+    const withZero = [...entries, { ...entries[0]!, id: 103, seconds: 0, date: '2026-07-01' }]
+    const { rows } = buildRows(input({ entries: withZero, rates: [...input().rates, { userId: 7, rate: 500, from: '2026-07-01' }] }))
+    expect(rows[0]).toMatchObject({ rateDate: '2026-06-02', baseRate: 200 })
+  })
+
+  it('записи со временем, но без даты — ошибка: не на что выбрать ставку', () => {
+    const { rows, errors } = buildRows(input({ entries: entries.map(e => ({ ...e, date: null })) }))
+    expect(rows).toEqual([])
+    expect(errors).toEqual([{ taskId: 10, message: 'у записей времени нет даты — не на что выбрать ставку' }])
+  })
+
+  it('теги задачи не прочитаны — ошибка по этой задаче, остальные задачи считаются', () => {
+    const other: TaskInfo = { ...task, id: 11, title: 'Другая' }
+    const { rows, errors } = buildRows(input({
+      tasks: [task, other],
+      entries: [...entries, { ...entries[0]!, id: 201, taskId: 11 }],
+      tagFailures: new Map([[10, 'tasks.task.get: Access denied']])
+    }))
+    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (tasks.task.get: Access denied) — не на что выбрать наценку' }])
+    expect(rows.map(r => r.taskId)).toEqual([11])
+  })
+
   it('нет ставки ответственного — ошибка, строки нет', () => {
     const { rows, errors } = buildRows(input({ rates: [{ userId: 9, rate: 80, from: '2026-01-01' }] }))
     expect(rows).toEqual([])
-    expect(errors[0]?.message).toBe('нет ставки для #7 на 2026-06-02')
+    expect(errors[0]?.message).toBe('нет ставки для #7 на 02.06.2026')
   })
 
   it('имя сотрудника в ошибке, если оно известно', () => {
@@ -74,20 +134,46 @@ describe('тип 1 — задача как строка', () => {
     expect(errors[0]?.message).toContain('не прочитан')
   })
 
-  it('наценка из настроек идёт в цену', () => {
-    const s = settings({ markup: { defaultPercent: 70, sections: [], products: [] } })
+  it('наценка «на всё» идёт в цену', () => {
+    const s = settings({ markup: { defaultPercent: 70, tags: [] } })
     const { rows } = buildRows(input({ settings: s }))
     expect(rows[0]).toMatchObject({ price: 340, markupPercent: 70, markupSource: 'default', sum: 510 })
+    expect(rows[0]).not.toHaveProperty('markupTag')
   })
 
-  it('товар из ставки и наценка по его папке', () => {
-    const s = settings({ markup: { defaultPercent: 70, sections: [{ id: 3, name: 'ЧЧ1', percent: 20 }], products: [] } })
-    const { rows } = buildRows(input({
-      settings: s,
-      rates: [{ userId: 7, rate: 100, from: '2026-01-01', productId: 55 }],
-      products: new Map([[55, { sectionChain: [3] }]])
-    }))
-    expect(rows[0]).toMatchObject({ productId: 55, price: 120, markupSource: 'section' })
+  it('наценка по тегу задачи сильнее «на всё»', () => {
+    const s = settings({ markup: { defaultPercent: 70, tags: [{ tag: 'ЧЧ1', percent: 20 }] } })
+    const { rows } = buildRows(input({ settings: s, tasks: [{ ...task, tags: ['чч1'] }], rates: [{ userId: 7, rate: 100, from: '2026-01-01' }] }))
+    expect(rows[0]).toMatchObject({ price: 120, markupPercent: 20, markupSource: 'tag', markupTag: 'ЧЧ1' })
+  })
+})
+
+describe('пересчёт в валюту счёта', () => {
+  const conversion = { from: 'RUB', to: 'USD', factor: 1 / 80, notice: 'Цены пересчитаны — проверьте курс' }
+
+  it('цена = ставка × курс × наценка, округление до центов один раз', () => {
+    const s = settings({ markup: { defaultPercent: 70, tags: [] } })
+    // 200 ₽ / 80 = 2,5 $ × 1,7 = 4,25 $.
+    const { rows } = buildRows(input({ settings: s, conversion }))
+    expect(rows[0]).toMatchObject({ baseRate: 200, price: 4.25, sum: 6.38 })
+  })
+
+  it('предупреждение о курсе — первым, одно на счёт', () => {
+    const { warnings } = buildRows(input({ mode: 'time', conversion }))
+    expect(warnings[0]).toEqual({ taskId: 0, message: conversion.notice })
+    expect(warnings.filter(w => w.message === conversion.notice)).toHaveLength(1)
+  })
+
+  it('пересчёт и наценка по тегу вместе: курс, потом наценка тега', () => {
+    const s = settings({ markup: { defaultPercent: 70, tags: [{ tag: 'ЧЧ1', percent: 20 }] } })
+    // 200 ₽ / 80 = 2,5 $ × 1,2 = 3 $.
+    const { rows } = buildRows(input({ settings: s, conversion, tasks: [{ ...task, tags: ['ЧЧ1'] }] }))
+    expect(rows[0]).toMatchObject({ price: 3, markupSource: 'tag', markupTag: 'ЧЧ1', sum: 4.5 })
+  })
+
+  it('строк нет — и предупреждения о курсе нет', () => {
+    const { warnings } = buildRows(input({ rates: [], conversion }))
+    expect(warnings).toEqual([])
   })
 })
 
@@ -106,6 +192,40 @@ describe('тип 2 — записи времени как строки', () => {
     const { errors } = buildRows(input({ mode: 'time', entries: [{ ...entries[0]!, comment: '' }] }))
     expect(errors[0]).toMatchObject({ taskId: 10, entryId: 101 })
     expect(errors[0]?.message).toContain('нет описания')
+  })
+
+  it('наценка строки — по тегам ЕЁ задачи', () => {
+    const s = settings({ markup: { defaultPercent: 0, tags: [{ tag: 'срочно', percent: 50 }] } })
+    const { rows } = buildRows(input({ mode: 'time', settings: s, tasks: [{ ...task, tags: ['Срочно'] }] }))
+    expect(rows.map(r => r.price)).toEqual([150, 120])
+  })
+
+  it('две задачи с разными тегами — у каждой строки наценка своей задачи, а не соседней', () => {
+    const s = settings({ markup: { defaultPercent: 0, tags: [{ tag: 'срочно', percent: 50 }, { tag: 'дизайн', percent: 100 }] } })
+    const second: TaskInfo = { ...task, id: 11, tags: ['Дизайн'] }
+    const { rows } = buildRows(input({
+      mode: 'time',
+      settings: s,
+      tasks: [{ ...task, tags: ['Срочно'] }, second],
+      entries: [entries[0]!, { ...entries[0]!, id: 201, taskId: 11 }]
+    }))
+    expect(rows.map(r => [r.key, r.markupTag, r.price])).toEqual([['e101', 'срочно', 150], ['e201', 'дизайн', 200]])
+  })
+
+  it('теги задачи не прочитаны — ошибка по задаче, её записи строк не дают', () => {
+    const { rows, errors } = buildRows(input({ mode: 'time', tagFailures: new Map([[10, 'сбой']]) }))
+    expect(rows).toEqual([])
+    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (сбой) — не на что выбрать наценку' }])
+  })
+
+  it('запись, ставшая нулём при округлении к ближайшему, — пропуск с предупреждением', () => {
+    const { rows, warnings } = buildRows(input({ mode: 'time', settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
+    // 60 мин → 1 ч, 30 мин → 1 ч (половина — вверх); обнуления нет.
+    expect(rows.map(r => r.quantity)).toEqual([1, 1])
+    const short = buildRows(input({ mode: 'time', entries: [{ ...entries[1]!, seconds: 1200 }], settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
+    expect(short.rows).toEqual([])
+    expect(short.warnings).toEqual([{ taskId: 10, entryId: 102, message: 'время 20 мин после округления стало нулём — строка пропущена' }])
+    expect(warnings).toEqual([])
   })
 
   it('нулевая запись пропускается с предупреждением, а не ошибкой', () => {
@@ -152,10 +272,11 @@ describe('applyNames — названия от BitrixGPT', () => {
 })
 
 describe('toProductRows — поля crm.item.productrow.*', () => {
-  it('передаёт товар, единицу измерения и сортировку после существующих строк', () => {
-    const { rows } = buildRows(input({ rates: [{ userId: 7, rate: 100, from: '2026-01-01', productId: 55 }] }))
+  it('свободная позиция без товара каталога: название, цена, единица, сортировка после существующих', () => {
+    const { rows } = buildRows(input({ rates: [{ userId: 7, rate: 100, from: '2026-01-01' }] }))
     expect(toProductRows(rows, settings({ measureCode: 356 }), 30)).toEqual([
-      { productId: 55, productName: 'Сверстать лендинг', price: 100, quantity: 1.5, measureCode: 356, sort: 40 }
+      { productName: 'Сверстать лендинг', price: 100, quantity: 1.5, measureCode: 356, sort: 40 }
     ])
+    expect(toProductRows(rows, settings())[0]).not.toHaveProperty('measureCode')
   })
 })

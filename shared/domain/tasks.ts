@@ -6,6 +6,7 @@
 // фильтр tasks.task.list портал НЕ отвергает, а отдаёт все задачи подряд — привязку к CRM мы
 // перепроверяем сами (`hasCrmBinding`), а не верим фильтру.
 
+import { MAX_TAG_LENGTH } from './markup'
 import { portalDate } from './time'
 
 /** CRM-тип счёта (новые счета). */
@@ -24,6 +25,12 @@ export interface TaskInfo {
   crmBindings: string[]
   /** Затраченное время по журналу (секунды), как его считает портал. */
   timeSpentInLogs: number
+  /**
+   * Теги задачи — по ним выбирается наценка (markup.ts). Список задач их не отдаёт: теги
+   * дочитываются отдельно (REST v3 tasks.task.get, {@link parseTaskTags}); пусто — тегов нет
+   * или правил по тегам нет и читать их не понадобилось.
+   */
+  tags: string[]
 }
 
 export interface TimeEntry {
@@ -32,7 +39,7 @@ export interface TimeEntry {
   userId: number | null
   seconds: number
   comment: string
-  /** Дата работы (`YYYY-MM-DD`, пояс портала) — по ней выбирается ставка. */
+  /** Дата создания записи (`YYYY-MM-DD`, пояс портала) — по ней выбирается ставка. */
   date: string | null
 }
 
@@ -82,8 +89,31 @@ export function parseTask(row: Row): TaskInfo | null {
     description: toText(pick(row, 'description', 'DESCRIPTION')),
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
-    timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0)
+    timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
+    tags: []
   }
+}
+
+/** Предел тегов одной задачи, которые читаем, — страховка от мусора в ответе. */
+const MAX_TASK_TAGS = 100
+
+/**
+ * Теги из ответа REST v3 `tasks.task.get` с `select: ['id', 'tags.id', 'tags.name']`:
+ * `{ item: { tags: [{ id, name }] } }` (статья «Поля задачи в REST 3.0»). Принимаем и голый
+ * объект задачи, и строки вместо объектов — форма ответа на живом портале ещё не замерена (#2).
+ *
+ * Тег длиннее {@link MAX_TAG_LENGTH} отбрасывается, а не обрезается: правило не бывает длиннее,
+ * так что совпасть он не может, а обрезанный мог бы совпасть с правилом ЛОЖНО (находка
+ * безопасности панели).
+ */
+export function parseTaskTags(result: unknown): string[] {
+  const item = result && typeof result === 'object' && 'item' in result ? (result as Row).item : result
+  const tags = item && typeof item === 'object' ? (item as Row).tags : undefined
+  if (!Array.isArray(tags)) return []
+  const names = tags
+    .map(t => (t && typeof t === 'object' ? toText((t as Row).name) : toText(t)).trim())
+    .filter(name => name && name.length <= MAX_TAG_LENGTH)
+  return [...new Set(names)].slice(0, MAX_TASK_TAGS)
 }
 
 /** Запись затраченного времени из ответа task.elapseditem.getlist. */
@@ -98,9 +128,10 @@ export function parseTimeEntry(row: Row): TimeEntry | null {
     userId: toInt(pick(row, 'USER_ID', 'userId')),
     seconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0,
     comment: toText(pick(row, 'COMMENT_TEXT', 'commentText')).trim(),
-    // ⚠ DATE_START — когда работа началась (ручная запись может быть задним числом);
-    // CREATED_DATE — когда запись внесли. Ставка должна браться на день работы.
-    date: portalDate(pick(row, 'DATE_START', 'dateStart')) ?? portalDate(pick(row, 'CREATED_DATE', 'createdDate'))
+    // ⚠ Решение владельца по #3: дата записи — ВСЕГДА дата её создания (CREATED_DATE), а не
+    // начала работы (DATE_START): «когда внёс, тогда и считается». Запись задним числом берёт
+    // ставку на день внесения. Та же дата — «последняя запись» в типе 1 (fill.ts).
+    date: portalDate(pick(row, 'CREATED_DATE', 'createdDate'))
   }
 }
 

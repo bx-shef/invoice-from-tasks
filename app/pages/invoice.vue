@@ -29,6 +29,11 @@ const modeItems = [
 ]
 
 const busy = computed(() => ['loading', 'collecting', 'writing'].includes(fill.step.value))
+const roundingText = computed(() => {
+  const { rounding, roundingDirection } = app.settings.value
+  if (!rounding) return 'нет'
+  return `${roundingDirection === 'nearest' ? 'к ближайшим' : 'вверх до'} ${rounding} мин`
+})
 
 // Сменили источник или тип — собранные строки к новым настройкам не относятся: сбрасываем
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
@@ -141,7 +146,7 @@ async function consult(promptId: string) {
               />
               <span class="text-sm opacity-70">
                 Названия: {{ app.settings.value.naming === 'ai' ? 'BitrixGPT' : 'как есть из задач' }} · округление:
-                {{ app.settings.value.rounding ? `до ${app.settings.value.rounding} мин` : 'нет' }}
+                {{ roundingText }}
               </span>
             </div>
           </template>
@@ -162,6 +167,7 @@ async function consult(promptId: string) {
           :warnings="result.warnings"
           :total="fill.total.value"
           :currency="fill.invoice.value?.currencyId ?? ''"
+          :rate-currency="app.settings.value.currency"
           :origin="origin"
           :user-label="users.label"
         />
@@ -198,6 +204,13 @@ async function consult(promptId: string) {
           v-if="fill.notice.value"
           color="air-primary-warning"
           :description="fill.notice.value"
+        />
+        <!-- Предпросмотр после записи может исчезнуть — предупреждение о курсе остаётся (#3). -->
+        <B24Alert
+          v-if="fill.step.value === 'done' && fill.conversion.value"
+          color="air-primary-warning"
+          :description="fill.conversion.value.notice"
+          data-testid="fill-conversion"
         />
 
         <B24Card v-if="app.settings.value.consultPrompts.length">

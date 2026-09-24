@@ -1,17 +1,14 @@
 <script setup lang="ts">
-// Ставки часа: «сотрудник — ставка — с даты» (+ необязательный товар каталога).
+// Ставки часа: «сотрудник — ставка — с даты».
 // Сохраняются отдельно от прочих настроек: их меняют и назначенные не-администраторы.
 import { MAX_RATE, validateRates, type RateEntry } from '#shared/domain/rates'
 import { formatUsage } from '#shared/domain/storageBudget'
 
 const app = useAppSettings()
 const users = useUsers()
-const catalog = useCatalog()
 const toast = useToast()
 
 const draft = ref<RateEntry[]>(app.rates.value.map(r => ({ ...r })))
-const productNames = ref<Record<number, string>>({})
-const productRow = ref<number | null>(null)
 const saving = ref(false)
 
 const issues = computed(() => validateRates(draft.value))
@@ -20,8 +17,6 @@ const currency = computed(() => app.settings.value.currency || 'валюта н�
 
 onMounted(async () => {
   await users.load(draft.value.map(r => r.userId))
-  const ids = [...new Set(draft.value.map(r => r.productId).filter((id): id is number => !!id))]
-  for (const id of ids) productNames.value[id] = await catalog.productName(id)
 })
 
 function today(): string {
@@ -42,14 +37,6 @@ function rowIssues(index: number): string[] {
   return issues.value.filter(i => i.index === index).map(i => i.message)
 }
 
-function setProduct(index: number, option: { id: number, name: string }) {
-  const row = draft.value[index]
-  if (!row) return
-  row.productId = option.id
-  productNames.value[option.id] = option.name
-  productRow.value = null
-}
-
 async function save() {
   saving.value = true
   try {
@@ -67,7 +54,8 @@ async function save() {
   <div class="space-y-4">
     <p class="text-sm opacity-80">
       Ставка за час без наценки, в валюте ставок ({{ currency }}). Действует с указанной даты до следующей
-      ставки того же сотрудника. Счёт считается по ставке на дату работы.
+      ставки того же сотрудника. Счёт считается по ставке на дату записи времени; счёт в другой валюте
+      пересчитывается по курсу портала.
     </p>
 
     <div class="overflow-x-auto">
@@ -82,9 +70,6 @@ async function save() {
             </th>
             <th class="py-2 pr-3 font-medium">
               Действует с
-            </th>
-            <th class="py-2 pr-3 font-medium">
-              Товар (необязательно)
             </th>
             <th class="py-2" />
           </tr>
@@ -114,28 +99,6 @@ async function save() {
                   :aria-label="`Действует с — ${users.label(row.userId)}`"
                 />
               </td>
-              <td class="py-2 pr-3">
-                <div class="flex items-center gap-2">
-                  <span v-if="row.productId">{{ productNames[row.productId] ?? `#${row.productId}` }}</span>
-                  <span
-                    v-else
-                    class="opacity-60"
-                  >по умолчанию</span>
-                  <B24Button
-                    size="xs"
-                    color="air-tertiary"
-                    :label="productRow === index ? 'Отмена' : 'Выбрать'"
-                    @click="productRow = productRow === index ? null : index"
-                  />
-                  <B24Button
-                    v-if="row.productId"
-                    size="xs"
-                    color="air-tertiary"
-                    label="Убрать"
-                    @click="row.productId = undefined"
-                  />
-                </div>
-              </td>
               <td class="py-2 text-right">
                 <B24Button
                   size="xs"
@@ -145,20 +108,9 @@ async function save() {
                 />
               </td>
             </tr>
-            <tr v-if="productRow === index">
-              <td
-                colspan="5"
-                class="pb-3"
-              >
-                <CatalogPicker
-                  kind="product"
-                  @pick="(o) => setProduct(index, o)"
-                />
-              </td>
-            </tr>
             <tr v-if="rowIssues(index).length">
               <td
-                colspan="5"
+                colspan="4"
                 class="pb-2 text-sm text-(--ui-color-accent-main-alert)"
               >
                 {{ rowIssues(index).join('; ') }}
@@ -167,7 +119,7 @@ async function save() {
           </template>
           <tr v-if="!draft.length">
             <td
-              colspan="5"
+              colspan="4"
               class="py-4 opacity-70"
             >
               Ставок пока нет

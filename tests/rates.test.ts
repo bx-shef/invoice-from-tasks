@@ -3,7 +3,7 @@ import { coerceRateEntries, findRate, normalizeRate, parseRates, serializeRates,
 
 const rates: RateEntry[] = [
   { userId: 7, rate: 100, from: '2026-01-01' },
-  { userId: 7, rate: 120, from: '2026-06-01', productId: 55 },
+  { userId: 7, rate: 120, from: '2026-06-01' },
   { userId: 9, rate: 80, from: '2026-03-15' }
 ]
 
@@ -23,7 +23,7 @@ describe('findRate — ставка, действующая на дату', () =
 describe('хранение ставок', () => {
   it('сериализуется в компактные кортежи и читается обратно без потерь', () => {
     const json = serializeRates(rates)
-    expect(json).toBe('[[7,100,"2026-01-01"],[7,120,"2026-06-01",55],[9,80,"2026-03-15"]]')
+    expect(json).toBe('[[7,100,"2026-01-01"],[7,120,"2026-06-01"],[9,80,"2026-03-15"]]')
     expect(parseRates(json)).toEqual(rates)
   })
 
@@ -73,11 +73,15 @@ describe('coerceRateEntries — тело запроса', () => {
     expect(coerceRateEntries([])).toEqual([])
   })
 
-  it('приводит поля к типам и не придумывает productId', () => {
-    expect(coerceRateEntries([{ userId: '5', rate: '1500', from: '2026-01-01', extra: 1 }]))
+  it('приводит поля к типам; посторонние поля (и товар каталога до #3) не переносит', () => {
+    expect(coerceRateEntries([{ userId: '5', rate: '1500', from: '2026-01-01', extra: 1, productId: 3 }]))
       .toEqual([{ userId: 5, rate: 1500, from: '2026-01-01' }])
-    expect(coerceRateEntries([{ userId: 5, rate: 1, from: '2026-01-01', productId: '3' }])?.[0]?.productId).toBe(3)
-    expect(coerceRateEntries([{ userId: 5, rate: 1, from: '2026-01-01', productId: null }])?.[0]).not.toHaveProperty('productId')
+  })
+
+  it('старые записи с товаром каталога читаются без товара и сохраняются тройкой', () => {
+    const legacy = parseRates([[7, 100, '2026-01-01', 55]])
+    expect(legacy).toEqual([{ userId: 7, rate: 100, from: '2026-01-01' }])
+    expect(serializeRates(legacy)).toBe('[[7,100,"2026-01-01"]]')
   })
 
   it('ставка строкой с запятой проходит, как и в normalizeRate', () => {

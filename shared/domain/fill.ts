@@ -2,40 +2,47 @@
 // времени, ставки и настройки — на выходе строки и список проблем. Никаких REST-вызовов:
 // их делает composable страницы (app/composables/useInvoiceFill.ts).
 //
-// Правила (ТЗ + решения, записанные в docs/PROCESSING.md):
+// Правила (ТЗ + решения владельца по #3, записанные в docs/PROCESSING.md):
 // • тип 1 «задача» — одна строка на задачу; всё время задачи (всех участников) умножается на
-//   ставку ОТВЕТСТВЕННОГО, действующую на дату последней записи времени;
+//   ставку ОТВЕТСТВЕННОГО, действующую на дату последней записи времени; если за период задачи
+//   ставка менялась — предупреждение;
 // • тип 2 «время» — одна строка на запись времени; ставка того, кто списал время, на дату записи;
+// • дата записи — дата её создания (tasks.ts);
+// • наценка — по тегам задачи, первое совпадение, иначе «на всё» (markup.ts);
+// • валюта счёта ≠ валюте ставок — цены пересчитываются по курсу портала (currency.ts);
 // • если чего-то не хватает — ошибка, и НИЧЕГО не пишется (ТЗ: «стоп работа и показ ошибки»).
 //   Ошибки собираются все сразу, чтобы человек исправил задачи за один проход.
 
+import type { CurrencyConversion } from './currency'
 import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
 import { findRate, type RateEntry } from './rates'
 import type { AppSettings } from './settings'
 import type { TaskInfo, TimeEntry } from './tasks'
-import { formatDuration, roundSeconds, secondsToHours } from './time'
+import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
 
 /** Тип заполнения: 1 — задача как учётная единица, 2 — записи затраченного времени. */
 export type FillMode = 'task' | 'time'
 /** Откуда брать задачи. Смешивать источники нельзя (ТЗ). */
 export type TaskSource = 'deal' | 'invoice'
 
-/** Длина названия товара в строке — у поля каталога предел 255 символов. */
+/** Длина названия товара в строке — у поля товарной позиции предел 255 символов. */
 export const MAX_ROW_NAME = 255
-
-export interface ProductInfo {
-  /** Папки товара от ближайшей к корню. */
-  sectionChain: number[]
-}
 
 export interface FillInput {
   mode: FillMode
+  /** Задачи; теги (`tags`) нужны, только если в настройках есть правила наценки по тегам. */
   tasks: TaskInfo[]
   entries: TimeEntry[]
   rates: RateEntry[]
   settings: AppSettings
-  /** Сведения о товарах каталога, задействованных в строках (для наценок по папкам). */
-  products: Map<number, ProductInfo>
+  /** Пересчёт в валюту счёта; `null`/нет — валюты совпадают. */
+  conversion?: CurrencyConversion | null
+  /**
+   * Задачи, чьи теги прочитать не удалось (ID → текст портала). Без тегов наценку не выбрать —
+   * это нехватка данных по задаче, а не сбой всей сборки: ошибка называет задачу, остальные
+   * задачи проверяются как обычно (находка программиста и техдиректора панели).
+   */
+  tagFailures?: ReadonlyMap<number, string>
   /** Имена сотрудников для понятных сообщений; нет имени — пишем `#ID`. */
   userNames?: Map<number, string>
 }
@@ -46,25 +53,27 @@ export interface DraftRow {
   taskId: number
   entryId?: number
   userId: number
-  productId?: number
   name: string
   /** Исходная длительность и после округления, секунды. */
   seconds: number
   roundedSeconds: number
   /** Часы — идут в колонку «Количество». */
   quantity: number
-  /** Ставка без наценки и дата, на которую она выбрана. */
+  /** Ставка без наценки в валюте ставок и дата, на которую она выбрана. */
   baseRate: number
   rateDate: string
   markupPercent: number
   markupSource: MarkupSource
-  /** Цена часа с наценкой — идёт в колонку «Цена». */
+  /** Тег сработавшего правила наценки (`markupSource = 'tag'`). */
+  markupTag?: string
+  /** Цена часа с наценкой в валюте счёта — идёт в колонку «Цена». */
   price: number
   /** Сумма строки для предпросмотра (портал считает её сам). */
   sum: number
 }
 
 export interface FillIssue {
+  /** Задача, к которой относится проблема; `0` — к счёту целиком (валюта, «нет задач»). */
   taskId: number
   entryId?: number
   message: string
@@ -73,7 +82,7 @@ export interface FillIssue {
 export interface FillResult {
   rows: DraftRow[]
   errors: FillIssue[]
-  /** Не мешают записи, но о них стоит знать (например, пропущенные нулевые записи). */
+  /** Не мешают записи, но о них стоит знать (пересчёт валюты, смена ставки, пропуски). */
   warnings: FillIssue[]
 }
 
@@ -87,15 +96,17 @@ export function clampName(name: string): string {
   return flat.length > MAX_ROW_NAME ? `${flat.slice(0, MAX_ROW_NAME - 1)}…` : flat
 }
 
-function priceFor(input: FillInput, rate: RateEntry): Pick<DraftRow, 'productId' | 'markupPercent' | 'markupSource' | 'price'> {
-  const productId = rate.productId ?? input.settings.defaultProductId ?? undefined
-  const chain = productId ? input.products.get(productId)?.sectionChain ?? [] : []
-  const markup = resolveMarkup(input.settings.markup, productId, chain)
+/**
+ * Цена часа: ставка → пересчёт в валюту счёта → наценка по тегам задачи. Округление до копеек —
+ * один раз, в конце (applyMarkup): двойное округление давало бы расхождение на копейки.
+ */
+function priceFor(input: FillInput, task: TaskInfo, rate: RateEntry): Pick<DraftRow, 'markupPercent' | 'markupSource' | 'markupTag' | 'price'> {
+  const markup = resolveMarkup(input.settings.markup, task.tags)
   return {
-    ...(productId ? { productId } : {}),
     markupPercent: markup.percent,
     markupSource: markup.source,
-    price: applyMarkup(rate.rate, markup.percent)
+    ...(markup.tag ? { markupTag: markup.tag } : {}),
+    price: applyMarkup(rate.rate * (input.conversion?.factor ?? 1), markup.percent)
   }
 }
 
@@ -103,12 +114,45 @@ function money(value: number): number {
   return Math.round(value * 100) / 100
 }
 
+function rateLabel(rate: RateEntry | null): string {
+  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}` : 'нет ставки'
+}
+
+/**
+ * Менялась ли ставка ответственного за период задачи (тип 1, решение владельца по #3: берём
+ * ставку на последнюю запись, но сообщаем о смене). Сравниваются версии ставки на даты всех
+ * записей со временем; «нет ставки» на ранние даты — тоже смена.
+ */
+function rateChangeWarning(input: FillInput, userId: number, dates: string[], applied: RateEntry): string | null {
+  const versions = new Map<string, RateEntry | null>()
+  for (const date of dates) {
+    const rate = findRate(input.rates, userId, date)
+    versions.set(rate ? rate.from : '', rate)
+  }
+  if (versions.size < 2) return null
+  const chain = [...versions.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, r]) => rateLabel(r))
+  return `ставка ${userLabel(input, userId)} менялась за время задачи: ${chain.join(' → ')}; применена ${applied.rate} — на дату последней записи`
+}
+
+/** Ноль после округления возможен только «к ближайшему» — но текст от направления не зависит. */
+function zeroAfterRounding(seconds: number): string {
+  return `время ${formatDuration(seconds)} после округления стало нулём — строка пропущена`
+}
+
+/** Ошибка «теги не прочитаны» по задаче или `null`. */
+function tagProblem(input: FillInput, task: TaskInfo): string | null {
+  const failure = input.tagFailures?.get(task.id)
+  return failure === undefined ? null : `теги задачи не прочитаны (${failure}) — не на что выбрать наценку`
+}
+
 function buildTaskRows(input: FillInput, result: FillResult): void {
-  const step = input.settings.rounding
+  const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
-    const entries = input.entries.filter(e => e.taskId === task.id)
+    const entries = input.entries.filter(e => e.taskId === task.id && e.seconds > 0)
     const total = entries.reduce((sum, e) => sum + e.seconds, 0)
     const problems: string[] = []
+    const tags = tagProblem(input, task)
+    if (tags) problems.push(tags)
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
     if (total === 0) {
@@ -116,20 +160,27 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
         ? 'журнал времени задачи не прочитан (нет доступа к записям времени?)'
         : 'в задаче нет затраченного времени')
     }
-    const lastDate = entries.map(e => e.date).filter((d): d is string => !!d).sort().at(-1) ?? null
+    const dates = [...new Set(entries.map(e => e.date).filter((d): d is string => !!d))].sort()
+    const lastDate = dates.at(-1) ?? null
     if (total > 0 && !lastDate) problems.push('у записей времени нет даты — не на что выбрать ставку')
     let rate: RateEntry | null = null
     if (task.responsibleId !== null && lastDate) {
       rate = findRate(input.rates, task.responsibleId, lastDate)
-      if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${lastDate}`)
+      if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(lastDate)}`)
     }
     if (problems.length || !rate || task.responsibleId === null || !lastDate) {
       for (const message of problems) result.errors.push({ taskId: task.id, message })
       continue
     }
-    const rounded = roundSeconds(total, step)
+    const changed = rateChangeWarning(input, task.responsibleId, dates, rate)
+    if (changed) result.warnings.push({ taskId: task.id, message: changed })
+    const rounded = roundSeconds(total, step, direction)
+    if (rounded === 0) {
+      result.warnings.push({ taskId: task.id, message: zeroAfterRounding(total) })
+      continue
+    }
     const quantity = secondsToHours(rounded)
-    const priced = priceFor(input, rate)
+    const priced = priceFor(input, task, rate)
     result.rows.push({
       key: `t${task.id}`,
       taskId: task.id,
@@ -147,8 +198,13 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
 }
 
 function buildTimeRows(input: FillInput, result: FillResult): void {
-  const step = input.settings.rounding
+  const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
+    const tags = tagProblem(input, task)
+    if (tags) {
+      result.errors.push({ taskId: task.id, message: tags })
+      continue
+    }
     const entries = input.entries.filter(e => e.taskId === task.id)
     if (entries.length === 0) {
       result.errors.push({ taskId: task.id, message: task.timeSpentInLogs > 0
@@ -168,15 +224,19 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
       let rate: RateEntry | null = null
       if (entry.userId !== null && entry.date) {
         rate = findRate(input.rates, entry.userId, entry.date)
-        if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${entry.date}`)
+        if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${formatRuDate(entry.date)}`)
       }
       if (problems.length || !rate || entry.userId === null || !entry.date) {
         for (const message of problems) result.errors.push({ taskId: task.id, entryId: entry.id, message })
         continue
       }
-      const rounded = roundSeconds(entry.seconds, step)
+      const rounded = roundSeconds(entry.seconds, step, direction)
+      if (rounded === 0) {
+        result.warnings.push({ taskId: task.id, entryId: entry.id, message: zeroAfterRounding(entry.seconds) })
+        continue
+      }
       const quantity = secondsToHours(rounded)
-      const priced = priceFor(input, rate)
+      const priced = priceFor(input, task, rate)
       result.rows.push({
         key: `e${entry.id}`,
         taskId: task.id,
@@ -206,6 +266,8 @@ export function buildRows(input: FillInput): FillResult {
   }
   if (input.mode === 'task') buildTaskRows(input, result)
   else buildTimeRows(input, result)
+  // Пересчёт валюты — первым предупреждением: он касается каждой цены в счёте.
+  if (input.conversion && result.rows.length) result.warnings.unshift({ taskId: 0, message: input.conversion.notice })
   return result
 }
 
@@ -231,9 +293,11 @@ export function rowsTotal(rows: DraftRow[]): number {
   return money(rows.reduce((sum, r) => sum + r.sum, 0))
 }
 
-/** Строка в формате crm.item.productrow.set / .add (поля — по документации метода). */
+/**
+ * Строка в формате crm.item.productrow.set / .add (поля — по документации метода). Товара
+ * каталога нет (#3): позиция — свободная, с названием, ценой и количеством.
+ */
 export interface ProductRowPayload {
-  productId?: number
   productName: string
   price: number
   quantity: number
@@ -244,7 +308,6 @@ export interface ProductRowPayload {
 /** Перевод строк в поля товарных позиций. `sortStart` — чтобы в режиме «добавить» идти после существующих. */
 export function toProductRows(rows: DraftRow[], settings: AppSettings, sortStart = 0): ProductRowPayload[] {
   return rows.map((row, i) => ({
-    ...(row.productId ? { productId: row.productId } : {}),
     productName: row.name,
     price: row.price,
     quantity: row.quantity,

@@ -34,16 +34,12 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
 /**
  * Что мешает заполнить счёт ещё до чтения задач. Пусто — можно продолжать.
  *
- * ⚠ Валюта: ставки хранятся в одной валюте (настройка), конвертации в приложении нет. Счёт в
- * другой валюте — остановка, а не пересчёт по неизвестному курсу.
+ * Валюта счёта, отличная от валюты ставок, — НЕ помеха (#3): цены пересчитываются по курсу
+ * портала (currency.ts), а если курса нет — остановка там же.
  */
 export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, source: TaskSource): string[] {
   const problems: string[] = []
-  if (!settings.currency) {
-    problems.push('В настройках приложения не выбрана валюта ставок')
-  } else if (invoice.currencyId && invoice.currencyId !== settings.currency) {
-    problems.push(`Валюта счёта ${invoice.currencyId} не совпадает с валютой ставок ${settings.currency}`)
-  }
+  if (!settings.currency) problems.push('В настройках приложения не выбрана валюта ставок')
   if (source === 'deal' && invoice.dealId === null) {
     problems.push('Счёт не связан со сделкой — выберите задачи, привязанные к самому счёту')
   }

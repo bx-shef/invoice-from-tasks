@@ -1,36 +1,53 @@
 import { describe, expect, it } from 'vitest'
-import { applyMarkup, normalizePercent, resolveMarkup, type MarkupSettings } from '#shared/domain/markup'
+import { applyMarkup, cleanTag, normalizePercent, normalizeTag, resolveMarkup, type MarkupSettings } from '#shared/domain/markup'
 
-// Пример из ТЗ: на всё 70 %, папка ЧЧ1 — 20 %, папка ЧЧ2 — 120 %, товар 1 — 25 %.
+// Решение по #3: на всё 70 %, тег «ЧЧ1» — 20 %, тег «ЧЧ2» — 120 %; порядок правил — приоритет.
 const settings: MarkupSettings = {
   defaultPercent: 70,
-  sections: [{ id: 11, name: 'ЧЧ1', percent: 20 }, { id: 12, name: 'ЧЧ2', percent: 120 }],
-  products: [{ id: 1, name: 'Товар 1', percent: 25 }]
+  tags: [{ tag: 'ЧЧ1', percent: 20 }, { tag: 'ЧЧ2', percent: 120 }]
 }
 
-describe('resolveMarkup — от частного к общему', () => {
-  it('правило товара сильнее правила папки', () => {
-    expect(resolveMarkup(settings, 1, [11])).toEqual({ percent: 25, source: 'product', ruleId: 1 })
+describe('resolveMarkup — первое совпадение по тегам задачи', () => {
+  it('срабатывает правило, чей тег есть у задачи', () => {
+    expect(resolveMarkup(settings, ['ЧЧ2'])).toEqual({ percent: 120, source: 'tag', tag: 'ЧЧ2' })
   })
 
-  it('ближайшая папка сильнее родительской', () => {
-    // Товар лежит в ЧЧ2, а ЧЧ2 — внутри ЧЧ1.
-    expect(resolveMarkup(settings, 5, [12, 11])).toEqual({ percent: 120, source: 'section', ruleId: 12 })
+  it('два подходящих тега — побеждает правило выше в списке, а не порядок тегов в задаче', () => {
+    expect(resolveMarkup(settings, ['ЧЧ2', 'ЧЧ1'])).toEqual({ percent: 20, source: 'tag', tag: 'ЧЧ1' })
+    const reversed: MarkupSettings = { ...settings, tags: [...settings.tags].reverse() }
+    expect(resolveMarkup(reversed, ['ЧЧ1', 'ЧЧ2'])).toEqual({ percent: 120, source: 'tag', tag: 'ЧЧ2' })
   })
 
-  it('правило родительской папки действует на вложенные', () => {
-    expect(resolveMarkup(settings, 5, [99, 11])).toEqual({ percent: 20, source: 'section', ruleId: 11 })
+  it('регистр, пробелы и # не мешают совпадению', () => {
+    expect(resolveMarkup(settings, ['  чч1 '])).toMatchObject({ percent: 20, source: 'tag' })
+    expect(resolveMarkup({ ...settings, tags: [{ tag: '#Срочно', percent: 50 }] }, ['срочно'])).toMatchObject({ percent: 50 })
   })
 
-  it('папки проверяются по цепочке по порядку: первое совпадение побеждает', () => {
-    // Цепочка без правил на ближних уровнях: правило найдётся на третьем.
-    expect(resolveMarkup(settings, 5, [98, 99, 12, 11])).toEqual({ percent: 120, source: 'section', ruleId: 12 })
-    expect(resolveMarkup(settings, 5, [])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
+  it('без тегов и без совпадений — наценка «на всё»', () => {
+    expect(resolveMarkup(settings, [])).toEqual({ percent: 70, source: 'default' })
+    expect(resolveMarkup(settings, ['другое'])).toEqual({ percent: 70, source: 'default' })
+    // Тег — подстрока правила, а не совпадение.
+    expect(resolveMarkup(settings, ['ЧЧ'])).toEqual({ percent: 70, source: 'default' })
   })
 
-  it('без товара и без совпадений — наценка «на всё»', () => {
-    expect(resolveMarkup(settings, undefined, [11])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
-    expect(resolveMarkup(settings, 5, [99])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
+  it('правило с нулевой наценкой — тоже совпадение (не проваливается в «на всё»)', () => {
+    expect(resolveMarkup({ defaultPercent: 70, tags: [{ tag: 'без наценки', percent: 0 }] }, ['Без наценки']))
+      .toEqual({ percent: 0, source: 'tag', tag: 'без наценки' })
+  })
+})
+
+describe('cleanTag', () => {
+  it('убирает # и лишние пробелы, регистр сохраняет', () => {
+    expect(cleanTag('  ##Важный   Клиент ')).toBe('Важный Клиент')
+    expect(cleanTag(null)).toBe('')
+  })
+})
+
+describe('normalizeTag', () => {
+  it('убирает #, лишние пробелы и регистр; мусор — пустая строка', () => {
+    expect(normalizeTag('  ##Важный   Клиент ')).toBe('важный клиент')
+    expect(normalizeTag(42)).toBe('')
+    expect(normalizeTag('#')).toBe('')
   })
 })
 
