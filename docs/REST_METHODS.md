@@ -23,13 +23,13 @@
 
 | Метод | Транспорт | Файл | Назначение, грабли | Статус |
 |---|---|---|---|---|
-| `crm.item.get` | фрейм | `useInvoiceFill.ts` | Счёт: `entityTypeId = 31`. Сделка — в `parentId2`, валюта — `currencyId`. | 📄 |
+| `crm.item.get` | фрейм | `useInvoiceFill.ts` | Счёт: `entityTypeId = 31`. Сделка — в `parentId2` (статья MCP «Счета: обзор методов и событий»: «Передавайте ID сделки в параметре `parentId2`»), валюта — `currencyId`. | 📄 |
 | `crm.item.productrow.list` | фрейм | `useInvoiceFill.ts` | Существующие позиции: фильтр `=ownerType: 'SI'`, `=ownerId`. | 📄 |
 | `crm.item.productrow.set` | фрейм | `useInvoiceFill.ts` | Режим «заменить»: ЗАМЕНЯЕТ все позиции переданным набором. | 📄 |
-| `crm.item.productrow.add` | фрейм, batch | `useInvoiceFill.ts` | Режим «добавить»: по одной позиции, остальные не трогает. ⚠ `set` для этого не годится: у позиции без переданной цены цена станет 0 (документация `set`). | 📄 |
+| `crm.item.productrow.add` | фрейм, batch | `useInvoiceFill.ts` | Режим «добавить»: по одной позиции, остальные не трогает. ⚠ `set` для этого не годится: у позиции без переданной цены цена станет 0 (документация `set`). Пакет — с остановкой на первой ошибке; после сбоя счёт перечитывается, и сотрудник видит «добавлено N из M» (`docs/PROCESSING.md`). | 📄 |
 | `crm.currency.list` | фрейм | `SettingsGeneral.vue` | Список валют для «валюты ставок»: `CURRENCY`, `FULL_NAME`. | 📄 |
 | `crm.activity.todo.add` | фрейм | `useInvoiceFill.ts`, параметры — `shared/domain/activity.ts` | Ответ консультации делом в счёте (`ownerTypeId = 31`). Схема — как в ai-price-import (там проверено вживую). | 📄 |
-| `crm.activity.update` | фрейм | `useInvoiceFill.ts` | Сразу после `todo.add`: `DESCRIPTION_TYPE = 3` (BB), иначе переносы строк ответа слипаются. У `todo.add` такого параметра нет. Метод помечен устаревшим, но другого пути нет — так делает и ai-price-import. | 📄 |
+| `crm.activity.update` | фрейм | `useInvoiceFill.ts` | Сразу после `todo.add`: `DESCRIPTION_TYPE = 3`, иначе переносы строк ответа слипаются. У `todo.add` такого параметра нет. Метод помечен устаревшим, но другого пути нет — так делает и ai-price-import. ⚠ Документация и замер расходятся: по `crm.enum.contenttype` 3 — это HTML, а замер ai-price-import (06.08.2026) показал, что при 3 BB-разметка отрисовывается, а при 2 — видна исходником. Следуем замеру и обезвреживаем в тексте и BB-, и HTML-скобки (`shared/domain/activity.ts`). | 📄 |
 
 ## Задачи (право `task`)
 
@@ -68,9 +68,10 @@
 |---|---|---|---|---|
 | `app.option.get` | фрейм; сервер: фрейм-токен | `useAppSettings.ts`, `server/utils/options.ts` | Чтение настроек и ставок. Доступно любому сотруднику. Без `option` — все опции (нужно для подсчёта места). | 📄 |
 | `app.option.set` | сервер: фрейм-токен (админ) / установщик (редактор ставок) | `server/api/settings.post.ts`, `server/api/rates.post.ts` | ⚠ **Только администратор** («Administrator authorization required» — документация). Поэтому не-администратора из списка редакторов ставок сервер пишет токеном установщика. Размер не документирован — см. `docs/SETTINGS.md`. | 📄 |
-| `app.info` | сервер: фрейм-токен | `server/utils/frameAuth.ts` | `CODE` — принадлежит ли фрейм-токен нашему приложению (если задан `B24_APP_CODE`). | 📄 |
+| `app.info` | сервер: фрейм-токен; фрейм | `server/utils/frameAuth.ts`, `pages/install.vue` | `CODE` — принадлежит ли фрейм-токен нашему приложению. Сверяется с `B24_APP_CODE` всегда: без переменной сервер отвечает 503, а не пропускает проверку. Страница установки показывает `CODE`, чтобы администратор сервера знал, что вписать. | 📄 |
 | `profile` | фрейм; сервер: фрейм-токен | `useAppSettings.ts`, `server/utils/frameAuth.ts` | Кто пришёл: `ID`, `ADMIN`. Этим флагом сервер решает, пускать ли к записи настроек. | 📄 |
 | `scope` | фрейм | `pages/install.vue` | Какие права выданы — установка показывает недостающие. | 📄 |
+| `batch` | фрейм | `useB24.ts` | Пакет до 50 команд (`actions.v2.batch.make`, документация `rest.batch`). Для записи — `isHaltOnError: true` (параметр `halt`): после первой ошибки портал не выполняет остальное, а ответов приходит меньше, чем команд, — `batch()` это ловит и бросает. | 📄 |
 
 ## Встройки и события (право `placement`, базовое)
 
@@ -84,8 +85,17 @@
 
 ## Не REST, но рядом
 
+- `crm.enum.contenttype` — справочник типов описания дела; не вызываем, на него ссылается
+  комментарий о расхождении документации и замера (`crm.activity.update` выше).
 - `$b24.installFinish()`, `$b24.parent.setTitle()`, `$b24.dialog.selectUser(s)()`,
   `$b24.placement.options` — методы фрейма b24jssdk (документация: `https://bitrix24.github.io/b24jssdk/llms.txt`).
-- `https://oauth.bitrix.info/oauth/token/` — обновление токена при установке для сверки member_id
-  (`server/utils/verifyInstallMember.ts`); хост фиксированный.
+- `https://oauth.bitrix24.tech/oauth/token/` — продление токена: при установке — для сверки
+  `member_id` и домена (`server/utils/verifyInstallMember.ts`), для токена установщика — внутри
+  b24jssdk (`server/utils/b24Client.ts`, `OAUTH_SERVER_ENDPOINT`). Хост — по текущей документации
+  («Автоматическое продление токенов OAuth 2.0», «Коды ошибок сервера авторизации»); эталон
+  использовал прежний `oauth.bitrix.info`. Хост фиксированный, из запроса не берётся. 📄
+- В ответе продления `client_endpoint` — REST-адрес **портала**, а `domain` — хост **сервера
+  авторизации**. Домен установки сверяем по `client_endpoint`.
+- `keepAuthFresh` из документации b24jssdk в установленной 2.2.0 нет — токен фрейма перед
+  запросом к нашему серверу обновляем сами (`app/utils/frameToken.ts`, `docs/ARCHITECTURE.md`).
 - `https://vibecode.bitrix24.tech/v1` — BitrixGPT (OpenAI-совместимый AI Router Вайбкода), `server/utils/llm.ts`.

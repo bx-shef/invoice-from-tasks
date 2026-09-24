@@ -58,7 +58,10 @@ function sources(dir: string): string[] {
  * ⚠ Ищем по префиксам модулей, которые мы зовём; новый модуль — новый префикс здесь, иначе
  * метод пройдёт мимо реестра. Лучше лишнее совпадение, чем пропуск.
  */
-const METHOD_RE = /'((?:crm|tasks?|catalog|user|app|placement|event)\.[a-z][\w.]*|profile|scope)'/g
+// Имена методов — в одинарных кавычках или обратных (строки кода, шаблоны, ссылки в комментариях).
+// Двойные не берём: в шаблонах Vue это выражения (`"app.loaded.value"`), а не имена методов.
+// Пространства имён — с запасом: новый вызов из соседнего модуля тоже должен попасть в реестр.
+const METHOD_RE = /['`]((?:crm|tasks?|catalog|user|app|placement|event|department|im|imbot|disk|entity|lists|sale|timeman|bizproc|calendar|sonet_group|documentgenerator|landing|ai|server|userfieldtype|biconnector)\.[a-z][a-z0-9_.]*[a-z0-9]|profile|scope|methods|batch)['`]/g
 
 describe('реестр REST-методов (docs/REST_METHODS.md)', () => {
   it('каждый метод, который зовёт код, описан в реестре', () => {

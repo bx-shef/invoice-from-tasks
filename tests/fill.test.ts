@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyNames, buildRows, rowsTotal, toProductRows, type FillInput } from '#shared/domain/fill'
+import { applyNames, buildRows, clampName, MAX_ROW_NAME, rowsTotal, toProductRows, type FillInput } from '#shared/domain/fill'
 import { defaultSettings, type AppSettings } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 
@@ -129,6 +129,16 @@ describe('общие правила', () => {
   it('длинное название обрезается до 255 символов', () => {
     const { rows } = buildRows(input({ tasks: [{ ...task, title: 'а'.repeat(400) }] }))
     expect(rows[0]?.name).toHaveLength(255)
+  })
+
+  it('clampName: ровно предел — без изменений, на символ больше — с многоточием', () => {
+    expect(MAX_ROW_NAME).toBe(255)
+    const exact = 'я'.repeat(MAX_ROW_NAME)
+    expect(clampName(exact)).toBe(exact)
+    const over = clampName(`${exact}ы`)
+    expect(over).toHaveLength(MAX_ROW_NAME)
+    expect(over.endsWith('…')).toBe(true)
+    expect(clampName('  две\n строки\t ')).toBe('две строки')
   })
 })
 

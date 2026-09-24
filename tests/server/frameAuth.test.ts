@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { extractFrameAuth, isAuthRejection, resetFrameCache, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { extractFrameAuth, isAuthRejection, resetFrameCache, VERIFY_CACHE_MS, verifyFrame, type VerifyDeps } from '../../server/utils/frameAuth'
 import { saveInstall, type KeyValue } from '../../server/utils/tokenStore'
+
+const APP = 'local.ours'
 
 function memoryKv(): KeyValue {
   const data = new Map<string, unknown>()
@@ -16,9 +18,18 @@ function headers(map: Record<string, string>) {
   return { get: (name: string) => map[name] ?? null }
 }
 
+/** Портал отвечает как настоящий: `profile` — сотрудник, `app.info` — наше приложение. */
+function portal(profile: Record<string, unknown> = { ID: '7' }, code = APP) {
+  return vi.fn(async (_d: string, _t: string, method: string) => (method === 'profile' ? profile : { CODE: code }))
+}
+
 beforeEach(() => {
   vi.stubEnv('B24_TOKEN_ENC_KEY', randomBytes(32).toString('hex'))
   resetFrameCache()
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 async function installedKv(): Promise<KeyValue> {
@@ -33,61 +44,101 @@ describe('extractFrameAuth', () => {
       .toEqual({ domain: 'demo.bitrix24.ru', accessToken: 'tok' })
   })
 
-  it('чужой домен или нет токена — null', () => {
+  it('чужой домен, нет токена или не Bearer — null', () => {
     expect(extractFrameAuth(headers({ 'authorization': 'Bearer tok', 'x-b24-domain': 'evil.com' }), {})).toBeNull()
     expect(extractFrameAuth(headers({ 'x-b24-domain': 'demo.bitrix24.ru' }), {})).toBeNull()
+    expect(extractFrameAuth(headers({ 'authorization': 'Basic tok', 'x-b24-domain': 'demo.bitrix24.ru' }), {})).toBeNull()
   })
 })
 
 describe('verifyFrame', () => {
   const auth = { domain: 'demo.bitrix24.ru', accessToken: 'tok' }
 
+  it('без B24_APP_CODE — 503, а не пропуск проверки; в портал не ходим', async () => {
+    const call = portal()
+    const res = await verifyFrame(auth, { kv: await installedKv(), call, appCode: '' })
+    expect(res).toMatchObject({ ok: false, status: 503 })
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('портал без установки — 409, в портал даже не ходим', async () => {
-    const call = vi.fn()
-    const res = await verifyFrame(auth, { kv: memoryKv(), call })
+    const call = portal()
+    const res = await verifyFrame(auth, { kv: memoryKv(), call, appCode: APP })
     expect(res).toMatchObject({ ok: false, status: 409 })
     expect(call).not.toHaveBeenCalled()
   })
 
   it('пользователь и признак администратора — из profile', async () => {
-    const res = await verifyFrame(auth, { kv: await installedKv(), call: async () => ({ ID: '7', ADMIN: true }) })
+    const res = await verifyFrame(auth, { kv: await installedKv(), call: portal({ ID: '7', ADMIN: true }), appCode: APP })
     expect(res).toMatchObject({ ok: true, user: { userId: 7, isAdmin: true } })
   })
 
+  it('ADMIN строкой "true" — не администратор (строгая проверка)', async () => {
+    const res = await verifyFrame(auth, { kv: await installedKv(), call: portal({ ID: '7', ADMIN: 'true' }), appCode: APP })
+    expect(res).toMatchObject({ ok: true, user: { isAdmin: false } })
+  })
+
+  it('profile без сотрудника — 401', async () => {
+    expect(await verifyFrame(auth, { kv: await installedKv(), call: portal({}), appCode: APP })).toMatchObject({ ok: false, status: 401 })
+  })
+
   it('токен чужого приложения на том же портале — 403', async () => {
-    const deps: VerifyDeps = {
-      kv: await installedKv(),
-      appCode: 'local.ours',
-      call: async (_d, _t, method) => (method === 'profile' ? { ID: 7 } : { CODE: 'local.other' })
-    }
+    const deps: VerifyDeps = { kv: await installedKv(), appCode: APP, call: portal({ ID: 7 }, 'local.other') }
     expect(await verifyFrame(auth, deps)).toMatchObject({ ok: false, status: 403 })
+  })
+
+  it('исчерпан лимит живых проверок — 429 и в портал не ходим; решение из кэша лимит не тратит', async () => {
+    const kv = await installedKv()
+    const call = portal()
+    expect(await verifyFrame(auth, { kv, call, appCode: APP, allowLiveCheck: () => false })).toMatchObject({ ok: false, status: 429 })
+    expect(call).not.toHaveBeenCalled()
+    const allow = vi.fn(() => true)
+    await verifyFrame(auth, { kv, call, appCode: APP, allowLiveCheck: allow })
+    await verifyFrame(auth, { kv, call, appCode: APP, allowLiveCheck: () => false })
+    expect(allow).toHaveBeenCalledTimes(1)
   })
 
   it('отвергнутый токен — 401, сбой портала — 502', async () => {
     const kv = await installedKv()
-    expect(await verifyFrame(auth, { kv, call: async () => {
+    expect(await verifyFrame(auth, { kv, appCode: APP, call: async () => {
       throw new Error('expired_token: The access token provided has expired')
     } })).toMatchObject({ status: 401 })
     resetFrameCache()
-    expect(await verifyFrame(auth, { kv, call: async () => {
+    expect(await verifyFrame(auth, { kv, appCode: APP, call: async () => {
       throw new Error('ECONNRESET')
     } })).toMatchObject({ status: 502 })
   })
 
-  it('кэширует решение по токену на минуту', async () => {
-    const call = vi.fn(async () => ({ ID: 7 }))
+  it('сбой портала не кэшируется: следующий запрос проверяет заново', async () => {
+    const kv = await installedKv()
+    let fail = true
+    const call = vi.fn(async (_d: string, _t: string, method: string) => {
+      if (fail) throw new Error('ECONNRESET')
+      return method === 'profile' ? { ID: 7 } : { CODE: APP }
+    })
+    expect(await verifyFrame(auth, { kv, call, appCode: APP })).toMatchObject({ status: 502 })
+    fail = false
+    expect(await verifyFrame(auth, { kv, call, appCode: APP })).toMatchObject({ ok: true })
+  })
+
+  it('кэширует решение по токену ровно на VERIFY_CACHE_MS', async () => {
+    const call = portal()
     const kv = await installedKv()
     let now = 1_000
-    await verifyFrame(auth, { kv, call, now: () => now })
-    await verifyFrame(auth, { kv, call, now: () => now })
-    expect(call).toHaveBeenCalledTimes(1)
-    now += 61_000
-    await verifyFrame(auth, { kv, call, now: () => now })
+    const deps = { kv, call, appCode: APP, now: () => now }
+    await verifyFrame(auth, deps)
+    now += VERIFY_CACHE_MS - 1
+    await verifyFrame(auth, deps)
+    // Два вызова на проверку (profile + app.info), и только одна проверка.
     expect(call).toHaveBeenCalledTimes(2)
+    now += 1
+    await verifyFrame(auth, deps)
+    expect(call).toHaveBeenCalledTimes(4)
   })
 
   it('isAuthRejection отличает отказ от сбоя', () => {
     expect(isAuthRejection('NO_AUTH_FOUND: Wrong authorization data')).toBe(true)
+    expect(isAuthRejection('frame token rejected')).toBe(true)
     expect(isAuthRejection('503 Service Unavailable')).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
-// Привязка member_id при установке (защита от «отравления установки»). Перенесено из
-// client-bank-alfa-by (server/utils/verifyInstallMember.ts, #162 там).
+// Привязка member_id и домена при установке (защита от «отравления установки»). Перенесено из
+// client-bank-alfa-by (server/utils/verifyInstallMember.ts, #162 там) и дополнено сверкой домена.
 //
 // Суть угрозы: member_id в ONAPPINSTALL — поле, которое присылает клиент, а application_token
 // общий для всех установок приложения. Установив наше приложение на СВОЙ портал, злоумышленник
@@ -8,9 +8,20 @@
 // Битрикс24 — ответ несёт НАСТОЯЩИЙ member_id этого гранта, и он обязан совпасть с заявленным.
 // Обновление РОТИРУЕТ токен: сохранять нужно вернувшийся грант, присланный уже истрачен.
 //
-// Хост OAuth фиксированный (не из запроса) — SSRF здесь нет; секреты идут в теле, не в URL.
+// ⚠ Домен сверяется так же, как member_id. Эталон сверял только member_id, и /code-review
+// этого PR нашёл обход: злоумышленник присылает СВОЙ member_id и свой грант (сверка проходит), но
+// `auth[domain]` жертвы — и индекс «домен → портал» начинает указывать на его запись. Настоящий
+// домен гранта — хост `client_endpoint` из ответа OAuth: документация («Автоматическое продление
+// токенов OAuth 2.0») называет его «адрес REST-интерфейса портала». ⚠ Поле `domain` того же
+// ответа — хост СЕРВЕРА АВТОРИЗАЦИИ (`oauth.bitrix24.tech` в примере документации), не портала:
+// сверять по нему нельзя.
+//
+// Хост OAuth фиксированный (не из запроса) — SSRF здесь нет; секреты идут в теле, не в URL
+// (документация показывает GET со строкой запроса, тело принимается — проверено авторами
+// b24jssdk, oauth/auth.mjs; так же шлёт и сам SDK).
 
-const OAUTH_TOKEN_URL = 'https://oauth.bitrix.info/oauth/token/'
+/** Адрес продления токена — по текущей документации; эталон использовал прежний `oauth.bitrix.info`. */
+export const OAUTH_TOKEN_URL = 'https://oauth.bitrix24.tech/oauth/token/'
 export const INSTALL_VERIFY_TIMEOUT_MS = 15_000
 
 /** Коды OAuth, означающие «грант поддельный» → 403. Остальное — «не можем проверить» → 503. */
@@ -45,19 +56,36 @@ export interface RefreshedGrant {
   accessToken: string
   refreshToken: string
   expiresIn: number
+  /** Хост портала из `client_endpoint` гранта — настоящий домен установки. */
+  domain: string
+}
+
+/** Хост из `client_endpoint` (`https://x.bitrix24.ru/rest/` → `x.bitrix24.ru`); `''` — не разобрать. */
+export function endpointHost(endpoint: unknown): string {
+  if (typeof endpoint !== 'string' || !endpoint) return ''
+  try {
+    return new URL(endpoint).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
 }
 
 export interface InstallMemberResult {
   ok: boolean
-  /** 403 — member_id не совпал / грант поддельный; 503 — проверить сейчас нельзя. */
+  /** 403 — member_id или домен не совпали / грант поддельный; 503 — проверить сейчас нельзя. */
   status?: 403 | 503
   grant?: RefreshedGrant
 }
 
-/** Сверяет заявленный member_id с настоящим из OAuth-гранта. Никогда не бросает. */
-export async function verifyInstallMember(claimedMemberId: string, refreshToken: string, refresh: (rt: string) => Promise<unknown>): Promise<InstallMemberResult> {
+/**
+ * Сверяет заявленные member_id и домен с настоящими из OAuth-гранта. Никогда не бросает.
+ *
+ * @param claimedDomain домен из события, уже нормализованный SSRF-гардом (`assertPortalHost`)
+ */
+export async function verifyInstallMember(claimedMemberId: string, claimedDomain: string, refreshToken: string, refresh: (rt: string) => Promise<unknown>): Promise<InstallMemberResult> {
   const claimed = claimedMemberId.trim().toLowerCase()
-  if (!claimed || !refreshToken) return { ok: false, status: 403 }
+  const claimedHost = claimedDomain.trim().toLowerCase()
+  if (!claimed || !claimedHost || !refreshToken) return { ok: false, status: 403 }
   let raw: unknown
   try {
     raw = await refresh(refreshToken)
@@ -70,15 +98,18 @@ export async function verifyInstallMember(claimedMemberId: string, refreshToken:
     return { ok: false, status: GRANT_REJECTION_CODES.has(String(o.error)) ? 403 : 503 }
   }
   const authoritative = String(o.member_id ?? '').trim().toLowerCase()
-  if (!authoritative) return { ok: false, status: 503 }
-  if (authoritative !== claimed) return { ok: false, status: 403 }
+  const authoritativeHost = endpointHost(o.client_endpoint)
+  // Нет member_id или адреса портала в ответе — сверять нечем: «не можем проверить», а не «принять».
+  if (!authoritative || !authoritativeHost) return { ok: false, status: 503 }
+  if (authoritative !== claimed || authoritativeHost !== claimedHost) return { ok: false, status: 403 }
   const expiresIn = Number(o.expires_in)
   return {
     ok: true,
     grant: {
       accessToken,
       refreshToken: typeof o.refresh_token === 'string' ? o.refresh_token : '',
-      expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600
+      expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600,
+      domain: authoritativeHost
     }
   }
 }

@@ -29,6 +29,10 @@ const modeItems = [
 ]
 
 const busy = computed(() => ['loading', 'collecting', 'writing'].includes(fill.step.value))
+
+// Сменили источник или тип — собранные строки к новым настройкам не относятся: сбрасываем
+// предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
+watch([source, mode], () => fill.reset())
 const result = computed(() => fill.result.value)
 
 onMounted(async () => {
@@ -162,8 +166,9 @@ async function consult(promptId: string) {
           :user-label="users.label"
         />
 
+        <!-- Во время записи кнопки остаются на месте: иначе индикатор загрузки некому показать. -->
         <div
-          v-if="fill.canWrite.value"
+          v-if="fill.canWrite.value || fill.step.value === 'writing'"
           class="flex flex-wrap gap-3"
         >
           <B24Button
@@ -187,6 +192,11 @@ async function consult(promptId: string) {
           color="air-primary-success"
           title="Готово"
           description="Строки записаны в счёт. Обновите карточку счёта, чтобы увидеть их."
+        />
+        <B24Alert
+          v-if="fill.notice.value"
+          color="air-primary-warning"
+          :description="fill.notice.value"
         />
 
         <B24Card v-if="app.settings.value.consultPrompts.length">

@@ -5,9 +5,12 @@
 //   1) домен проходит SSRF-гард и должен принадлежать установке из нашего хранилища —
 //      иначе ключ BitrixGPT был бы открыт любому порталу Битрикс24;
 //   2) токен проверяется живым вызовом `profile` (кто это и администратор ли он);
-//   3) если задан `B24_APP_CODE`, токен обязан принадлежать НАШЕМУ приложению (`app.info.CODE`):
-//      фрейм-токен чужого приложения на том же портале тоже прошёл бы `profile`.
-// Схема — как в эталонах (resolveFrameMember.ts / settingsHandler.ts), плюс пункт 3.
+//   3) токен обязан принадлежать НАШЕМУ приложению (`app.info.CODE` = `B24_APP_CODE`): фрейм-токен
+//      чужого приложения на том же портале тоже прошёл бы `profile`. Без `B24_APP_CODE` сервер
+//      отказывает (503), а не пропускает проверку — находка отдела безопасности панели;
+//   4) живые проверки ограничены по частоте (`allowLiveCheck`): поток случайных токенов иначе
+//      гонял бы наш сервер вызовами `profile` в чужой портал без меры.
+// Схема — как в эталонах (resolveFrameMember.ts / settingsHandler.ts), плюс пункты 3–4.
 
 import { createHash } from 'node:crypto'
 import { assertPortalHost } from './b24Host'
@@ -26,7 +29,7 @@ export interface FrameUser {
 
 export type FrameVerdict
   = | { ok: true, user: FrameUser }
-    | { ok: false, status: 400 | 401 | 403 | 409 | 502, error: string }
+    | { ok: false, status: 400 | 401 | 403 | 409 | 429 | 502 | 503, error: string }
 
 /** Заголовки запроса → домен и токен. `null` — чего-то нет или домен не портал Битрикс24. */
 export function extractFrameAuth(headers: { get: (name: string) => string | null | undefined }, env?: Record<string, string | undefined>): FrameAuth | null {
@@ -45,8 +48,10 @@ export interface VerifyDeps {
   kv: KeyValue
   /** REST-вызов от имени фрейм-токена (b24Client.makeFrameCall). */
   call: (domain: string, accessToken: string, method: string) => Promise<unknown>
-  /** Код нашего приложения; пусто — проверка принадлежности токена пропускается (разработка). */
-  appCode?: string
+  /** Код нашего приложения (`B24_APP_CODE`); пусто — отказ 503, а не пропуск проверки. */
+  appCode: string
+  /** Можно ли сейчас сходить в портал с живой проверкой; `false` — 429. По умолчанию — можно. */
+  allowLiveCheck?: () => boolean
   now?: () => number
 }
 
@@ -70,6 +75,7 @@ export function isAuthRejection(message: string): boolean {
 }
 
 export async function verifyFrame(auth: FrameAuth, deps: VerifyDeps): Promise<FrameVerdict> {
+  if (!deps.appCode) return { ok: false, status: 503, error: 'server not configured: B24_APP_CODE' }
   const now = deps.now?.() ?? Date.now()
   const key = cacheKey(auth)
   const hit = cache.get(key)
@@ -77,6 +83,7 @@ export async function verifyFrame(auth: FrameAuth, deps: VerifyDeps): Promise<Fr
 
   const portal = await getPortalByDomain(deps.kv, auth.domain)
   if (!portal) return { ok: false, status: 409, error: 'portal not installed' }
+  if (deps.allowLiveCheck && !deps.allowLiveCheck()) return { ok: false, status: 429, error: 'too many token checks' }
 
   let verdict: FrameVerdict
   try {
@@ -84,13 +91,11 @@ export async function verifyFrame(auth: FrameAuth, deps: VerifyDeps): Promise<Fr
     const userId = Number(profile?.ID)
     if (!Number.isInteger(userId) || userId <= 0) {
       verdict = { ok: false, status: 401, error: 'profile has no user' }
-    } else if (deps.appCode) {
+    } else {
       const info = await deps.call(auth.domain, auth.accessToken, 'app.info') as { CODE?: unknown } | null
       verdict = String(info?.CODE ?? '') === deps.appCode
         ? { ok: true, user: { userId, isAdmin: profile?.ADMIN === true, portal } }
         : { ok: false, status: 403, error: 'token belongs to another application' }
-    } else {
-      verdict = { ok: true, user: { userId, isAdmin: profile?.ADMIN === true, portal } }
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

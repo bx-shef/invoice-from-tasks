@@ -32,11 +32,33 @@ function positiveInt(value: unknown): number | null {
   return Number.isInteger(n) && n > 0 ? n : null
 }
 
-/** Денежное значение ставки: конечное, неотрицательное, не больше {@link MAX_RATE}, 2 знака. */
+/**
+ * Денежное значение ставки: конечное, БОЛЬШЕ нуля, не больше {@link MAX_RATE}, 2 знака.
+ *
+ * ⚠ Ноль — не ставка. Новая строка в таблице ставок начинается с 0, и пустое поле тоже даёт 0:
+ * пропусти такую строку проверка — сотрудник молча выставлялся бы в счёт бесплатно, вместо
+ * ошибки «нет ставки» (находка /code-review этого PR).
+ */
 export function normalizeRate(value: unknown): number | null {
   const n = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
-  if (!Number.isFinite(n) || n < 0 || n > MAX_RATE) return null
-  return Math.round(n * 100) / 100
+  if (!Number.isFinite(n) || n <= 0 || n > MAX_RATE) return null
+  const rounded = Math.round(n * 100) / 100
+  return rounded > 0 ? rounded : null
+}
+
+/**
+ * Записи ставок из тела запроса — только объекты; иначе `null` (400/422, а не падение на
+ * `null.userId` в проверке — находка /code-review). Поля не нормализуются: это делает проверка.
+ */
+export function coerceRateEntries(raw: unknown): RateEntry[] | null {
+  if (!Array.isArray(raw)) return null
+  if (raw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return null
+  return raw.map((item) => {
+    const o = item as Record<string, unknown>
+    const entry: RateEntry = { userId: Number(o.userId), rate: Number(o.rate), from: String(o.from ?? '') }
+    if (o.productId !== undefined && o.productId !== null) entry.productId = Number(o.productId)
+    return entry
+  })
 }
 
 /**
@@ -94,7 +116,7 @@ export function validateRates(entries: RateEntry[]): RateIssue[] {
   const seen = new Map<string, number>()
   entries.forEach((e, index) => {
     if (positiveInt(e.userId) === null) issues.push({ index, message: 'Не выбран сотрудник' })
-    if (normalizeRate(e.rate) === null) issues.push({ index, message: `Ставка должна быть числом от 0 до ${MAX_RATE}` })
+    if (normalizeRate(e.rate) === null) issues.push({ index, message: `Ставка должна быть больше 0 и не больше ${MAX_RATE}` })
     if (!isIsoDate(e.from)) issues.push({ index, message: 'Дата начала должна быть в формате ГГГГ-ММ-ДД' })
     if (e.productId !== undefined && positiveInt(e.productId) === null) issues.push({ index, message: 'Некорректный товар' })
     const key = `${e.userId}|${e.from}`

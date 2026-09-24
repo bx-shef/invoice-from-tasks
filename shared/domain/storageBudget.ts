@@ -117,9 +117,12 @@ export function storageUsage(options: Record<string, string>): StorageUsage {
   }
 }
 
-/** Подпись для индикатора в настройках: «1,2 из 1,4 КБ». */
+/**
+ * Подпись для индикатора в настройках: «1,2 из 1,4 КБ». Без `toLocaleString`: его вывод зависит
+ * от ICU среды (в урезанной сборке Node — «1.2»), а подпись должна быть одинаковой везде.
+ */
 export function formatUsage(usage: StorageUsage): string {
-  const kb = (n: number) => (n / 1024).toLocaleString('ru-RU', { maximumFractionDigits: 1, minimumFractionDigits: 1 })
+  const kb = (n: number) => (n / 1024).toFixed(1).replace('.', ',')
   return `${kb(usage.bytes)} из ${kb(usage.budget)} КБ`
 }
 

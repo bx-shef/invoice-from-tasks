@@ -24,6 +24,8 @@ const steps = ref<Step[]>([
 ])
 const fatal = ref('')
 const done = ref(false)
+/** Код приложения (`app.info → CODE`): его вписывают в `B24_APP_CODE` сервера (docs/DEPLOY.md). */
+const appCode = ref('')
 
 function mark(key: string, state: StepState, note?: string) {
   const step = steps.value.find(s => s.key === key)
@@ -59,6 +61,11 @@ async function runInstall() {
   await frame.installFinish()
   mark('finish', 'ok')
   done.value = true
+
+  // Без B24_APP_CODE сервер не пускает к BitrixGPT и записи ставок — показываем, что вписать.
+  // Сбой здесь установку не портит: код виден и в карточке приложения в портале.
+  const info = await b24.call<{ CODE?: unknown }>('app.info').catch(() => null)
+  appCode.value = typeof info?.CODE === 'string' ? info.CODE : ''
 }
 
 onMounted(async () => {
@@ -117,6 +124,18 @@ const icon: Record<StepState, string> = { wait: '○', run: '…', ok: '✓', wa
         title="Готово"
         description="Администратор настраивает валюту и ставки в разделе приложения «Настройки». Затем в карточке счёта: верхняя кнопка → «Заполнить из задач»."
       />
+      <B24Alert
+        v-if="done && appCode"
+        color="air-primary"
+        title="Для администратора сервера"
+        data-testid="install-app-code"
+      >
+        <template #description>
+          Код приложения — <code class="font-mono">{{ appCode }}</code>. Он должен быть задан в
+          переменной <code class="font-mono">B24_APP_CODE</code> на сервере приложения: без неё сервер
+          не пускает к BitrixGPT и к записи ставок.
+        </template>
+      </B24Alert>
     </div>
   </InPortalGate>
 </template>

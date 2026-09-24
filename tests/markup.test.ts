@@ -22,6 +22,12 @@ describe('resolveMarkup — от частного к общему', () => {
     expect(resolveMarkup(settings, 5, [99, 11])).toEqual({ percent: 20, source: 'section', ruleId: 11 })
   })
 
+  it('папки проверяются по цепочке по порядку: первое совпадение побеждает', () => {
+    // Цепочка без правил на ближних уровнях: правило найдётся на третьем.
+    expect(resolveMarkup(settings, 5, [98, 99, 12, 11])).toEqual({ percent: 120, source: 'section', ruleId: 12 })
+    expect(resolveMarkup(settings, 5, [])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
+  })
+
   it('без товара и без совпадений — наценка «на всё»', () => {
     expect(resolveMarkup(settings, undefined, [11])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
     expect(resolveMarkup(settings, 5, [99])).toEqual({ percent: 70, source: 'default', ruleId: 0 })
@@ -34,6 +40,11 @@ describe('applyMarkup', () => {
     expect(applyMarkup(100, 120)).toBe(220)
     expect(applyMarkup(33.33, 20)).toBe(40)
     expect(applyMarkup(100, 0)).toBe(100)
+  })
+
+  it('округляет до копеек, а не до рублей (12,34 + 10 % = 13,57)', () => {
+    expect(applyMarkup(12.34, 10)).toBe(13.57)
+    expect(applyMarkup(0.01, 50)).toBe(0.02)
   })
 })
 

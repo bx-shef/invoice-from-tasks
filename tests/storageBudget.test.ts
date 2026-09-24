@@ -50,10 +50,22 @@ describe('бюджет app.option', () => {
     expect(storageUsage({ ift_rates_v1: '[]' }).fits).toBe(true)
   })
 
+  it('граница: ровно бюджет — влезает, на байт больше — нет', () => {
+    const budget = budgetFor(DOCUMENTED_OPTION_LIMIT)
+    // Обёртка сериализации одного ключа `k`: a:1:{s:1:"k";s:N:"…";} — считаем её сами.
+    const overhead = phpSerializedLength({ k: '' })
+    const exact = 'x'.repeat(budget - overhead - (String(budget - overhead).length - 1))
+    const usage = storageUsage({ k: exact })
+    expect(usage.bytes).toBe(budget)
+    expect(usage.fits).toBe(true)
+    expect(usage.ratio).toBe(1)
+    expect(storageUsage({ k: `${exact}x` }).fits).toBe(false)
+  })
+
   it('оценивает, сколько ещё версий ставок влезет', () => {
     const usage = storageUsage({ a: '' })
     expect(usage.rateCapacityLeft).toBe(Math.floor((usage.budget - usage.bytes) / 30))
-    expect(formatUsage(usage)).toMatch(/из 1,4 КБ$/)
+    expect(formatUsage(usage)).toBe('0,0 из 1,4 КБ')
   })
 })
 

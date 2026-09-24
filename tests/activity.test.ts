@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildConsultActivity, MAX_ACTIVITY_TEXT, neutralizeBb } from '#shared/domain/activity'
+import { buildConsultActivity, MAX_ACTIVITY_TEXT, neutralizeMarkup } from '#shared/domain/activity'
 import { parseExistingRows } from '#shared/domain/invoice'
 import { tokenNeedsRefresh } from '~/utils/frameToken'
 
@@ -16,11 +16,12 @@ describe('дело с ответом консультации', () => {
     })
   })
 
-  it('BB-разметка из ответа модели не станет ссылкой в карточке', () => {
-    expect(neutralizeBb('[URL=https://evil]жми[/URL]')).toBe('［URL=https://evil］жми［/URL］')
+  it('разметка из ответа модели не станет ни ссылкой, ни тегом в карточке', () => {
+    expect(neutralizeMarkup('[URL=https://evil]жми[/URL]')).toBe('［URL=https://evil］жми［/URL］')
+    expect(neutralizeMarkup('<img src=x onerror=alert(1)>')).toBe('＜img src=x onerror=alert(1)＞')
     const p = buildConsultActivity({ invoiceId: 1, promptTitle: '[B]x[/B]', answer: '[URL=a]b[/URL]', responsibleId: 0, nowMs: 0 })
-    expect(String(p.description)).not.toContain('[')
-    expect(String(p.title)).not.toContain('[')
+    expect(String(p.description)).not.toMatch(/[[\]<>]/)
+    expect(String(p.title)).not.toMatch(/[[\]<>]/)
     expect(p).not.toHaveProperty('responsibleId')
   })
 

@@ -73,21 +73,27 @@ export function useB24() {
   /**
    * Пачка вызовов, порциями по {@link BATCH_MAX}. Возвращает результат каждой команды по порядку;
    * первая же ошибка — исключение с методом и текстом портала (частичный результат нам не нужен).
+   *
+   * `haltOnError` — портал прекращает выполнять команды пакета после первой ошибки, а следующие
+   * порции не отправляются. Нужен для ЗАПИСИ: без него ошибка в середине не мешала бы портале
+   * выполнить остальные команды порции (`isHaltOnError: false`).
    */
-  async function batch<T = unknown>(calls: BatchCall[]): Promise<T[]> {
+  async function batch<T = unknown>(calls: BatchCall[], opts: { haltOnError?: boolean } = {}): Promise<T[]> {
     const out: T[] = []
     for (let i = 0; i < calls.length; i += BATCH_MAX) {
-      const chunk = calls.slice(i, i + BATCH_MAX)
+      const part = calls.slice(i, i + BATCH_MAX)
       const res = await getOrThrow().actions.v2.batch.make({
-        calls: chunk,
-        options: { isHaltOnError: false, returnAjaxResult: true }
+        calls: part,
+        options: { isHaltOnError: opts.haltOnError ?? false, returnAjaxResult: true }
       }) as Result<AjaxResult<T>[]>
       if (!res.isSuccess) throw new B24CallError('batch', res.getErrorMessages())
       const items = res.getData() ?? []
       items.forEach((item, idx) => {
-        if (!item.isSuccess) throw new B24CallError(chunk[idx]?.[0] ?? 'batch', item.getErrorMessages())
+        if (!item.isSuccess) throw new B24CallError(part[idx]?.[0] ?? 'batch', item.getErrorMessages())
         out.push(item.getData()?.result as T)
       })
+      // Портал остановил пакет — ответов меньше, чем команд: дальше не идём.
+      if (items.length < part.length) throw new B24CallError(part[items.length]?.[0] ?? 'batch', ['пакет остановлен порталом'])
     }
     return out
   }

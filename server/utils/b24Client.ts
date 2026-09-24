@@ -12,7 +12,12 @@ import type { OAuthCreds } from './verifyInstallMember'
 /** Вызов REST-метода: результат (`result` конверта) или исключение с текстом ошибок портала. */
 export type RestCall = (method: string, params?: Record<string, unknown>) => Promise<unknown>
 
-const OAUTH_SERVER_ENDPOINT = 'https://oauth.bitrix.info/rest/'
+/**
+ * Сервер авторизации — по текущей документации (статья «Автоматическое продление токенов
+ * OAuth 2.0»: `server_endpoint` = `…oauth.bitrix24.tech/rest/`). Эталон использовал прежний
+ * `oauth.bitrix.info`. SDK шлёт рефреш на `<serverEndpoint без /rest/>/oauth/token/`.
+ */
+export const OAUTH_SERVER_ENDPOINT = 'https://oauth.bitrix24.tech/rest/'
 
 /** Сообщение, по которому видно, что фрейм-токен отвергнут (обновить его на сервере нельзя). */
 export const FRAME_TOKEN_REJECTED = 'frame token rejected'

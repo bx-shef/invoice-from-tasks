@@ -6,7 +6,7 @@ import { buildConsultMessages } from '#shared/domain/prompts'
 import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
 import { askBitrixGpt, enforceAiLimit } from '../../utils/aiGateway'
 import { readOption } from '../../utils/options'
-import { requireFrameUser } from '../../utils/requestContext'
+import { aiHttpError, requireFrameUser } from '../../utils/requestContext'
 
 export default defineEventHandler(async (event) => {
   const { user, frameCall } = await requireFrameUser(event)
@@ -18,7 +18,11 @@ export default defineEventHandler(async (event) => {
   const prompt = settings.consultPrompts.find(p => p.id === promptId)
   if (!prompt) throw createError({ statusCode: 404, statusMessage: 'prompt not found' })
 
-  enforceAiLimit(user)
-  const answer = await askBitrixGpt({ messages: buildConsultMessages(prompt.text, body?.context ?? {}), json: false })
-  return { title: prompt.title, text: answer.trim() }
+  try {
+    enforceAiLimit(user)
+    const answer = await askBitrixGpt({ messages: buildConsultMessages(prompt.text, body?.context ?? {}), json: false })
+    return { title: prompt.title, text: answer.trim() }
+  } catch (e) {
+    throw aiHttpError(e)
+  }
 })

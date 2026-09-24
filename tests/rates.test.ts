@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findRate, normalizeRate, parseRates, serializeRates, validateRates, type RateEntry } from '#shared/domain/rates'
+import { coerceRateEntries, findRate, normalizeRate, parseRates, serializeRates, validateRates, type RateEntry } from '#shared/domain/rates'
 
 const rates: RateEntry[] = [
   { userId: 7, rate: 100, from: '2026-01-01' },
@@ -60,5 +60,29 @@ describe('normalizeRate', () => {
     expect(normalizeRate('12,345')).toBe(12.35)
     expect(normalizeRate(-1)).toBeNull()
     expect(normalizeRate(2_000_000)).toBeNull()
+  })
+})
+
+describe('coerceRateEntries — тело запроса', () => {
+  it('только массив объектов; иначе null (400), а не падение', () => {
+    expect(coerceRateEntries('x')).toBeNull()
+    expect(coerceRateEntries({})).toBeNull()
+    expect(coerceRateEntries([null])).toBeNull()
+    expect(coerceRateEntries([[1, 2, '2026-01-01']])).toBeNull()
+    expect(coerceRateEntries([1])).toBeNull()
+    expect(coerceRateEntries([])).toEqual([])
+  })
+
+  it('приводит поля к типам и не придумывает productId', () => {
+    expect(coerceRateEntries([{ userId: '5', rate: '1500', from: '2026-01-01', extra: 1 }]))
+      .toEqual([{ userId: 5, rate: 1500, from: '2026-01-01' }])
+    expect(coerceRateEntries([{ userId: 5, rate: 1, from: '2026-01-01', productId: '3' }])?.[0]?.productId).toBe(3)
+    expect(coerceRateEntries([{ userId: 5, rate: 1, from: '2026-01-01', productId: null }])?.[0]).not.toHaveProperty('productId')
+  })
+
+  it('ставка 0 — ошибка проверки, а не «бесплатный сотрудник»', () => {
+    const entries = coerceRateEntries([{ userId: 5, rate: 0, from: '2026-01-01' }])!
+    expect(validateRates(entries)).toEqual([{ index: 0, message: expect.stringMatching(/больше 0/) }])
+    expect(normalizeRate('0,004')).toBeNull()
   })
 })

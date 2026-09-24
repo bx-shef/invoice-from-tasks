@@ -7,12 +7,12 @@ import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
 import { askBitrixGpt, enforceAiLimit } from '../../utils/aiGateway'
 import { extractJson } from '../../utils/llm'
 import { readOption } from '../../utils/options'
-import { requireFrameUser } from '../../utils/requestContext'
+import { aiHttpError, requireFrameUser } from '../../utils/requestContext'
 
 function parseItems(raw: unknown): NamingItem[] {
   if (!Array.isArray(raw)) return []
   const out: NamingItem[] = []
-  for (const item of raw.slice(0, MAX_NAMING_ITEMS)) {
+  for (const item of raw) {
     const o = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
     const key = typeof o.key === 'string' ? o.key : ''
     if (!/^[te]\d{1,12}$/.test(key)) continue
@@ -30,12 +30,20 @@ export default defineEventHandler(async (event) => {
   const { user, frameCall } = await requireFrameUser(event)
   const body = await readBody<{ mode?: unknown, items?: unknown }>(event)
   const mode = body?.mode === 'task' || body?.mode === 'time' ? body.mode : null
+  // Больше пакета — отказ, а не молчаливая обрезка: обрезанные строки вернулись бы без названий.
+  if (Array.isArray(body?.items) && body.items.length > MAX_NAMING_ITEMS) {
+    throw createError({ statusCode: 413, statusMessage: `at most ${MAX_NAMING_ITEMS} items per request` })
+  }
   const items = parseItems(body?.items)
   if (!mode || items.length === 0) throw createError({ statusCode: 400, statusMessage: 'mode and items required' })
 
-  enforceAiLimit(user)
-  const settings = parseSettings(await readOption(frameCall, SETTINGS_KEY))
-  const custom = mode === 'task' ? settings.prompts.taskTitle : settings.prompts.timeBlock
-  const answer = await askBitrixGpt({ messages: buildNamingMessages(mode, custom, items), json: true })
-  return { names: pickNames(extractJson(answer), items.map(i => i.key)) }
+  try {
+    enforceAiLimit(user)
+    const settings = parseSettings(await readOption(frameCall, SETTINGS_KEY))
+    const custom = mode === 'task' ? settings.prompts.taskTitle : settings.prompts.timeBlock
+    const answer = await askBitrixGpt({ messages: buildNamingMessages(mode, custom, items), json: true })
+    return { names: pickNames(extractJson(answer), items.map(i => i.key)) }
+  } catch (e) {
+    throw aiHttpError(e)
+  }
 })

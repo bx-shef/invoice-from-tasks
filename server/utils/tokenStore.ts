@@ -6,14 +6,16 @@
 //
 // Хранилище — unstorage (Nitro `useStorage('portals')`, драйвер fs, см. nuxt.config.ts), а не
 // Postgres, как в эталоне: здесь одна запись на портал и никаких запросов по полям.
-// Refresh-токен шифруется (secretCrypto.ts); access-токен живёт час и хранится как есть.
+// Оба токена шифруются (secretCrypto.ts): access-токен живёт час, но это час прав администратора
+// портала — при утечке тома он не должен читаться (находка отдела безопасности панели).
 
 import { decryptSecret, encryptSecret } from './secretCrypto'
 
 export interface PortalRecord {
   memberId: string
   domain: string
-  accessToken: string
+  /** Зашифрованный access-токен (`iv:tag:data`). */
+  accessTokenEnc: string
   /** Зашифрованный refresh-токен (`iv:tag:data`). */
   refreshTokenEnc: string
   /** Момент истечения access-токена, мс. */
@@ -49,7 +51,10 @@ export async function getPortal(kv: KeyValue, memberId: string): Promise<PortalR
 
 export async function getPortalByDomain(kv: KeyValue, domain: string): Promise<PortalRecord | null> {
   const memberId = await kv.getItem(domainKey(domain))
-  return typeof memberId === 'string' ? getPortal(kv, memberId) : null
+  if (typeof memberId !== 'string') return null
+  const record = await getPortal(kv, memberId)
+  // Индекс мог устареть: запись, чей домен уже другой, этому домену не принадлежит.
+  return record && record.domain === domain.toLowerCase() ? record : null
 }
 
 export interface SaveInstallInput {
@@ -70,15 +75,25 @@ export async function saveInstall(kv: KeyValue, input: SaveInstallInput, now = D
   const record: PortalRecord = {
     memberId: input.memberId.toLowerCase(),
     domain: input.domain.toLowerCase(),
-    accessToken: input.accessToken,
+    accessTokenEnc: input.accessToken ? encryptSecret(input.accessToken) : '',
     refreshTokenEnc: input.refreshToken ? encryptSecret(input.refreshToken) : '',
     expiresAt: now + input.expiresIn * 1000,
     applicationToken: prev?.applicationToken || input.applicationToken,
     installedAt: prev?.installedAt ?? now
   }
-  if (prev && prev.domain !== record.domain) await kv.removeItem(domainKey(prev.domain))
+  if (prev && prev.domain !== record.domain) await removeDomainIfOwned(kv, prev.domain, record.memberId)
   await kv.setItem(portalKey(record.memberId), record)
   await kv.setItem(domainKey(record.domain), record.memberId)
+}
+
+/**
+ * Снимает индекс домена, только если он всё ещё указывает на этот портал. Домен мог перейти к
+ * другому порталу (переезд, освобождённое имя) — чужой индекс трогать нельзя, иначе тот портал
+ * получит «не установлено» на каждый запрос (находка /code-review этого PR).
+ */
+async function removeDomainIfOwned(kv: KeyValue, domain: string, memberId: string): Promise<void> {
+  const owner = await kv.getItem(domainKey(domain))
+  if (typeof owner === 'string' && owner === memberId.toLowerCase()) await kv.removeItem(domainKey(domain))
 }
 
 /** Обновление токенов после рефреша. Только для существующей записи — удалённый портал не воскрешаем. */
@@ -87,7 +102,7 @@ export async function updateTokens(kv: KeyValue, memberId: string, tokens: { acc
   if (!prev) return
   await kv.setItem(portalKey(prev.memberId), {
     ...prev,
-    accessToken: tokens.accessToken,
+    accessTokenEnc: tokens.accessToken ? encryptSecret(tokens.accessToken) : prev.accessTokenEnc,
     refreshTokenEnc: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : prev.refreshTokenEnc,
     expiresAt: tokens.expiresAt
   })
@@ -96,16 +111,25 @@ export async function updateTokens(kv: KeyValue, memberId: string, tokens: { acc
 /** Удаление всего, что мы знаем о портале (событие удаления приложения). */
 export async function removePortal(kv: KeyValue, memberId: string): Promise<void> {
   const prev = await getPortal(kv, memberId)
-  if (prev) await kv.removeItem(domainKey(prev.domain))
+  if (prev) await removeDomainIfOwned(kv, prev.domain, prev.memberId)
   await kv.removeItem(portalKey(memberId))
+}
+
+function decryptOrEmpty(blob: string): string {
+  if (!blob) return ''
+  try {
+    return decryptSecret(blob)
+  } catch {
+    return ''
+  }
+}
+
+/** Расшифрованный access-токен записи; `''`, если его нет или ключ сменился. */
+export function accessTokenOf(record: PortalRecord): string {
+  return decryptOrEmpty(record.accessTokenEnc)
 }
 
 /** Расшифрованный refresh-токен записи; `''`, если его нет или ключ сменился. */
 export function refreshTokenOf(record: PortalRecord): string {
-  if (!record.refreshTokenEnc) return ''
-  try {
-    return decryptSecret(record.refreshTokenEnc)
-  } catch {
-    return ''
-  }
+  return decryptOrEmpty(record.refreshTokenEnc)
 }

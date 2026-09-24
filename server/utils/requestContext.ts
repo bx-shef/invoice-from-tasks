@@ -3,9 +3,19 @@
 // отдельно от чистых модулей, которые покрыты юнит-тестами.
 
 import type { H3Event } from 'h3'
+import { AiGatewayError } from './aiGateway'
 import { makeFrameCall, makePortalCall, oauthCredsFromEnv, type RestCall } from './b24Client'
 import { extractFrameAuth, verifyFrame, type FrameUser } from './frameAuth'
-import { refreshTokenOf, updateTokens, type KeyValue } from './tokenStore'
+import { SlidingWindow } from './rateLimit'
+import { FRAME_CHECKS_PER_IP, pickClientIp } from './requestLimits'
+import { accessTokenOf, refreshTokenOf, updateTokens, type KeyValue } from './tokenStore'
+
+const frameCheckWindows = new SlidingWindow()
+
+/** IP клиента для лимитов: `X-Forwarded-For` — только при `TRUST_PROXY=1` (см. `pickClientIp`). */
+export function clientIp(event: H3Event): string {
+  return pickClientIp(getRequestHeader(event, 'x-forwarded-for'), getRequestIP(event), process.env.TRUST_PROXY === '1')
+}
 
 /** Хранилище установок (fs-драйвер, см. `nitro.storage` в nuxt.config.ts). */
 export function portalStore(): KeyValue {
@@ -24,10 +34,13 @@ export async function requireFrameUser(event: H3Event): Promise<RequestContext> 
   const auth = extractFrameAuth({ get: name => headers[name] })
   if (!auth) throw createError({ statusCode: 400, statusMessage: 'frame auth headers required' })
   const creds = oauthCredsFromEnv()
+  const ip = clientIp(event)
   const verdict = await verifyFrame(auth, {
     kv: portalStore(),
     call: (domain, token, method) => makeFrameCall(domain, token, creds)(method),
-    appCode: process.env.B24_APP_CODE?.trim() || ''
+    appCode: process.env.B24_APP_CODE?.trim() || '',
+    // Живая проверка — вызов в портал; поток случайных токенов не должен гонять нас туда без меры.
+    allowLiveCheck: () => frameCheckWindows.take([[`fv:${ip}`, FRAME_CHECKS_PER_IP]])
   })
   if (!verdict.ok) throw createError({ statusCode: verdict.status, statusMessage: verdict.error })
   return { user: verdict.user, frameCall: makeFrameCall(auth.domain, auth.accessToken, creds) }
@@ -44,7 +57,7 @@ export function installerCall(user: FrameUser): RestCall {
     {
       domain: p.domain,
       memberId: p.memberId,
-      accessToken: p.accessToken,
+      accessToken: accessTokenOf(p),
       refreshToken: refreshTokenOf(p),
       expiresAt: p.expiresAt,
       applicationToken: p.applicationToken
@@ -52,4 +65,9 @@ export function installerCall(user: FrameUser): RestCall {
     oauthCredsFromEnv(),
     tokens => updateTokens(kv, p.memberId, tokens)
   )
+}
+
+/** Переводит отказ AI-шлюза в HTTP-ошибку h3; прочие ошибки пробрасывает как есть. */
+export function aiHttpError(e: unknown): unknown {
+  return e instanceof AiGatewayError ? createError({ statusCode: e.statusCode, statusMessage: e.message }) : e
 }
