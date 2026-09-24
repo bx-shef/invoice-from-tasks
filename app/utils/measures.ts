@@ -18,19 +18,26 @@ export const OKEI_NAMES: Readonly<Record<number, string>> = {
   796: 'Штука'
 }
 
+/** Предел названия единицы: справочник ведёт администратор портала, длинная строка ломала бы список. */
+export const MAX_MEASURE_TITLE = 100
+
 export interface MeasureOption {
   code: number
+  /** Название без кода; `''` — названия нет ни у портала, ни в ОКЕИ. */
   title: string
+  /** Подпись пункта списка: «Штука (код 796)», без названия — «код 5002». */
+  label: string
 }
 
 function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+  return typeof value === 'string' ? value.trim().slice(0, MAX_MEASURE_TITLE) : ''
 }
 
 /**
- * Пункты списка единиц: код и понятное название. Название — своё у портала (`measureTitle`,
- * `symbol`), иначе из ОКЕИ по коду, иначе международное обозначение, иначе «код N».
- * Запись без положительного кода отбрасывается: её нельзя передать в `measureCode`.
+ * Пункты списка единиц. Название — своё у портала (`measureTitle`, `symbol`), иначе из ОКЕИ по
+ * коду, иначе международное обозначение; подпись добавляет код, а без названия — только код
+ * (не «код 5002 (код 5002)» — находка программиста панели). Запись без положительного целого
+ * кода отбрасывается: её нельзя передать в `measureCode`.
  */
 export function parseMeasures(raw: unknown): MeasureOption[] {
   if (!Array.isArray(raw)) return []
@@ -40,8 +47,8 @@ export function parseMeasures(raw: unknown): MeasureOption[] {
     const o = item as Record<string, unknown>
     const code = Number(o.code)
     if (!Number.isInteger(code) || code <= 0) continue
-    const title = text(o.measureTitle) || text(o.symbol) || OKEI_NAMES[code] || text(o.symbolIntl) || text(o.symbolLetterIntl) || `код ${code}`
-    out.push({ code, title })
+    const title = text(o.measureTitle) || text(o.symbol) || OKEI_NAMES[code] || text(o.symbolIntl) || text(o.symbolLetterIntl)
+    out.push({ code, title, label: title ? `${title} (код ${code})` : `код ${code}` })
   }
   return out
 }

@@ -98,9 +98,13 @@ export function parseTask(row: Row): TaskInfo | null {
 const MAX_TASK_TAGS = 100
 
 /**
- * Теги из ответа REST v3 `tasks.task.get` с `select: ['id', 'tags.id', 'tags.name']`:
- * `{ item: { tags: [{ id, name }] } }` (статья «Поля задачи в REST 3.0»). Принимаем и голый
- * объект задачи, и строки вместо объектов — форма ответа на живом портале ещё не замерена (#2).
+ * Теги задачи из ответа портала. Две живые формы (замер 2026-09-24):
+ * • REST v3 `tasks.task.get`, `select: ['id', 'tags.id', 'tags.name']` →
+ *   `{ item: { tags: [{ id, name }] } }`, без тегов — `[]`;
+ * • REST v2 `tasks.task.list` / `tasks.task.get`, `select: ['TAGS']` → `tags: { "<id>": { id, title } }`,
+ *   без тегов — `[]`. Сейчас теги читаются через v3; v2-форма разбирается, чтобы переход на неё
+ *   (теги прямо в списке задач, без лишних запросов) не требовал нового разбора.
+ * Принимаем и голый объект задачи, и строки вместо объектов.
  *
  * Тег длиннее {@link MAX_TAG_LENGTH} отбрасывается, а не обрезается: правило не бывает длиннее,
  * так что совпасть он не может, а обрезанный мог бы совпасть с правилом ЛОЖНО (находка
@@ -108,10 +112,10 @@ const MAX_TASK_TAGS = 100
  */
 export function parseTaskTags(result: unknown): string[] {
   const item = result && typeof result === 'object' && 'item' in result ? (result as Row).item : result
-  const tags = item && typeof item === 'object' ? (item as Row).tags : undefined
-  if (!Array.isArray(tags)) return []
+  const raw = item && typeof item === 'object' ? (item as Row).tags : undefined
+  const tags = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : []
   const names = tags
-    .map(t => (t && typeof t === 'object' ? toText((t as Row).name) : toText(t)).trim())
+    .map(t => (t && typeof t === 'object' ? toText((t as Row).name ?? (t as Row).title) : toText(t)).trim())
     .filter(name => name && name.length <= MAX_TAG_LENGTH)
   return [...new Set(names)].slice(0, MAX_TASK_TAGS)
 }

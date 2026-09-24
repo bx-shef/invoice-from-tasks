@@ -21,6 +21,16 @@ describe('разбор задач', () => {
     expect(parseTaskTags({ tags: [{ name: 'Без обёртки' }] })).toEqual(['Без обёртки'])
   })
 
+  it('v2-форма тегов (замер: tags — объект «id → { id, title }») тоже разбирается', () => {
+    expect(parseTaskTags({ id: '2', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } })).toEqual(['Срочно', 'ЧЧ1'])
+    expect(parseTaskTags({ id: '4', tags: [] })).toEqual([])
+  })
+
+  it('живой ответ v2 tasks.task.list (замер): числа строками, timeSpentInLogs при нуле — null', () => {
+    const row = { id: '10', title: 'IFT: чужая задача', description: 'Описание', responsibleId: '1', ufCrmTask: ['D_999999'], timeSpentInLogs: null, group: [] }
+    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [] })
+  })
+
   it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
     const exact = 'т'.repeat(100)
     expect(parseTaskTags({ item: { tags: [{ name: exact }, { name: `${exact}ы` }] } })).toEqual([exact])
