@@ -31,6 +31,11 @@ describe('разбор задач', () => {
     expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [] })
   })
 
+  it('теги приходят в том же списке v2 (select TAGS) и разбираются в parseTask', () => {
+    const row = { id: '2', title: 'IFT: задача сделки с тегами', responsibleId: '1', ufCrmTask: ['D_4'], timeSpentInLogs: '5400', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } }
+    expect(parseTask(row)?.tags).toEqual(['Срочно', 'ЧЧ1'])
+  })
+
   it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
     const exact = 'т'.repeat(100)
     expect(parseTaskTags({ item: { tags: [{ name: exact }, { name: `${exact}ы` }] } })).toEqual([exact])

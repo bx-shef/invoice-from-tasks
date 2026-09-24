@@ -102,17 +102,6 @@ describe('тип 1 — задача как строка', () => {
     expect(errors).toEqual([{ taskId: 10, message: 'у записей времени нет даты — не на что выбрать ставку' }])
   })
 
-  it('теги задачи не прочитаны — ошибка по этой задаче, остальные задачи считаются', () => {
-    const other: TaskInfo = { ...task, id: 11, title: 'Другая' }
-    const { rows, errors } = buildRows(input({
-      tasks: [task, other],
-      entries: [...entries, { ...entries[0]!, id: 201, taskId: 11 }],
-      tagFailures: new Map([[10, 'tasks.task.get: Access denied']])
-    }))
-    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (tasks.task.get: Access denied) — не на что выбрать наценку' }])
-    expect(rows.map(r => r.taskId)).toEqual([11])
-  })
-
   it('нет ставки ответственного — ошибка, строки нет', () => {
     const { rows, errors } = buildRows(input({ rates: [{ userId: 9, rate: 80, from: '2026-01-01' }] }))
     expect(rows).toEqual([])
@@ -210,12 +199,6 @@ describe('тип 2 — записи времени как строки', () => {
       entries: [entries[0]!, { ...entries[0]!, id: 201, taskId: 11 }]
     }))
     expect(rows.map(r => [r.key, r.markupTag, r.price])).toEqual([['e101', 'срочно', 150], ['e201', 'дизайн', 200]])
-  })
-
-  it('теги задачи не прочитаны — ошибка по задаче, её записи строк не дают', () => {
-    const { rows, errors } = buildRows(input({ mode: 'time', tagFailures: new Map([[10, 'сбой']]) }))
-    expect(rows).toEqual([])
-    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (сбой) — не на что выбрать наценку' }])
   })
 
   it('запись, ставшая нулём при округлении к ближайшему, — пропуск с предупреждением', () => {

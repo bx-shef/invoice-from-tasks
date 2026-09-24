@@ -12,37 +12,33 @@ import {
   crmBindingCodes,
   DEAL_ENTITY_TYPE_ID,
   INVOICE_ENTITY_TYPE_ID,
-  INVOICE_OWNER_TYPE,
   listRows,
-  parseTaskTags,
   parseTimeEntry,
   tasksBoundTo,
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
-import { BATCH_MAX } from '~/composables/useB24'
-import { B24CallError } from '~/utils/b24Batch'
+import { B24CallError, type BatchCall } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
+import {
+  addRowCall,
+  elapsedListCall,
+  ELAPSED_PAGE,
+  invoiceGetCall,
+  MAX_ELAPSED_PAGES,
+  MAX_PRODUCT_ROWS,
+  productRowListCall,
+  PRODUCT_ROWS_PAGE,
+  replaceRowsCall,
+  resultListCall,
+  TASK_LIST_OPTIONS,
+  taskListCall
+} from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
 import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
 
-/** Поля задачи, которые мы читаем (tasks.task.list, REST v2). */
-export const TASK_SELECT = ['ID', 'TITLE', 'DESCRIPTION', 'RESPONSIBLE_ID', 'UF_CRM_TASK', 'TIME_SPENT_IN_LOGS']
-
-/** Страница task.elapseditem.getlist — максимум 50 (документация метода). */
-const ELAPSED_PAGE = 50
-/** Потолок страниц записей времени одной задачи: 100 × 50 = 5000 записей. */
-const MAX_ELAPSED_PAGES = 100
-/** Страница crm.item.productrow.list — 50 (документация метода: «Размер страницы — 50 записей»). */
-const PRODUCT_ROWS_PAGE = 50
-/** Потолок позиций счёта, которые читаем: 200 страниц × 50. */
-const MAX_PRODUCT_ROWS = 10_000
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
 const MAX_CONSULT_TITLE = 500
-/** Поля REST v3 tasks.task.get для тегов (статья «Поля задачи в REST 3.0»). */
-export const TAG_SELECT = ['id', 'tags.id', 'tags.name']
-/** Сколько результатов задачи берём в контекст названий — последние важнее. */
-const MAX_RESULTS = 20
 /** Сколько задач читаем одновременно: SDK всё равно выравнивает вызовы под лимит REST портала. */
 const READ_CONCURRENCY = 4
 
@@ -79,11 +75,10 @@ export function useInvoiceFill() {
    */
   async function fetchExistingRows(id: number): Promise<ExistingRow[]> {
     const raw = await collectOffsetPages(
-      async start => (await b24.call<{ productRows?: unknown[] }>('crm.item.productrow.list', {
-        filter: { '=ownerType': INVOICE_OWNER_TYPE, '=ownerId': id },
-        order: { id: 'asc' },
-        start
-      }))?.productRows ?? [],
+      async (start) => {
+        const { method, params } = productRowListCall(id, start)
+        return (await b24.call<{ productRows?: unknown[] }>(method, params as Record<string, unknown>))?.productRows ?? []
+      },
       PRODUCT_ROWS_PAGE,
       MAX_PRODUCT_ROWS,
       `в счёте #${id} больше ${MAX_PRODUCT_ROWS} позиций — такой счёт приложение не обрабатывает`
@@ -93,8 +88,9 @@ export function useInvoiceFill() {
 
   /** Счёт и его позиции. Состояние шага не трогает — это делают вызывающие. */
   async function readInvoice(id: number): Promise<void> {
+    const get = invoiceGetCall(id)
     const [item, rows] = await Promise.all([
-      b24.call('crm.item.get', { entityTypeId: INVOICE_ENTITY_TYPE_ID, id }),
+      b24.call(get.method, get.params as Record<string, unknown>),
       fetchExistingRows(id)
     ])
     const parsed = parseInvoice(item)
@@ -132,12 +128,9 @@ export function useInvoiceFill() {
       : crmBindingCodes(INVOICE_ENTITY_TYPE_ID, inv.id)
     const rows: Record<string, unknown>[] = []
     for (const code of codes) {
-      // ⚠ Фильтр ОБЪЕКТОМ — форма REST v2; форма v3 (массив) на /rest/ отвергается (замер get-task-from-b24).
-      const found = await b24.callList<Record<string, unknown>>('tasks.task.list', {
-        filter: { UF_CRM_TASK: code },
-        select: TASK_SELECT
-      }, { idKey: 'id', cursorIdKey: 'ID', customKeyForResult: 'tasks' })
-      rows.push(...found)
+      // Теги приходят в этом же списке (TASK_SELECT → TAGS), отдельных запросов нет.
+      const { method, params } = taskListCall(code)
+      rows.push(...await b24.callList<Record<string, unknown>>(method, params as Record<string, unknown>, { ...TASK_LIST_OPTIONS }))
     }
     return tasksBoundTo(rows, codes)
   }
@@ -151,11 +144,9 @@ export function useInvoiceFill() {
   async function fetchEntries(taskId: number): Promise<TimeEntry[]> {
     const raw = await collectNumberedPages(
       async (page) => {
-        const res = await b24.getOrThrow().actions.v2.call.make({
-          method: 'task.elapseditem.getlist',
-          params: [taskId, { ID: 'asc' }, {}, ['*'], { NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: page } }] as unknown as Record<string, unknown>
-        })
-        if (!res.isSuccess) throw new B24CallError('task.elapseditem.getlist', res.getErrorMessages())
+        const { method, params } = elapsedListCall(taskId, page)
+        const res = await b24.getOrThrow().actions.v2.call.make({ method, params: params as unknown as Record<string, unknown> })
+        if (!res.isSuccess) throw new B24CallError(method, res.getErrorMessages())
         // getTotal() без поля `total` в ответе даёт 0 — collectNumberedPages считает это «неизвестно».
         return { rows: listRows(res.getData()?.result), total: res.getTotal() }
       },
@@ -178,49 +169,12 @@ export function useInvoiceFill() {
    */
   async function fetchResults(taskId: number): Promise<string> {
     try {
-      const res = await b24.callV3<unknown>('tasks.task.result.list', {
-        filter: [['taskId', '=', taskId]],
-        select: ['id', 'text'],
-        order: { id: 'desc' },
-        pagination: { limit: MAX_RESULTS }
-      })
+      const { method, params } = resultListCall(taskId)
+      const res = await b24.callV3<unknown>(method, params as Record<string, unknown>)
       return listRows(res, 'items', 'results').map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')
     } catch {
       return ''
     }
-  }
-
-  /**
-   * Теги задач — для наценки по тегам (markup.ts). Список задач v2 их не отдаёт, а v3 — только
-   * в `tasks.task.get` («Поля задачи в REST 3.0»): пакетами v3 по {@link BATCH_MAX} задач. Правил
-   * по тегам нет — не читаем вовсе: лишние запросы и лишняя точка отказа.
-   *
-   * Пакет v3 выполняется целиком или никак и не говорит, какая команда упала. Поэтому при сбое
-   * порции её задачи читаются по одной: неудачные попадают в `failures` и становятся ошибкой
-   * ПО ЗАДАЧЕ (fill.ts → tagFailures), а не общей ошибкой сборки.
-   */
-  async function withTags(list: TaskInfo[]): Promise<{ tasks: TaskInfo[], failures: Map<number, string> }> {
-    const failures = new Map<number, string>()
-    if (!settings.value.markup.tags.length || !list.length) return { tasks: list, failures }
-    const readOne = (t: TaskInfo): [string, Record<string, unknown>] => ['tasks.task.get', { id: t.id, select: TAG_SELECT }]
-    const out: TaskInfo[] = []
-    for (const part of chunk(list, BATCH_MAX)) {
-      const answers = await b24.batchV3<unknown>(part.map(readOne)).catch(() => null)
-      if (answers) {
-        part.forEach((t, i) => out.push({ ...t, tags: parseTaskTags(answers[i]) }))
-        continue
-      }
-      out.push(...await mapLimit(part, READ_CONCURRENCY, async (t) => {
-        try {
-          const [method, params] = readOne(t)
-          return { ...t, tags: parseTaskTags(await b24.callV3<unknown>(method, params)) }
-        } catch (e) {
-          failures.set(t.id, e instanceof Error ? e.message : String(e))
-          return t
-        }
-      }))
-    }
-    return { tasks: out, failures }
   }
 
   /**
@@ -256,8 +210,7 @@ export function useInvoiceFill() {
       return
     }
     try {
-      const tagged = await withTags(await fetchTasks(source, inv))
-      tasks.value = tagged.tasks
+      tasks.value = await fetchTasks(source, inv)
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
 
       const involved = new Set<number>()
@@ -273,7 +226,6 @@ export function useInvoiceFill() {
         rates: rates.value,
         settings: settings.value,
         conversion: conversion.value,
-        tagFailures: tagged.failures,
         userNames
       })
 
@@ -332,11 +284,16 @@ export function useInvoiceFill() {
     let failure: string | null = null
     try {
       if (replace) {
-        await b24.call('crm.item.productrow.set', { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, productRows: toProductRows(draft, settings.value) })
+        const { method, params } = replaceRowsCall(inv.id, toProductRows(draft, settings.value))
+        await b24.call(method, params as Record<string, unknown>)
       } else {
         const sortStart = existing.value.reduce((max, r) => Math.max(max, r.sort), 0)
         const rows = toProductRows(draft, settings.value, sortStart)
-        await b24.batch(rows.map(fields => ['crm.item.productrow.add', { fields: { ownerType: INVOICE_OWNER_TYPE, ownerId: inv.id, ...fields } }]), { haltOnError: true })
+        const calls = rows.map((fields): BatchCall => {
+          const { method, params } = addRowCall(inv.id, fields)
+          return [method, params as Record<string, unknown>]
+        })
+        await b24.batch(calls, { haltOnError: true })
       }
     } catch (e) {
       failure = e instanceof Error ? e.message : String(e)

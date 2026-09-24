@@ -20,6 +20,7 @@ pnpm install          # + nuxt prepare (postinstall)
 pnpm dev              # разработка; страницы работают только во фрейме портала
 pnpm check            # lint + typecheck + test — перед каждым PR
 pnpm build            # сборка сервера .output/server/index.mjs
+pnpm smoke            # живой прогон на ТЕСТОВОМ портале: REST, расчёт, запись, BitrixGPT (docs/SMOKE.md)
 ```
 
 ## Карта
@@ -29,12 +30,13 @@ pnpm build            # сборка сервера .output/server/index.mjs
 | `shared/domain/` | **чистые правила**: `time` (округление), `rates` (ставки по датам), `markup` (наценки по тегам), `currency` (пересчёт по курсу портала), `fill` (сборка строк, тип 1/2), `tasks` (разбор задач и времени, привязка к CRM), `invoice`, `settings` (формат настроек), `storageBudget` (место в app.option), `prompts` (BitrixGPT), `activity` (дело консультации) |
 | `app/pages/` | `index` (публичная), `install` (установка), `app` (главная в портале), `settings`, `invoice` (встройка в карточку счёта) |
 | `app/composables/` | `useB24` (фрейм и REST v2/v3), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog` (единицы измерения), `useUsers`, `useStorageProbe` |
-| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере), `measures` (единицы измерения, ОКЕИ) |
+| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере), `measures` (единицы измерения, ОКЕИ), `invoiceRequests` (параметры REST-запросов сценария счёта) |
 | `app/config/b24.ts` | права, встройка, события, настройки SDK (без автоповторов записи) — одно место |
 | `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` |
 | `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
 | `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |
 | `tests/` | юнит-тесты (vitest, node); `tests/server/` — серверные модули; `repoGuards` — гарды репо |
+| `smoke/` | смок на тестовом портале (`pnpm smoke`, свой vitest-конфиг, не в CI): страж портала, засев, формы REST, матрица расчёта, BitrixGPT, готовность v3 — `docs/SMOKE.md` |
 
 Подробно: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), правила расчёта —
 [`docs/PROCESSING.md`](docs/PROCESSING.md).
@@ -43,7 +45,9 @@ pnpm build            # сборка сервера .output/server/index.mjs
 
 - **По Битрикс24 не гадаем — читаем.** REST — MCP `b24-dev-mcp`; b24jssdk и b24ui — их `llms.txt`
   (навык `b24-docs`). Документация задаёт форму запроса, живой портал подтверждает результат.
-  Работаем через b24jssdk; метод есть в REST v3 — зовём v3 (`b24.callV3`/`batchV3`), иначе v2.
+  Работаем через b24jssdk; метод есть в REST v3 — зовём v3 (`b24.callV3`), иначе v2; исключения
+  владельца — в `docs/REST_METHODS.md` («Версия REST»: теги задач из v2-списка, #13). Параметры
+  запросов сценария счёта — только в `app/utils/invoiceRequests.ts` (их же шлёт смок).
   Уже пойманные расхождения — в `docs/REST_METHODS.md` (фильтр задач объектом, право `task`,
   позиционные параметры `task.elapseditem.getlist`, `DESCRIPTION_TYPE` дела, сервер авторизации
   `oauth.bitrix24.tech`, `keepAuthFresh` нет в SDK 2.2.0).

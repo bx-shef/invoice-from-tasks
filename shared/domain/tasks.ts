@@ -26,9 +26,9 @@ export interface TaskInfo {
   /** Затраченное время по журналу (секунды), как его считает портал. */
   timeSpentInLogs: number
   /**
-   * Теги задачи — по ним выбирается наценка (markup.ts). Список задач их не отдаёт: теги
-   * дочитываются отдельно (REST v3 tasks.task.get, {@link parseTaskTags}); пусто — тегов нет
-   * или правил по тегам нет и читать их не понадобилось.
+   * Теги задачи — по ним выбирается наценка (markup.ts). Приходят в том же списке задач v2
+   * (`select: ['TAGS']`, решение владельца; вернуться к v3 — issue #13), разбор —
+   * {@link parseTaskTags}.
    */
   tags: string[]
 }
@@ -90,7 +90,7 @@ export function parseTask(row: Row): TaskInfo | null {
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
-    tags: []
+    tags: parseTaskTags(row)
   }
 }
 
@@ -102,8 +102,9 @@ const MAX_TASK_TAGS = 100
  * • REST v3 `tasks.task.get`, `select: ['id', 'tags.id', 'tags.name']` →
  *   `{ item: { tags: [{ id, name }] } }`, без тегов — `[]`;
  * • REST v2 `tasks.task.list` / `tasks.task.get`, `select: ['TAGS']` → `tags: { "<id>": { id, title } }`,
- *   без тегов — `[]`. Сейчас теги читаются через v3; v2-форма разбирается, чтобы переход на неё
- *   (теги прямо в списке задач, без лишних запросов) не требовал нового разбора.
+ *   без тегов — `[]`. Теги читаются ИМЕННО так — в том же списке задач, без лишних запросов
+ *   (решение владельца); v3-форма разбирается, чтобы возврат к v3 (issue #13) не требовал нового
+ *   разбора.
  * Принимаем и голый объект задачи, и строки вместо объектов.
  *
  * Тег длиннее {@link MAX_TAG_LENGTH} отбрасывается, а не обрезается: правило не бывает длиннее,

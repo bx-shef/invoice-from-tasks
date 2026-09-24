@@ -37,12 +37,6 @@ export interface FillInput {
   settings: AppSettings
   /** Пересчёт в валюту счёта; `null`/нет — валюты совпадают. */
   conversion?: CurrencyConversion | null
-  /**
-   * Задачи, чьи теги прочитать не удалось (ID → текст портала). Без тегов наценку не выбрать —
-   * это нехватка данных по задаче, а не сбой всей сборки: ошибка называет задачу, остальные
-   * задачи проверяются как обычно (находка программиста и техдиректора панели).
-   */
-  tagFailures?: ReadonlyMap<number, string>
   /** Имена сотрудников для понятных сообщений; нет имени — пишем `#ID`. */
   userNames?: Map<number, string>
 }
@@ -139,20 +133,12 @@ function zeroAfterRounding(seconds: number): string {
   return `время ${formatDuration(seconds)} после округления стало нулём — строка пропущена`
 }
 
-/** Ошибка «теги не прочитаны» по задаче или `null`. */
-function tagProblem(input: FillInput, task: TaskInfo): string | null {
-  const failure = input.tagFailures?.get(task.id)
-  return failure === undefined ? null : `теги задачи не прочитаны (${failure}) — не на что выбрать наценку`
-}
-
 function buildTaskRows(input: FillInput, result: FillResult): void {
   const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
     const entries = input.entries.filter(e => e.taskId === task.id && e.seconds > 0)
     const total = entries.reduce((sum, e) => sum + e.seconds, 0)
     const problems: string[] = []
-    const tags = tagProblem(input, task)
-    if (tags) problems.push(tags)
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
     if (total === 0) {
@@ -200,11 +186,6 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
 function buildTimeRows(input: FillInput, result: FillResult): void {
   const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
-    const tags = tagProblem(input, task)
-    if (tags) {
-      result.errors.push({ taskId: task.id, message: tags })
-      continue
-    }
     const entries = input.entries.filter(e => e.taskId === task.id)
     if (entries.length === 0) {
       result.errors.push({ taskId: task.id, message: task.timeSpentInLogs > 0

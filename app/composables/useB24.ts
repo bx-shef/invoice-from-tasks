@@ -113,17 +113,5 @@ export function useB24() {
     return res.getData()?.result as T
   }
 
-  /**
-   * Пачка ЧТЕНИЙ REST v3. Пакет v3 — отдельный запрос: методы v2 в нём смешивать нельзя (у версий
-   * разные адреса), и портал выполняет его целиком или никак — нам это подходит, при сбое чтения
-   * счёт всё равно не заполняется.
-   */
-  async function batchV3<T = unknown>(calls: BatchCall[]): Promise<T[]> {
-    return inPortions<T>(calls, async part => await getOrThrow().actions.v3.batch.make({
-      calls: part,
-      options: { isHaltOnError: true, returnAjaxResult: true }
-    }) as Result<AjaxResult<T>[]>)
-  }
-
-  return { ready, init, get, getOrThrow, call, callList, batch, callV3, batchV3 }
+  return { ready, init, get, getOrThrow, call, callList, batch, callV3 }
 }
