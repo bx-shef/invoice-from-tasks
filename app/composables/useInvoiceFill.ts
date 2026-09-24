@@ -1,10 +1,11 @@
-// Сценарий страницы счёта: прочитать счёт → найти задачи → прочитать время, ставки, товары →
+// Сценарий страницы счёта: прочитать счёт → найти задачи → прочитать время, теги, курс валюты →
 // собрать строки (shared/domain/fill.ts) → показать → записать. Все чтения и записи в CRM идут
 // ПРАВАМИ СОТРУДНИКА через фрейм: видит только свои задачи, пишет только в доступный ему счёт.
-// Методы и их поля — docs/REST_METHODS.md.
+// Методы и их поля — docs/REST_METHODS.md; методы задач, которые есть в REST v3, — через v3.
 
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
-import { applyNames, buildRows, rowsTotal, toProductRows, type FillMode, type FillResult, type ProductInfo, type TaskSource } from '#shared/domain/fill'
+import { currencyConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
+import { applyNames, buildRows, rowsTotal, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
@@ -13,6 +14,7 @@ import {
   INVOICE_ENTITY_TYPE_ID,
   INVOICE_OWNER_TYPE,
   listRows,
+  parseTaskTags,
   parseTimeEntry,
   tasksBoundTo,
   type TaskInfo,
@@ -36,8 +38,10 @@ const PRODUCT_ROWS_PAGE = 50
 const MAX_PRODUCT_ROWS = 10_000
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
 const MAX_CONSULT_TITLE = 500
-/** Глубина обхода папок каталога вверх — страховка от циклов в данных. */
-const MAX_SECTION_DEPTH = 20
+/** Поля REST v3 tasks.task.get для тегов (статья «Поля задачи в REST 3.0»). */
+export const TAG_SELECT = ['id', 'tags.id', 'tags.name']
+/** Сколько результатов задачи берём в контекст названий — последние важнее. */
+const MAX_RESULTS = 20
 /** Сколько задач читаем одновременно: SDK всё равно выравнивает вызовы под лимит REST портала. */
 const READ_CONCURRENCY = 4
 
@@ -55,6 +59,8 @@ export function useInvoiceFill() {
   const result = ref<FillResult | null>(null)
   /** Проблемы уровня счёта/настроек (валюта, нет сделки) — до чтения задач. */
   const problems = ref<string[]>([])
+  /** Пересчёт в валюту счёта последней сборки: его предупреждение показываем и после записи. */
+  const conversion = ref<CurrencyConversion | null>(null)
   const step = ref<Step>('idle')
   const error = ref('')
   /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
@@ -114,6 +120,7 @@ export function useInvoiceFill() {
     result.value = null
     problems.value = []
     notice.value = ''
+    conversion.value = null
     step.value = 'idle'
   }
 
@@ -164,42 +171,45 @@ export function useInvoiceFill() {
     return [...byId.values()]
   }
 
-  /** Отчёты (результаты) задачи — контекст для названий в режиме ИИ. Не обязательны: сбой не останавливает. */
+  /**
+   * Отчёты (результаты) задачи — контекст для названий в режиме ИИ. REST v3: фильтр по `taskId`
+   * обязателен (документация метода). Не обязательны: сбой не останавливает.
+   */
   async function fetchResults(taskId: number): Promise<string> {
     try {
-      const res = await b24.call<unknown>('tasks.task.result.list', { taskId })
-      return listRows(res).map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')
+      const res = await b24.callV3<unknown>('tasks.task.result.list', {
+        filter: [['taskId', '=', taskId]],
+        select: ['id', 'text'],
+        order: { id: 'desc' },
+        pagination: { limit: MAX_RESULTS }
+      })
+      return listRows(res, 'items', 'results').map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')
     } catch {
       return ''
     }
   }
 
-  /** Папки товаров каталога, от ближайшей к корню. Товар не найден — ошибка заполнения. */
-  async function fetchProducts(ids: number[]): Promise<{ products: Map<number, ProductInfo>, missing: number[] }> {
-    const products = new Map<number, ProductInfo>()
-    const missing: number[] = []
-    const parentOf = new Map<number, number | null>()
-    for (const id of ids) {
-      let sectionId: number | null
-      try {
-        const res = await b24.call<{ product?: { iblockSectionId?: unknown } }>('catalog.product.get', { id })
-        sectionId = Number(res?.product?.iblockSectionId) || null
-      } catch {
-        missing.push(id)
-        continue
-      }
-      const chain: number[] = []
-      for (let depth = 0; sectionId && depth < MAX_SECTION_DEPTH && !chain.includes(sectionId); depth++) {
-        chain.push(sectionId)
-        if (!parentOf.has(sectionId)) {
-          const sec = await b24.call<{ section?: { iblockSectionId?: unknown } }>('catalog.section.get', { id: sectionId })
-          parentOf.set(sectionId, Number(sec?.section?.iblockSectionId) || null)
-        }
-        sectionId = parentOf.get(sectionId) ?? null
-      }
-      products.set(id, { sectionChain: chain })
-    }
-    return { products, missing }
+  /**
+   * Теги задач — для наценки по тегам (markup.ts). Список задач v2 их не отдаёт, а v3 — только
+   * в `tasks.task.get` («Поля задачи в REST 3.0»): пакетами v3 по 50 задач. Правил по тегам нет —
+   * не читаем вовсе: лишние запросы и лишняя точка отказа.
+   */
+  async function withTags(list: TaskInfo[]): Promise<TaskInfo[]> {
+    if (!settings.value.markup.tags.length || !list.length) return list
+    const answers = await b24.batchV3<unknown>(list.map(t => ['tasks.task.get', { id: t.id, select: TAG_SELECT }]))
+    return list.map((t, i) => ({ ...t, tags: parseTaskTags(answers[i]) }))
+  }
+
+  /**
+   * Пересчёт в валюту счёта (решение по #3): валюты совпадают — `null`; курса нет — исключение
+   * с понятной причиной, и счёт не заполняется.
+   */
+  async function conversionFor(inv: InvoiceInfo): Promise<CurrencyConversion | null> {
+    const from = settings.value.currency
+    if (!inv.currencyId || inv.currencyId === from) return null
+    const res = currencyConversion(from, inv.currencyId, parseCurrencies(await b24.call<unknown>('crm.currency.list', {})))
+    if (!res.ok) throw new Error(res.problem)
+    return res.conversion
   }
 
   async function collect(source: TaskSource, mode: FillMode): Promise<void> {
@@ -209,29 +219,30 @@ export function useInvoiceFill() {
     error.value = ''
     notice.value = ''
     result.value = null
+    conversion.value = null
     problems.value = invoiceProblems(inv, settings.value, source)
+    if (!problems.value.length) {
+      try {
+        conversion.value = await conversionFor(inv)
+      } catch (e) {
+        problems.value = [e instanceof Error ? e.message : String(e)]
+      }
+    }
     if (problems.value.length) {
       step.value = 'idle'
       return
     }
     try {
-      tasks.value = await fetchTasks(source, inv)
+      tasks.value = await withTags(await fetchTasks(source, inv))
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
 
       const involved = new Set<number>()
       tasks.value.forEach(t => t.responsibleId && involved.add(t.responsibleId))
       entries.forEach(e => e.userId && involved.add(e.userId))
-
-      // Товары — только из ставок тех, кто участвует в строках, и товар по умолчанию.
-      const productIds = new Set<number>()
-      if (settings.value.defaultProductId) productIds.add(settings.value.defaultProductId)
-      rates.value.forEach(r => r.productId && involved.has(r.userId) && productIds.add(r.productId))
-      const [{ products, missing }] = await Promise.all([fetchProducts([...productIds]), users.load([...involved])])
+      await users.load([...involved])
       const userNames = new Map(Object.entries(users.names.value).map(([id, name]) => [Number(id), name]))
 
-      let built = buildRows({ mode, tasks: tasks.value, entries, rates: rates.value, settings: settings.value, products, userNames })
-      const usedMissing = missing.filter(id => built.rows.some(r => r.productId === id))
-      for (const id of usedMissing) built.errors.push({ taskId: 0, message: `товар каталога #${id} не найден или нет доступа — проверьте настройки ставок` })
+      let built = buildRows({ mode, tasks: tasks.value, entries, rates: rates.value, settings: settings.value, conversion: conversion.value, userNames })
 
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
         const names: Record<string, string> = {}
@@ -331,5 +342,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, step, error, notice, writing, canWrite, total, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, step, error, notice, writing, canWrite, total, loadInvoice, reset, collect, write, consult }
 }

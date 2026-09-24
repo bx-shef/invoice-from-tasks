@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { formatDuration, isIsoDate, portalDate, roundSeconds, secondsToHours } from '#shared/domain/time'
 
-describe('roundSeconds — округление затраченного времени вверх', () => {
+describe('roundSeconds — округление затраченного времени', () => {
   it('«как есть» не трогает секунды', () => {
     expect(roundSeconds(1234, 0)).toBe(1234)
   })
@@ -22,6 +22,24 @@ describe('roundSeconds — округление затраченного вре�
     expect(roundSeconds(0, 60)).toBe(0)
     expect(roundSeconds(-5, 60)).toBe(0)
     expect(roundSeconds(Number.NaN, 30)).toBe(0)
+    expect(roundSeconds(0, 60, 'nearest')).toBe(0)
+  })
+
+  it.each([
+    [60, 1, 0], // короче половины шага — ноль
+    [60, 1799, 0],
+    [60, 1800, 3600], // ровно половина — вверх
+    [60, 5399, 3600],
+    [30, 2700, 3600],
+    [10, 899, 600],
+    [5, 150, 300]
+  ] as const)('к ближайшему, шаг %i мин: %i с → %i с', (step, input, expected) => {
+    expect(roundSeconds(input, step, 'nearest')).toBe(expected)
+  })
+
+  it('по умолчанию — вверх; «как есть» не зависит от направления', () => {
+    expect(roundSeconds(1, 60)).toBe(roundSeconds(1, 60, 'up'))
+    expect(roundSeconds(1234, 0, 'nearest')).toBe(1234)
   })
 })
 

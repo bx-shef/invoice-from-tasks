@@ -11,15 +11,13 @@ export interface RateEntry {
   rate: number
   /** Дата начала действия, `YYYY-MM-DD`, включительно. */
   from: string
-  /**
-   * Товар каталога, которым продаётся час этого сотрудника (необязательно). Нужен наценкам
-   * «по папке» и «по товару»: без товара строка счёта не лежит ни в какой папке.
-   */
-  productId?: number
 }
 
-/** Кортеж хранения: `[userId, rate, from]` или `[userId, rate, from, productId]`. */
-export type StoredRate = [number, number, string] | [number, number, string, number]
+/**
+ * Кортеж хранения: `[userId, rate, from]`. Четвёртый элемент (товар каталога) был до #3 —
+ * при разборе он молча отбрасывается, так что старые записи читаются без миграции.
+ */
+export type StoredRate = [number, number, string]
 
 /** Верхняя граница ставки — защита от опечатки «лишний ноль» и от мусора в хранилище. */
 export const MAX_RATE = 1_000_000
@@ -62,9 +60,7 @@ export function coerceRateEntries(raw: unknown): RateEntry[] | null {
   if (raw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return null
   return raw.map((item) => {
     const o = item as Record<string, unknown>
-    const entry: RateEntry = { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? '') }
-    if (o.productId !== undefined && o.productId !== null) entry.productId = Number(o.productId)
-    return entry
+    return { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? '') }
   })
 }
 
@@ -89,8 +85,7 @@ export function parseRates(raw: unknown): RateEntry[] {
     const rate = normalizeRate(item[1])
     const from = item[2]
     if (userId === null || rate === null || !isIsoDate(from)) continue
-    const productId = positiveInt(item[3])
-    byKey.set(`${userId}|${from}`, productId ? { userId, rate, from, productId } : { userId, rate, from })
+    byKey.set(`${userId}|${from}`, { userId, rate, from })
   }
   return sortRates([...byKey.values()])
 }
@@ -102,9 +97,7 @@ export function sortRates(entries: RateEntry[]): RateEntry[] {
 
 /** Сериализация в компактный JSON. Порядок стабильный, лишних ключей нет. */
 export function serializeRates(entries: RateEntry[]): string {
-  const tuples: StoredRate[] = sortRates(entries).map(e =>
-    e.productId ? [e.userId, e.rate, e.from, e.productId] : [e.userId, e.rate, e.from]
-  )
+  const tuples: StoredRate[] = sortRates(entries).map(e => [e.userId, e.rate, e.from])
   return JSON.stringify(tuples)
 }
 
@@ -125,7 +118,6 @@ export function validateRates(entries: RateEntry[]): RateIssue[] {
     if (positiveInt(e.userId) === null) issues.push({ index, message: 'Не выбран сотрудник' })
     if (normalizeRate(e.rate) === null) issues.push({ index, message: `Ставка должна быть больше 0 и не больше ${MAX_RATE}` })
     if (!isIsoDate(e.from)) issues.push({ index, message: 'Дата начала должна быть в формате ГГГГ-ММ-ДД' })
-    if (e.productId !== undefined && positiveInt(e.productId) === null) issues.push({ index, message: 'Некорректный товар' })
     const key = `${e.userId}|${e.from}`
     const prev = seen.get(key)
     if (prev !== undefined) issues.push({ index, message: `Дубль: у этого сотрудника уже есть ставка с этой даты (строка ${prev + 1})` })

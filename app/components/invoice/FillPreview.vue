@@ -8,7 +8,10 @@ const props = defineProps<{
   errors: FillIssue[]
   warnings: FillIssue[]
   total: number
+  /** Валюта счёта — в ней цены и суммы. */
   currency: string
+  /** Валюта ставок; отличается от валюты счёта — колонка «Ставка» подписана ею (цены пересчитаны). */
+  rateCurrency: string
   /** Адрес портала для ссылок на задачи (`https://portal.bitrix24.ru`). */
   origin: string
   userLabel: (id: number) => string
@@ -16,7 +19,8 @@ const props = defineProps<{
 
 const money = (v: number) => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const hours = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 4 })
-const markupLabel: Record<DraftRow['markupSource'], string> = { product: 'товар', section: 'папка', default: 'на всё' }
+const markupLabel = (row: DraftRow) => row.markupSource === 'tag' ? `#${row.markupTag ?? ''}` : 'на всё'
+const ruDate = (iso: string) => iso.split('-').reverse().join('.')
 
 function taskHref(taskId: number): string {
   return `${props.origin}/company/personal/user/0/tasks/task/view/${taskId}/`
@@ -62,7 +66,15 @@ function taskHref(taskId: number): string {
             v-for="(issue, i) in warnings"
             :key="i"
           >
-            Задача #{{ issue.taskId }}: {{ issue.message }}
+            <a
+              v-if="issue.taskId"
+              :href="taskHref(issue.taskId)"
+              target="_blank"
+              rel="noopener"
+              class="underline"
+            >Задача #{{ issue.taskId }}</a><template v-if="issue.taskId">
+              :
+            </template>{{ issue.message }}
           </li>
         </ul>
       </template>
@@ -88,7 +100,9 @@ function taskHref(taskId: number): string {
               Часы
             </th>
             <th class="py-2 pr-3 font-medium text-right">
-              Ставка
+              Ставка<template v-if="rateCurrency && rateCurrency !== currency">
+                , {{ rateCurrency }}
+              </template>
             </th>
             <th class="py-2 pr-3 font-medium text-right">
               Наценка
@@ -127,12 +141,12 @@ function taskHref(taskId: number): string {
             </td>
             <td
               class="py-2 pr-3 text-right whitespace-nowrap"
-              :title="`Ставка с ${row.rateDate}`"
+              :title="`Ставка на ${ruDate(row.rateDate)}`"
             >
               {{ money(row.baseRate) }}
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ row.markupPercent }}% <span class="opacity-60">({{ markupLabel[row.markupSource] }})</span>
+              {{ row.markupPercent }}% <span class="opacity-60">({{ markupLabel(row) }})</span>
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
               {{ money(row.price) }}

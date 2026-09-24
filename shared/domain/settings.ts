@@ -3,8 +3,8 @@
 // Разбор защитный: хранилище — внешние данные, битое поле заменяется значением по умолчанию.
 // Контракт полей — docs/SETTINGS.md.
 
-import { isRoundingStep, type RoundingStep } from './time'
-import { normalizePercent, type MarkupRule, type MarkupSettings } from './markup'
+import { isRoundingDirection, isRoundingStep, type RoundingDirection, type RoundingStep } from './time'
+import { MAX_TAG_LENGTH, normalizePercent, normalizeTag, type MarkupSettings, type TagMarkupRule } from './markup'
 
 /** Ключ общих настроек в app.option. Суффикс версии — на случай несовместимой смены формата. */
 export const SETTINGS_KEY = 'ift_settings_v1'
@@ -24,13 +24,16 @@ export interface ConsultPrompt {
 export interface AppSettings {
   /** Шаг округления затраченного времени (минуты), 0 — как есть. */
   rounding: RoundingStep
-  /** Валюта ставок. Счёт в другой валюте заполнить нельзя — конвертации нет (docs/PROCESSING.md). */
+  /** Направление округления: вверх (по умолчанию) или к ближайшему. */
+  roundingDirection: RoundingDirection
+  /**
+   * Валюта ставок. Счёт в другой валюте пересчитывается по курсу портала с предупреждением
+   * (currency.ts, docs/PROCESSING.md).
+   */
   currency: string
   /** Кто кроме администраторов может менять ставки (ID сотрудников). */
   rateEditors: number[]
   markup: MarkupSettings
-  /** Товар каталога для строк по умолчанию (если у ставки сотрудника своего товара нет). */
-  defaultProductId: number | null
   /** Код единицы измерения строк (`measureCode`); `null` — не передаём, портал берёт свою. */
   measureCode: number | null
   naming: NamingMode
@@ -49,7 +52,6 @@ export interface AppSettings {
 export const LIMITS = {
   rateEditors: 50,
   markupRules: 200,
-  ruleName: 255,
   prompt: 4000,
   consultPrompts: 20,
   consultTitle: 100
@@ -58,10 +60,10 @@ export const LIMITS = {
 export function defaultSettings(): AppSettings {
   return {
     rounding: 0,
+    roundingDirection: 'up',
     currency: '',
     rateEditors: [],
-    markup: { defaultPercent: 0, sections: [], products: [] },
-    defaultProductId: null,
+    markup: { defaultPercent: 0, tags: [] },
     measureCode: null,
     naming: 'plain',
     prompts: { taskTitle: null, timeBlock: null },
@@ -88,17 +90,24 @@ function nullablePrompt(value: unknown): string | null {
   return trimmed ? trimmed.slice(0, LIMITS.prompt) : null
 }
 
-function parseRules(value: unknown): MarkupRule[] {
+/**
+ * Правила наценки по тегам. Порядок сохраняется — это приоритет. Повтор тега (без учёта регистра)
+ * отбрасывается: правило ниже по списку всё равно никогда бы не сработало.
+ */
+function parseTagRules(value: unknown): TagMarkupRule[] {
   if (!Array.isArray(value)) return []
-  const byId = new Map<number, MarkupRule>()
+  const out: TagMarkupRule[] = []
+  const seen = new Set<string>()
   for (const item of value.slice(0, LIMITS.markupRules)) {
     const o = asObject(item)
-    const id = positiveInt(o.id)
+    const tag = typeof o.tag === 'string' ? o.tag.replace(/\s+/g, ' ').trim() : ''
+    const key = normalizeTag(tag)
     const percent = normalizePercent(o.percent)
-    if (id === null || percent === null) continue
-    byId.set(id, { id, name: text(o.name, LIMITS.ruleName), percent })
+    if (!key || tag.length > MAX_TAG_LENGTH || percent === null || seen.has(key)) continue
+    seen.add(key)
+    out.push({ tag, percent })
   }
-  return [...byId.values()]
+  return out
 }
 
 function parseConsultPrompts(value: unknown): ConsultPrompt[] {
@@ -139,16 +148,15 @@ export function parseSettings(raw: unknown): AppSettings {
   const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : ''
   return {
     rounding: isRoundingStep(o.rounding) ? o.rounding : d.rounding,
+    roundingDirection: isRoundingDirection(o.roundingDirection) ? o.roundingDirection : d.roundingDirection,
     currency: /^[A-Z]{3}$/.test(currency) ? currency : d.currency,
     rateEditors: Array.isArray(o.rateEditors)
       ? [...new Set(o.rateEditors.map(positiveInt).filter((v): v is number => v !== null))].slice(0, LIMITS.rateEditors)
       : d.rateEditors,
     markup: {
       defaultPercent: normalizePercent(markup.defaultPercent) ?? d.markup.defaultPercent,
-      sections: parseRules(markup.sections),
-      products: parseRules(markup.products)
+      tags: parseTagRules(markup.tags)
     },
-    defaultProductId: positiveInt(o.defaultProductId),
     measureCode: positiveInt(o.measureCode),
     naming: o.naming === 'ai' ? 'ai' : 'plain',
     prompts: {

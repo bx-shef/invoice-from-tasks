@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Общие настройки: округление, валюта ставок, источник названий строк, единица измерения, товар строк.
-import { ROUNDING_LABELS, ROUNDING_STEPS } from '#shared/domain/time'
+// Общие настройки: округление (шаг и направление), валюта ставок, источник названий строк,
+// единица измерения.
+import { ROUNDING_DIRECTION_LABELS, ROUNDING_DIRECTIONS, ROUNDING_LABELS, ROUNDING_STEPS } from '#shared/domain/time'
 import type { AppSettings } from '#shared/domain/settings'
 
 const settings = defineModel<AppSettings>({ required: true })
@@ -9,13 +10,13 @@ const b24 = useB24()
 const catalog = useCatalog()
 
 const roundingItems = ROUNDING_STEPS.map(step => ({ label: ROUNDING_LABELS[step], value: step }))
+const directionItems = ROUNDING_DIRECTIONS.map(direction => ({ label: ROUNDING_DIRECTION_LABELS[direction], value: direction }))
 const namingItems = [
   { label: 'Как есть из задачи', value: 'plain', description: 'Тип 1 — заголовок задачи, тип 2 — описание записи времени' },
   { label: 'Через BitrixGPT', value: 'ai', description: 'Короткое понятное клиенту название по заголовку, описанию и отчёту' }
 ]
 const currencies = ref<Array<{ label: string, value: string }>>([])
 const measures = ref<Array<{ label: string, value: number }>>([])
-const productLabel = ref('')
 
 onMounted(async () => {
   try {
@@ -29,7 +30,6 @@ onMounted(async () => {
   } catch {
     measures.value = []
   }
-  if (settings.value.defaultProductId) productLabel.value = await catalog.productName(settings.value.defaultProductId)
 })
 
 const measureModel = computed({
@@ -42,20 +42,31 @@ const measureModel = computed({
   <div class="space-y-5">
     <B24FormField
       label="Округление затраченного времени"
-      description="Время округляется вверх: начатый интервал считается целиком"
+      description="Тип 1 округляет время задачи целиком, тип 2 — каждую запись"
     >
-      <B24Select
-        v-model="settings.rounding"
-        :items="roundingItems"
-        value-key="value"
-        class="w-72"
-        data-testid="settings-rounding"
-      />
+      <div class="flex flex-wrap gap-3">
+        <B24Select
+          v-model="settings.rounding"
+          :items="roundingItems"
+          value-key="value"
+          class="w-56"
+          data-testid="settings-rounding"
+        />
+        <B24Select
+          v-model="settings.roundingDirection"
+          :items="directionItems"
+          value-key="value"
+          class="w-96"
+          :disabled="settings.rounding === 0"
+          aria-label="Направление округления"
+          data-testid="settings-rounding-direction"
+        />
+      </div>
     </B24FormField>
 
     <B24FormField
       label="Валюта ставок"
-      description="Счёт в другой валюте заполнить нельзя — конвертации нет"
+      description="Счёт в другой валюте пересчитывается по курсу из справочника валют CRM — с предупреждением проверить курс"
       required
     >
       <B24Select
@@ -79,7 +90,7 @@ const measureModel = computed({
 
     <B24FormField
       label="Единица измерения строк"
-      description="Например, «час». Не выбрано — портал возьмёт единицу товара или «шт»"
+      description="Например, «час». Не выбрано — портал поставит единицу по умолчанию"
     >
       <B24Select
         v-model="measureModel"
@@ -87,33 +98,6 @@ const measureModel = computed({
         value-key="value"
         class="w-72"
       />
-    </B24FormField>
-
-    <B24FormField
-      label="Товар каталога для строк по умолчанию"
-      description="Нужен наценкам по папкам и товарам. У ставки сотрудника может быть свой товар"
-    >
-      <div class="space-y-2">
-        <div
-          v-if="settings.defaultProductId"
-          class="flex items-center gap-2"
-        >
-          <B24Badge
-            color="air-secondary"
-            :label="productLabel || `#${settings.defaultProductId}`"
-          />
-          <B24Button
-            size="sm"
-            color="air-tertiary"
-            label="Убрать"
-            @click="settings.defaultProductId = null"
-          />
-        </div>
-        <CatalogPicker
-          kind="product"
-          @pick="(o) => { settings.defaultProductId = o.id; productLabel = o.name }"
-        />
-      </div>
     </B24FormField>
   </div>
 </template>

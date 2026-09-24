@@ -13,22 +13,44 @@ describe('parseSettings — защитный разбор app.option', () => {
       rounding: 30,
       currency: 'rub',
       rateEditors: [5, '6', 5, -1, 'x'],
-      markup: { defaultPercent: '70', sections: [{ id: 11, name: 'ЧЧ1', percent: 20 }], products: [{ id: 1, name: 'Т1', percent: 25 }] },
+      roundingDirection: 'nearest',
+      markup: { defaultPercent: '70', tags: [{ tag: ' ЧЧ1 ', percent: 20 }, { tag: 'ЧЧ2', percent: '120' }] },
       naming: 'ai',
       prompts: { taskTitle: '  свой промпт  ', timeBlock: '' }
     }))
     expect(s.rounding).toBe(30)
     expect(s.currency).toBe('RUB')
     expect(s.rateEditors).toEqual([5, 6])
-    expect(s.markup.defaultPercent).toBe(70)
+    expect(s.roundingDirection).toBe('nearest')
+    expect(s.markup).toEqual({ defaultPercent: 70, tags: [{ tag: 'ЧЧ1', percent: 20 }, { tag: 'ЧЧ2', percent: 120 }] })
     expect(s.naming).toBe('ai')
     expect(s.prompts).toEqual({ taskTitle: 'свой промпт', timeBlock: null })
   })
 
-  it('недопустимый шаг округления и валюта отбрасываются', () => {
-    const s = parseSettings({ rounding: 15, currency: 'RUBLES' })
+  it('недопустимый шаг и направление округления, валюта отбрасываются', () => {
+    const s = parseSettings({ rounding: 15, roundingDirection: 'down', currency: 'RUBLES' })
     expect(s.rounding).toBe(0)
+    expect(s.roundingDirection).toBe('up')
     expect(s.currency).toBe('')
+  })
+
+  it('правила по тегам: порядок сохраняется, пустые, битые и повторы тега отбрасываются', () => {
+    const s = parseSettings({ markup: { defaultPercent: 10, tags: [
+      { tag: 'Срочно', percent: 50 },
+      { tag: '  ', percent: 5 },
+      { tag: 'Дизайн', percent: -1 },
+      { tag: '#срочно', percent: 70 },
+      { tag: 'x'.repeat(101), percent: 5 },
+      'мусор',
+      { tag: 'Дизайн', percent: 30 }
+    ] } })
+    expect(s.markup.tags).toEqual([{ tag: 'Срочно', percent: 50 }, { tag: 'Дизайн', percent: 30 }])
+  })
+
+  it('настройки до #3 (наценки по папкам и товарам, товар строк) читаются без них', () => {
+    const s = parseSettings({ markup: { defaultPercent: 70, sections: [{ id: 11, name: 'ЧЧ1', percent: 20 }], products: [] }, defaultProductId: 5 })
+    expect(s.markup).toEqual({ defaultPercent: 70, tags: [] })
+    expect(s).not.toHaveProperty('defaultProductId')
   })
 
   it('не переносит посторонние ключи, в том числе __proto__', () => {

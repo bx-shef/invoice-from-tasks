@@ -1,18 +1,36 @@
 <script setup lang="ts">
-// Наценки: «на всё», по папкам каталога и по товарам. Приоритет — товар → папка → на всё.
-import { MAX_MARKUP, type MarkupRule } from '#shared/domain/markup'
+// Наценки: «на всё» и правила по тегам задач. Правила проверяются сверху вниз, срабатывает
+// первое, чей тег есть у задачи (#3, markup.ts). Порядок меняется стрелками.
+import { MAX_MARKUP, MAX_TAG_LENGTH, normalizeTag } from '#shared/domain/markup'
 import type { AppSettings } from '#shared/domain/settings'
 
 const settings = defineModel<AppSettings>({ required: true })
 
-function addRule(list: MarkupRule[], option: { id: number, name: string }) {
-  if (list.some(r => r.id === option.id)) return
-  list.push({ id: option.id, name: option.name, percent: 0 })
+const newTag = ref('')
+
+/** Тег уже есть в правилах (без учёта регистра и `#`) — второе такое правило никогда не сработает. */
+const duplicate = computed(() => {
+  const key = normalizeTag(newTag.value)
+  return !!key && settings.value.markup.tags.some(r => normalizeTag(r.tag) === key)
+})
+
+function addRule() {
+  const tag = newTag.value.replace(/\s+/g, ' ').trim()
+  if (!normalizeTag(tag) || duplicate.value) return
+  settings.value.markup.tags.push({ tag, percent: 0 })
+  newTag.value = ''
 }
 
-function removeRule(list: MarkupRule[], id: number) {
-  const index = list.findIndex(r => r.id === id)
-  if (index >= 0) list.splice(index, 1)
+function move(index: number, delta: -1 | 1) {
+  const list = settings.value.markup.tags
+  const target = index + delta
+  if (target < 0 || target >= list.length) return
+  const [rule] = list.splice(index, 1)
+  if (rule) list.splice(target, 0, rule)
+}
+
+function removeRule(index: number) {
+  settings.value.markup.tags.splice(index, 1)
 }
 </script>
 
@@ -20,7 +38,7 @@ function removeRule(list: MarkupRule[], id: number) {
   <div class="space-y-6">
     <B24FormField
       label="Наценка на всё, %"
-      description="Применяется, если не сработало правило товара или папки"
+      description="Применяется, если у задачи нет ни одного тега из правил ниже"
     >
       <B24InputNumber
         v-model="settings.markup.defaultPercent"
@@ -34,65 +52,85 @@ function removeRule(list: MarkupRule[], id: number) {
 
     <section class="space-y-2">
       <h3 class="font-medium">
-        Папки каталога
+        Наценки по тегам задач
       </h3>
       <p class="text-sm opacity-70">
-        Правило папки действует и на вложенные папки; ближайшая папка сильнее родительской.
+        Правила проверяются сверху вниз: срабатывает первое, чей тег есть у задачи. Регистр и знак «#»
+        не важны. Наценка относится ко всем строкам задачи.
       </p>
-      <div
-        v-for="rule in settings.markup.sections"
-        :key="rule.id"
-        class="flex items-center gap-3"
+      <ol
+        v-if="settings.markup.tags.length"
+        class="space-y-2"
+        data-testid="markup-tags"
       >
-        <span class="flex-1">{{ rule.name || `#${rule.id}` }}</span>
-        <B24InputNumber
-          v-model="rule.percent"
-          :min="0"
-          :max="MAX_MARKUP"
-          class="w-32"
-          :aria-label="`Наценка для папки ${rule.name}`"
+        <li
+          v-for="(rule, index) in settings.markup.tags"
+          :key="rule.tag"
+          class="flex items-center gap-3"
+        >
+          <span class="w-6 text-right opacity-60">{{ index + 1 }}.</span>
+          <span class="flex-1">#{{ rule.tag }}</span>
+          <B24InputNumber
+            v-model="rule.percent"
+            :min="0"
+            :max="MAX_MARKUP"
+            class="w-32"
+            :aria-label="`Наценка для тега ${rule.tag}`"
+          />
+          <B24Button
+            size="xs"
+            color="air-tertiary"
+            label="↑"
+            :disabled="index === 0"
+            :aria-label="`Поднять правило ${rule.tag}`"
+            @click="move(index, -1)"
+          />
+          <B24Button
+            size="xs"
+            color="air-tertiary"
+            label="↓"
+            :disabled="index === settings.markup.tags.length - 1"
+            :aria-label="`Опустить правило ${rule.tag}`"
+            @click="move(index, 1)"
+          />
+          <B24Button
+            size="xs"
+            color="air-tertiary"
+            label="Убрать"
+            @click="removeRule(index)"
+          />
+        </li>
+      </ol>
+      <p
+        v-else
+        class="text-sm opacity-70"
+      >
+        Правил пока нет — на все строки действует наценка «на всё».
+      </p>
+      <div class="flex gap-2">
+        <B24Input
+          v-model="newTag"
+          class="flex-1"
+          :maxlength="MAX_TAG_LENGTH"
+          placeholder="Тег задачи, например «срочно»"
+          aria-label="Новый тег"
+          data-testid="markup-new-tag"
+          @keydown.enter.prevent="addRule"
         />
         <B24Button
-          size="xs"
-          color="air-tertiary"
-          label="Убрать"
-          @click="removeRule(settings.markup.sections, rule.id)"
+          color="air-secondary"
+          label="Добавить правило"
+          :disabled="!normalizeTag(newTag) || duplicate"
+          data-testid="markup-add-tag"
+          @click="addRule"
         />
       </div>
-      <CatalogPicker
-        kind="section"
-        @pick="(o) => addRule(settings.markup.sections, o)"
-      />
-    </section>
-
-    <section class="space-y-2">
-      <h3 class="font-medium">
-        Товары
-      </h3>
-      <div
-        v-for="rule in settings.markup.products"
-        :key="rule.id"
-        class="flex items-center gap-3"
+      <p
+        v-if="duplicate"
+        class="text-sm text-(--ui-color-accent-main-alert)"
       >
-        <span class="flex-1">{{ rule.name || `#${rule.id}` }}</span>
-        <B24InputNumber
-          v-model="rule.percent"
-          :min="0"
-          :max="MAX_MARKUP"
-          class="w-32"
-          :aria-label="`Наценка для товара ${rule.name}`"
-        />
-        <B24Button
-          size="xs"
-          color="air-tertiary"
-          label="Убрать"
-          @click="removeRule(settings.markup.products, rule.id)"
-        />
-      </div>
-      <CatalogPicker
-        kind="product"
-        @pick="(o) => addRule(settings.markup.products, o)"
-      />
+        Правило для этого тега уже есть
+      </p>
     </section>
   </div>
 </template>

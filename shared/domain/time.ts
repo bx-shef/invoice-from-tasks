@@ -12,10 +12,29 @@ export type RoundingStep = typeof ROUNDING_STEPS[number]
 /** Подписи шагов для интерфейса настроек — в одном месте со списком, чтобы не разъехались. */
 export const ROUNDING_LABELS: Readonly<Record<RoundingStep, string>> = {
   0: 'Как есть (до секунды)',
-  60: 'Вверх до часа',
-  30: 'Вверх до 30 минут',
-  10: 'Вверх до 10 минут',
-  5: 'Вверх до 5 минут'
+  60: 'До часа',
+  30: 'До 30 минут',
+  10: 'До 10 минут',
+  5: 'До 5 минут'
+}
+
+/**
+ * Направление округления (решение владельца по #3: настройка, по умолчанию вверх).
+ * • `up` — начатый шаг считается целиком: так выставляют время в счетах;
+ * • `nearest` — к ближайшему, половина шага — вверх. Запись короче половины шага обнуляется.
+ */
+export const ROUNDING_DIRECTIONS = ['up', 'nearest'] as const
+
+export type RoundingDirection = typeof ROUNDING_DIRECTIONS[number]
+
+export const ROUNDING_DIRECTION_LABELS: Readonly<Record<RoundingDirection, string>> = {
+  up: 'Вверх: начатый интервал — целиком',
+  nearest: 'К ближайшему: короче половины шага — ноль'
+}
+
+/** Проверка направления для разбора сохранённых настроек. */
+export function isRoundingDirection(value: unknown): value is RoundingDirection {
+  return (ROUNDING_DIRECTIONS as readonly unknown[]).includes(value)
 }
 
 /** Сколько знаков после запятой несёт количество часов в строке счёта. */
@@ -27,21 +46,23 @@ export function isRoundingStep(value: unknown): value is RoundingStep {
 }
 
 /**
- * Округляет длительность ВВЕРХ до шага.
+ * Округляет длительность до шага в заданном направлении.
  *
- * ⚠ Направление — вверх: так выставляют время в счетах («начатый час — час»). Округление к
- * ближайшему обнулило бы короткие записи (3 минуты при шаге в час), и работа пропала бы из
- * счёта молча. Решение записано в docs/PROCESSING.md; сменить его — вопрос владельцу.
+ * ⚠ По умолчанию — вверх («начатый час — час»). К ближайшему короткая запись (3 минуты при шаге
+ * в час) становится нулём: строку с нулём часов сборка пропускает С ПРЕДУПРЕЖДЕНИЕМ (fill.ts),
+ * чтобы работа не пропала из счёта молча. Правило — docs/PROCESSING.md, «Время».
  *
  * @param seconds длительность в секундах; отрицательное и нечисловое считаются нулём
  * @param step шаг в минутах, `0` — без округления
+ * @param direction `up` — вверх, `nearest` — к ближайшему (половина — вверх)
  * @returns длительность в секундах, целая
  */
-export function roundSeconds(seconds: number, step: RoundingStep): number {
+export function roundSeconds(seconds: number, step: RoundingStep, direction: RoundingDirection = 'up'): number {
   const s = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0
   if (step === 0 || s === 0) return s
   const stepSeconds = step * 60
-  return Math.ceil(s / stepSeconds) * stepSeconds
+  const steps = direction === 'nearest' ? Math.round(s / stepSeconds) : Math.ceil(s / stepSeconds)
+  return steps * stepSeconds
 }
 
 /**

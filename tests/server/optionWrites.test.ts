@@ -110,7 +110,7 @@ describe('saveRatesFor', () => {
     const p = portalOptions()
     const { c } = ctx(p, { isAdmin: true })
     await saveRatesFor(c, { rates: [{ ...rates[0], note: 'секрет', productId: 3 }] })
-    expect(p.options[RATES_KEY]).toBe('[[5,1500,"2026-01-01",3]]')
+    expect(p.options[RATES_KEY]).toBe('[[5,1500,"2026-01-01"]]')
   })
 
   it('не влезает в бюджет — 413 и без записи', async () => {
