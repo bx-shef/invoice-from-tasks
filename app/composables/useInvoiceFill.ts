@@ -4,7 +4,7 @@
 // Методы и их поля — docs/REST_METHODS.md; методы задач, которые есть в REST v3, — через v3.
 
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
-import { currencyConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
+import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
 import { applyNames, buildRows, rowsTotal, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
@@ -20,6 +20,7 @@ import {
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
+import { BATCH_MAX } from '~/composables/useB24'
 import { B24CallError } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
@@ -191,13 +192,35 @@ export function useInvoiceFill() {
 
   /**
    * Теги задач — для наценки по тегам (markup.ts). Список задач v2 их не отдаёт, а v3 — только
-   * в `tasks.task.get` («Поля задачи в REST 3.0»): пакетами v3 по 50 задач. Правил по тегам нет —
-   * не читаем вовсе: лишние запросы и лишняя точка отказа.
+   * в `tasks.task.get` («Поля задачи в REST 3.0»): пакетами v3 по {@link BATCH_MAX} задач. Правил
+   * по тегам нет — не читаем вовсе: лишние запросы и лишняя точка отказа.
+   *
+   * Пакет v3 выполняется целиком или никак и не говорит, какая команда упала. Поэтому при сбое
+   * порции её задачи читаются по одной: неудачные попадают в `failures` и становятся ошибкой
+   * ПО ЗАДАЧЕ (fill.ts → tagFailures), а не общей ошибкой сборки.
    */
-  async function withTags(list: TaskInfo[]): Promise<TaskInfo[]> {
-    if (!settings.value.markup.tags.length || !list.length) return list
-    const answers = await b24.batchV3<unknown>(list.map(t => ['tasks.task.get', { id: t.id, select: TAG_SELECT }]))
-    return list.map((t, i) => ({ ...t, tags: parseTaskTags(answers[i]) }))
+  async function withTags(list: TaskInfo[]): Promise<{ tasks: TaskInfo[], failures: Map<number, string> }> {
+    const failures = new Map<number, string>()
+    if (!settings.value.markup.tags.length || !list.length) return { tasks: list, failures }
+    const readOne = (t: TaskInfo): [string, Record<string, unknown>] => ['tasks.task.get', { id: t.id, select: TAG_SELECT }]
+    const out: TaskInfo[] = []
+    for (const part of chunk(list, BATCH_MAX)) {
+      const answers = await b24.batchV3<unknown>(part.map(readOne)).catch(() => null)
+      if (answers) {
+        part.forEach((t, i) => out.push({ ...t, tags: parseTaskTags(answers[i]) }))
+        continue
+      }
+      out.push(...await mapLimit(part, READ_CONCURRENCY, async (t) => {
+        try {
+          const [method, params] = readOne(t)
+          return { ...t, tags: parseTaskTags(await b24.callV3<unknown>(method, params)) }
+        } catch (e) {
+          failures.set(t.id, e instanceof Error ? e.message : String(e))
+          return t
+        }
+      }))
+    }
+    return { tasks: out, failures }
   }
 
   /**
@@ -206,7 +229,7 @@ export function useInvoiceFill() {
    */
   async function conversionFor(inv: InvoiceInfo): Promise<CurrencyConversion | null> {
     const from = settings.value.currency
-    if (!inv.currencyId || inv.currencyId === from) return null
+    if (!needsConversion(from, inv.currencyId)) return null
     const res = currencyConversion(from, inv.currencyId, parseCurrencies(await b24.call<unknown>('crm.currency.list', {})))
     if (!res.ok) throw new Error(res.problem)
     return res.conversion
@@ -233,7 +256,8 @@ export function useInvoiceFill() {
       return
     }
     try {
-      tasks.value = await withTags(await fetchTasks(source, inv))
+      const tagged = await withTags(await fetchTasks(source, inv))
+      tasks.value = tagged.tasks
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
 
       const involved = new Set<number>()
@@ -242,7 +266,16 @@ export function useInvoiceFill() {
       await users.load([...involved])
       const userNames = new Map(Object.entries(users.names.value).map(([id, name]) => [Number(id), name]))
 
-      let built = buildRows({ mode, tasks: tasks.value, entries, rates: rates.value, settings: settings.value, conversion: conversion.value, userNames })
+      let built = buildRows({
+        mode,
+        tasks: tasks.value,
+        entries,
+        rates: rates.value,
+        settings: settings.value,
+        conversion: conversion.value,
+        tagFailures: tagged.failures,
+        userNames
+      })
 
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
         const names: Record<string, string> = {}

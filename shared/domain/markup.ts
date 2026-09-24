@@ -4,7 +4,7 @@
 
 /** Правило наценки: тег задачи и процент. Порядок правил в списке — их приоритет. */
 export interface TagMarkupRule {
-  /** Тег так, как его ввёл человек (для показа); сравнение — через {@link normalizeTag}. */
+  /** Тег для показа — как ввёл человек, без `#` в начале ({@link cleanTag}); сравнение — через {@link normalizeTag}. */
   tag: string
   /** Наценка в процентах; 0 — без наценки, 120 — цена ×2,2. */
   percent: number
@@ -41,13 +41,21 @@ export function normalizePercent(value: unknown): number | null {
 }
 
 /**
+ * Тег правила для хранения и показа: без `#` в начале и лишних пробелов, регистр — как ввели.
+ * `#` интерфейс дорисовывает сам; сохранённый с решёткой тег показывался бы как `##срочно`.
+ */
+export function cleanTag(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.replace(/^\s*#+/, '').replace(/\s+/g, ' ').trim()
+}
+
+/**
  * Ключ сравнения тегов: без `#` в начале, без лишних пробелов, без учёта регистра.
  * «#Срочно», « срочно » и «СРОЧНО» — один тег: человек вводит правило руками, а тег в задаче
  * ставит другой человек, и расхождение в регистре не должно молча менять цену.
  */
 export function normalizeTag(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return value.replace(/^\s*#+/, '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('ru')
+  return cleanTag(value).toLocaleLowerCase('ru')
 }
 
 /**

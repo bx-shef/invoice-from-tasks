@@ -4,7 +4,7 @@
 // Контракт полей — docs/SETTINGS.md.
 
 import { isRoundingDirection, isRoundingStep, type RoundingDirection, type RoundingStep } from './time'
-import { MAX_TAG_LENGTH, normalizePercent, normalizeTag, type MarkupSettings, type TagMarkupRule } from './markup'
+import { cleanTag, MAX_TAG_LENGTH, normalizePercent, normalizeTag, type MarkupSettings, type TagMarkupRule } from './markup'
 
 /** Ключ общих настроек в app.option. Суффикс версии — на случай несовместимой смены формата. */
 export const SETTINGS_KEY = 'ift_settings_v1'
@@ -100,7 +100,7 @@ function parseTagRules(value: unknown): TagMarkupRule[] {
   const seen = new Set<string>()
   for (const item of value.slice(0, LIMITS.markupRules)) {
     const o = asObject(item)
-    const tag = typeof o.tag === 'string' ? o.tag.replace(/\s+/g, ' ').trim() : ''
+    const tag = cleanTag(o.tag)
     const key = normalizeTag(tag)
     const percent = normalizePercent(o.percent)
     if (!key || tag.length > MAX_TAG_LENGTH || percent === null || seen.has(key)) continue

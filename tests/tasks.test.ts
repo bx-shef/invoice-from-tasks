@@ -21,6 +21,11 @@ describe('разбор задач', () => {
     expect(parseTaskTags({ tags: [{ name: 'Без обёртки' }] })).toEqual(['Без обёртки'])
   })
 
+  it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
+    const exact = 'т'.repeat(100)
+    expect(parseTaskTags({ item: { tags: [{ name: exact }, { name: `${exact}ы` }] } })).toEqual([exact])
+  })
+
   it('берёт строки из обёртки { tasks: [...] }', () => {
     expect(listRows({ tasks: [{ id: 1 }] }, 'tasks')).toHaveLength(1)
     expect(listRows(null, 'tasks')).toEqual([])

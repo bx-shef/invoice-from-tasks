@@ -40,7 +40,8 @@
    - предел `app.option` (кнопка «Замерить предел»);
    - код привязки задачи к счёту (`SI_<id>` или `T1f_<id>`);
    - ответы REST v3: `tasks.task.get` с `tags.*` (теги задачи) и `tasks.task.result.list`
-     (`/rest/api/…`), пакет `actions.v3.batch`;
+     (`/rest/api/…`, фильтр тройкой `['taskId', '=', id]` — принимает ли), пакет
+     `actions.v3.batch`;
    - `crm.currency.list` отдаёт курсы (`AMOUNT`, `AMOUNT_CNT`) правами обычного сотрудника;
    - как портал принимает `task.elapseditem.getlist` с позиционными параметрами;
    - установка доходит до сервера: событие приходит с `Content-Length` (иначе `411`), в нём есть

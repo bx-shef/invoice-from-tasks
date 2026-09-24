@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { currencyConversion, parseCurrencies } from '#shared/domain/currency'
+import { currencyConversion, needsConversion, parseCurrencies } from '#shared/domain/currency'
 
 // Форма ответа crm.currency.list — из примера документации метода (числа строками).
 const raw = [
@@ -17,6 +17,15 @@ describe('parseCurrencies', () => {
     ])
   })
 
+  it('базовая — только при BASE = Y; поля нет или другое значение — не базовая', () => {
+    const [noBase, other] = parseCurrencies([
+      { CURRENCY: 'EUR', AMOUNT_CNT: '1', AMOUNT: '100' },
+      { CURRENCY: 'GBP', AMOUNT_CNT: '1', AMOUNT: '110', BASE: 'yes' }
+    ])
+    expect(noBase?.base).toBe(false)
+    expect(other?.base).toBe(false)
+  })
+
   it('валюта без курса, с нулём или мусором в коде отбрасывается', () => {
     expect(parseCurrencies([
       { CURRENCY: 'EUR', AMOUNT_CNT: '1', AMOUNT: '0' },
@@ -32,8 +41,18 @@ describe('parseCurrencies', () => {
 describe('currencyConversion', () => {
   const currencies = parseCurrencies(raw)
 
-  it('валюты совпадают — пересчёта нет', () => {
+  it('валюты совпадают или код пустой — пересчёта нет', () => {
     expect(currencyConversion('RUB', 'RUB', currencies)).toEqual({ ok: true, conversion: null })
+    // Счёт без валюты считается в валюте ставок, как до #3; ставки без валюты — не пересчитываем.
+    expect(currencyConversion('RUB', '', currencies)).toEqual({ ok: true, conversion: null })
+    expect(currencyConversion('', 'EUR', currencies)).toEqual({ ok: true, conversion: null })
+  })
+
+  it('needsConversion — только две непустые разные валюты', () => {
+    expect(needsConversion('RUB', 'USD')).toBe(true)
+    expect(needsConversion('RUB', 'RUB')).toBe(false)
+    expect(needsConversion('RUB', '')).toBe(false)
+    expect(needsConversion('', 'USD')).toBe(false)
   })
 
   it('рубли → доллары: множитель и предупреждение «проверьте курс» с датой курса', () => {

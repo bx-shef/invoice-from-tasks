@@ -47,6 +47,17 @@ describe('parseSettings — защитный разбор app.option', () => {
     expect(s.markup.tags).toEqual([{ tag: 'Срочно', percent: 50 }, { tag: 'Дизайн', percent: 30 }])
   })
 
+  it('тег правила хранится без # в начале; ровно 100 символов — допустимо', () => {
+    const exact = 'т'.repeat(100)
+    const s = parseSettings({ markup: { tags: [{ tag: ' ##Срочно ', percent: 5 }, { tag: exact, percent: 1 }] } })
+    expect(s.markup.tags).toEqual([{ tag: 'Срочно', percent: 5 }, { tag: exact, percent: 1 }])
+  })
+
+  it('правила — не массив (объект, строка) — правил нет', () => {
+    expect(parseSettings({ markup: { tags: { tag: 'срочно', percent: 5 } } }).markup.tags).toEqual([])
+    expect(parseSettings({ markup: { tags: 'срочно' } }).markup.tags).toEqual([])
+  })
+
   it('настройки до #3 (наценки по папкам и товарам, товар строк) читаются без них', () => {
     const s = parseSettings({ markup: { defaultPercent: 70, sections: [{ id: 11, name: 'ЧЧ1', percent: 20 }], products: [] }, defaultProductId: 5 })
     expect(s.markup).toEqual({ defaultPercent: 70, tags: [] })

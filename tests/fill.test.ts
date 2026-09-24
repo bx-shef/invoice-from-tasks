@@ -65,7 +65,7 @@ describe('тип 1 — задача как строка', () => {
     const { rows, errors, warnings } = buildRows(input({ entries: tiny, settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
     expect(errors).toEqual([])
     expect(rows).toEqual([])
-    expect(warnings).toEqual([{ taskId: 10, message: 'время 10 мин при округлении к ближайшему стало нулём — строка пропущена' }])
+    expect(warnings).toEqual([{ taskId: 10, message: 'время 10 мин после округления стало нулём — строка пропущена' }])
   })
 
   it('ставка менялась за время задачи — строка по последней записи и предупреждение', () => {
@@ -94,6 +94,23 @@ describe('тип 1 — задача как строка', () => {
     const withZero = [...entries, { ...entries[0]!, id: 103, seconds: 0, date: '2026-07-01' }]
     const { rows } = buildRows(input({ entries: withZero, rates: [...input().rates, { userId: 7, rate: 500, from: '2026-07-01' }] }))
     expect(rows[0]).toMatchObject({ rateDate: '2026-06-02', baseRate: 200 })
+  })
+
+  it('записи со временем, но без даты — ошибка: не на что выбрать ставку', () => {
+    const { rows, errors } = buildRows(input({ entries: entries.map(e => ({ ...e, date: null })) }))
+    expect(rows).toEqual([])
+    expect(errors).toEqual([{ taskId: 10, message: 'у записей времени нет даты — не на что выбрать ставку' }])
+  })
+
+  it('теги задачи не прочитаны — ошибка по этой задаче, остальные задачи считаются', () => {
+    const other: TaskInfo = { ...task, id: 11, title: 'Другая' }
+    const { rows, errors } = buildRows(input({
+      tasks: [task, other],
+      entries: [...entries, { ...entries[0]!, id: 201, taskId: 11 }],
+      tagFailures: new Map([[10, 'tasks.task.get: Access denied']])
+    }))
+    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (tasks.task.get: Access denied) — не на что выбрать наценку' }])
+    expect(rows.map(r => r.taskId)).toEqual([11])
   })
 
   it('нет ставки ответственного — ошибка, строки нет', () => {
@@ -147,6 +164,13 @@ describe('пересчёт в валюту счёта', () => {
     expect(warnings.filter(w => w.message === conversion.notice)).toHaveLength(1)
   })
 
+  it('пересчёт и наценка по тегу вместе: курс, потом наценка тега', () => {
+    const s = settings({ markup: { defaultPercent: 70, tags: [{ tag: 'ЧЧ1', percent: 20 }] } })
+    // 200 ₽ / 80 = 2,5 $ × 1,2 = 3 $.
+    const { rows } = buildRows(input({ settings: s, conversion, tasks: [{ ...task, tags: ['ЧЧ1'] }] }))
+    expect(rows[0]).toMatchObject({ price: 3, markupSource: 'tag', markupTag: 'ЧЧ1', sum: 4.5 })
+  })
+
   it('строк нет — и предупреждения о курсе нет', () => {
     const { warnings } = buildRows(input({ rates: [], conversion }))
     expect(warnings).toEqual([])
@@ -176,13 +200,31 @@ describe('тип 2 — записи времени как строки', () => {
     expect(rows.map(r => r.price)).toEqual([150, 120])
   })
 
+  it('две задачи с разными тегами — у каждой строки наценка своей задачи, а не соседней', () => {
+    const s = settings({ markup: { defaultPercent: 0, tags: [{ tag: 'срочно', percent: 50 }, { tag: 'дизайн', percent: 100 }] } })
+    const second: TaskInfo = { ...task, id: 11, tags: ['Дизайн'] }
+    const { rows } = buildRows(input({
+      mode: 'time',
+      settings: s,
+      tasks: [{ ...task, tags: ['Срочно'] }, second],
+      entries: [entries[0]!, { ...entries[0]!, id: 201, taskId: 11 }]
+    }))
+    expect(rows.map(r => [r.key, r.markupTag, r.price])).toEqual([['e101', 'срочно', 150], ['e201', 'дизайн', 200]])
+  })
+
+  it('теги задачи не прочитаны — ошибка по задаче, её записи строк не дают', () => {
+    const { rows, errors } = buildRows(input({ mode: 'time', tagFailures: new Map([[10, 'сбой']]) }))
+    expect(rows).toEqual([])
+    expect(errors).toEqual([{ taskId: 10, message: 'теги задачи не прочитаны (сбой) — не на что выбрать наценку' }])
+  })
+
   it('запись, ставшая нулём при округлении к ближайшему, — пропуск с предупреждением', () => {
     const { rows, warnings } = buildRows(input({ mode: 'time', settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
     // 60 мин → 1 ч, 30 мин → 1 ч (половина — вверх); обнуления нет.
     expect(rows.map(r => r.quantity)).toEqual([1, 1])
     const short = buildRows(input({ mode: 'time', entries: [{ ...entries[1]!, seconds: 1200 }], settings: settings({ rounding: 60, roundingDirection: 'nearest' }) }))
     expect(short.rows).toEqual([])
-    expect(short.warnings).toEqual([{ taskId: 10, entryId: 102, message: 'время 20 мин при округлении к ближайшему стало нулём — строка пропущена' }])
+    expect(short.warnings).toEqual([{ taskId: 10, entryId: 102, message: 'время 20 мин после округления стало нулём — строка пропущена' }])
     expect(warnings).toEqual([])
   })
 

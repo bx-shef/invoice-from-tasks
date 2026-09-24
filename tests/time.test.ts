@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, isIsoDate, portalDate, roundSeconds, secondsToHours } from '#shared/domain/time'
+import { formatDuration, formatRuDate, isIsoDate, portalDate, roundSeconds, secondsToHours } from '#shared/domain/time'
 
 describe('roundSeconds — округление затраченного времени', () => {
   it('«как есть» не трогает секунды', () => {
@@ -40,6 +40,14 @@ describe('roundSeconds — округление затраченного вре�
   it('по умолчанию — вверх; «как есть» не зависит от направления', () => {
     expect(roundSeconds(1, 60)).toBe(roundSeconds(1, 60, 'up'))
     expect(roundSeconds(1234, 0, 'nearest')).toBe(1234)
+  })
+})
+
+describe('formatRuDate', () => {
+  it('ГГГГ-ММ-ДД → ДД.ММ.ГГГГ; не дата — как есть', () => {
+    expect(formatRuDate('2026-09-01')).toBe('01.09.2026')
+    expect(formatRuDate('2026-02-31')).toBe('2026-02-31')
+    expect(formatRuDate('')).toBe('')
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMarkup, normalizePercent, normalizeTag, resolveMarkup, type MarkupSettings } from '#shared/domain/markup'
+import { applyMarkup, cleanTag, normalizePercent, normalizeTag, resolveMarkup, type MarkupSettings } from '#shared/domain/markup'
 
 // Решение по #3: на всё 70 %, тег «ЧЧ1» — 20 %, тег «ЧЧ2» — 120 %; порядок правил — приоритет.
 const settings: MarkupSettings = {
@@ -33,6 +33,13 @@ describe('resolveMarkup — первое совпадение по тегам з
   it('правило с нулевой наценкой — тоже совпадение (не проваливается в «на всё»)', () => {
     expect(resolveMarkup({ defaultPercent: 70, tags: [{ tag: 'без наценки', percent: 0 }] }, ['Без наценки']))
       .toEqual({ percent: 0, source: 'tag', tag: 'без наценки' })
+  })
+})
+
+describe('cleanTag', () => {
+  it('убирает # и лишние пробелы, регистр сохраняет', () => {
+    expect(cleanTag('  ##Важный   Клиент ')).toBe('Важный Клиент')
+    expect(cleanTag(null)).toBe('')
   })
 })
 

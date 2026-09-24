@@ -2,6 +2,8 @@
 // что курс стоит проверить»). Курсы — из справочника валют CRM (crm.currency.list): курс валюты —
 // цена `AMOUNT_CNT` её единиц в базовой валюте портала (`AMOUNT`). Правило — docs/PROCESSING.md.
 
+import { formatRuDate } from './time'
+
 /** Валюта справочника CRM — только то, что нужно для пересчёта и предупреждения. */
 export interface PortalCurrency {
   code: string
@@ -55,10 +57,12 @@ function formatRate(value: number): string {
   return String(Number(value.toFixed(RATE_DIGITS))).replace('.', ',')
 }
 
-/** `2026-09-20` → `20.09.2026`. */
-function formatDate(iso: string): string {
-  const [y, m, d] = iso.split('-')
-  return `${d}.${m}.${y}`
+/**
+ * Нужен ли пересчёт: у счёта есть валюта, и она не совпадает с валютой ставок. Счёт без валюты
+ * (портал её не отдал) считается в валюте ставок — как до #3.
+ */
+export function needsConversion(from: string, to: string): boolean {
+  return !!from && !!to && from !== to
 }
 
 export type ConversionResult
@@ -70,14 +74,14 @@ export type ConversionResult
  * Курса одной из валют в портале нет — остановка: считать по неизвестному курсу нельзя.
  */
 export function currencyConversion(from: string, to: string, currencies: readonly PortalCurrency[]): ConversionResult {
-  if (!from || !to || from === to) return { ok: true, conversion: null }
+  if (!needsConversion(from, to)) return { ok: true, conversion: null }
   const src = currencies.find(c => c.code === from)
   const dst = currencies.find(c => c.code === to)
   const missing = [src ? null : from, dst ? null : to].filter(Boolean)
   if (!src || !dst) {
     return { ok: false, problem: `В справочнике валют портала нет курса ${missing.join(' и ')} — пересчитать ставки из ${from} в ${to} нельзя` }
   }
-  const dates = [src, dst].filter(c => !c.base && c.updated).map(c => `${c.code} — ${formatDate(c.updated!)}`)
+  const dates = [src, dst].filter(c => !c.base && c.updated).map(c => `${c.code} — ${formatRuDate(c.updated!)}`)
   const updated = dates.length ? ` (курс обновлён: ${dates.join(', ')})` : ''
   const notice = `Цены пересчитаны из ${from} в ${to} по курсу портала: 1 ${to} = ${formatRate(dst.unitRate / src.unitRate)} ${from}${updated} — проверьте курс перед отправкой счёта`
   return { ok: true, conversion: { from, to, factor: src.unitRate / dst.unitRate, notice } }

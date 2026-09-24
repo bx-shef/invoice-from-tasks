@@ -18,7 +18,7 @@ import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
 import { findRate, type RateEntry } from './rates'
 import type { AppSettings } from './settings'
 import type { TaskInfo, TimeEntry } from './tasks'
-import { formatDuration, roundSeconds, secondsToHours } from './time'
+import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
 
 /** Тип заполнения: 1 — задача как учётная единица, 2 — записи затраченного времени. */
 export type FillMode = 'task' | 'time'
@@ -37,6 +37,12 @@ export interface FillInput {
   settings: AppSettings
   /** Пересчёт в валюту счёта; `null`/нет — валюты совпадают. */
   conversion?: CurrencyConversion | null
+  /**
+   * Задачи, чьи теги прочитать не удалось (ID → текст портала). Без тегов наценку не выбрать —
+   * это нехватка данных по задаче, а не сбой всей сборки: ошибка называет задачу, остальные
+   * задачи проверяются как обычно (находка программиста и техдиректора панели).
+   */
+  tagFailures?: ReadonlyMap<number, string>
   /** Имена сотрудников для понятных сообщений; нет имени — пишем `#ID`. */
   userNames?: Map<number, string>
 }
@@ -108,14 +114,8 @@ function money(value: number): number {
   return Math.round(value * 100) / 100
 }
 
-/** `2026-09-01` → `01.09.2026` — даты в сообщениях так, как их видит сотрудник. */
-function ruDate(iso: string): string {
-  const [y, m, d] = iso.split('-')
-  return `${d}.${m}.${y}`
-}
-
 function rateLabel(rate: RateEntry | null): string {
-  return rate ? `${rate.rate} с ${ruDate(rate.from)}` : 'нет ставки'
+  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}` : 'нет ставки'
 }
 
 /**
@@ -134,8 +134,15 @@ function rateChangeWarning(input: FillInput, userId: number, dates: string[], ap
   return `ставка ${userLabel(input, userId)} менялась за время задачи: ${chain.join(' → ')}; применена ${applied.rate} — на дату последней записи`
 }
 
+/** Ноль после округления возможен только «к ближайшему» — но текст от направления не зависит. */
 function zeroAfterRounding(seconds: number): string {
-  return `время ${formatDuration(seconds)} при округлении к ближайшему стало нулём — строка пропущена`
+  return `время ${formatDuration(seconds)} после округления стало нулём — строка пропущена`
+}
+
+/** Ошибка «теги не прочитаны» по задаче или `null`. */
+function tagProblem(input: FillInput, task: TaskInfo): string | null {
+  const failure = input.tagFailures?.get(task.id)
+  return failure === undefined ? null : `теги задачи не прочитаны (${failure}) — не на что выбрать наценку`
 }
 
 function buildTaskRows(input: FillInput, result: FillResult): void {
@@ -144,6 +151,8 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     const entries = input.entries.filter(e => e.taskId === task.id && e.seconds > 0)
     const total = entries.reduce((sum, e) => sum + e.seconds, 0)
     const problems: string[] = []
+    const tags = tagProblem(input, task)
+    if (tags) problems.push(tags)
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
     if (total === 0) {
@@ -157,7 +166,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     let rate: RateEntry | null = null
     if (task.responsibleId !== null && lastDate) {
       rate = findRate(input.rates, task.responsibleId, lastDate)
-      if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${ruDate(lastDate)}`)
+      if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(lastDate)}`)
     }
     if (problems.length || !rate || task.responsibleId === null || !lastDate) {
       for (const message of problems) result.errors.push({ taskId: task.id, message })
@@ -191,6 +200,11 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
 function buildTimeRows(input: FillInput, result: FillResult): void {
   const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
+    const tags = tagProblem(input, task)
+    if (tags) {
+      result.errors.push({ taskId: task.id, message: tags })
+      continue
+    }
     const entries = input.entries.filter(e => e.taskId === task.id)
     if (entries.length === 0) {
       result.errors.push({ taskId: task.id, message: task.timeSpentInLogs > 0
@@ -210,7 +224,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
       let rate: RateEntry | null = null
       if (entry.userId !== null && entry.date) {
         rate = findRate(input.rates, entry.userId, entry.date)
-        if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${ruDate(entry.date)}`)
+        if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${formatRuDate(entry.date)}`)
       }
       if (problems.length || !rate || entry.userId === null || !entry.date) {
         for (const message of problems) result.errors.push({ taskId: task.id, entryId: entry.id, message })

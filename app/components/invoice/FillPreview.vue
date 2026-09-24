@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Предпросмотр строк счёта и проблем. Ничего не пишет — только показывает, что будет записано.
 import type { DraftRow, FillIssue } from '#shared/domain/fill'
-import { formatDuration } from '#shared/domain/time'
+import { formatDuration, formatRuDate } from '#shared/domain/time'
 
 const props = defineProps<{
   rows: DraftRow[]
@@ -20,7 +20,6 @@ const props = defineProps<{
 const money = (v: number) => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const hours = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 4 })
 const markupLabel = (row: DraftRow) => row.markupSource === 'tag' ? `#${row.markupTag ?? ''}` : 'на всё'
-const ruDate = (iso: string) => iso.split('-').reverse().join('.')
 
 function taskHref(taskId: number): string {
   return `${props.origin}/company/personal/user/0/tasks/task/view/${taskId}/`
@@ -141,7 +140,7 @@ function taskHref(taskId: number): string {
             </td>
             <td
               class="py-2 pr-3 text-right whitespace-nowrap"
-              :title="`Ставка на ${ruDate(row.rateDate)}`"
+              :title="`Ставка на ${formatRuDate(row.rateDate)}`"
             >
               {{ money(row.baseRate) }}
             </td>

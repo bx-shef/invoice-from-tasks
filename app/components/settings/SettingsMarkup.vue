@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Наценки: «на всё» и правила по тегам задач. Правила проверяются сверху вниз, срабатывает
 // первое, чей тег есть у задачи (#3, markup.ts). Порядок меняется стрелками.
-import { MAX_MARKUP, MAX_TAG_LENGTH, normalizeTag } from '#shared/domain/markup'
+import { cleanTag, MAX_MARKUP, MAX_TAG_LENGTH, normalizeTag } from '#shared/domain/markup'
 import type { AppSettings } from '#shared/domain/settings'
 
 const settings = defineModel<AppSettings>({ required: true })
@@ -15,8 +15,8 @@ const duplicate = computed(() => {
 })
 
 function addRule() {
-  const tag = newTag.value.replace(/\s+/g, ' ').trim()
-  if (!normalizeTag(tag) || duplicate.value) return
+  const tag = cleanTag(newTag.value)
+  if (!tag || tag.length > MAX_TAG_LENGTH || duplicate.value) return
   settings.value.markup.tags.push({ tag, percent: 0 })
   newTag.value = ''
 }

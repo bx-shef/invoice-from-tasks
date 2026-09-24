@@ -97,6 +97,14 @@ export function isIsoDate(value: unknown): value is string {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
 }
 
+/**
+ * Дата для сообщений и предпросмотра так, как её видит сотрудник: `2026-09-01` → `01.09.2026`.
+ * Не дата — строка как есть: сообщение об ошибке не должно само падать на мусоре.
+ */
+export function formatRuDate(iso: string): string {
+  return isIsoDate(iso) ? iso.split('-').reverse().join('.') : iso
+}
+
 /** Человекочитаемая длительность для предпросмотра: `1 ч 05 мин`. */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds))
