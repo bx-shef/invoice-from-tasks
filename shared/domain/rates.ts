@@ -1,0 +1,124 @@
+// Ставки часа сотрудников: «сотрудник — ставка — начиная с даты». Хранятся в app.option
+// отдельным ключом (docs/SETTINGS.md), поэтому формат хранения компактный — место ограничено.
+
+import { isIsoDate } from './time'
+
+/** Одна версия ставки сотрудника. Действует с даты `from` до следующей версии того же сотрудника. */
+export interface RateEntry {
+  /** ID сотрудника в портале. */
+  userId: number
+  /** Ставка за час в валюте ставок (настройка `currency`), без наценки. */
+  rate: number
+  /** Дата начала действия, `YYYY-MM-DD`, включительно. */
+  from: string
+  /**
+   * Товар каталога, которым продаётся час этого сотрудника (необязательно). Нужен наценкам
+   * «по папке» и «по товару»: без товара строка счёта не лежит ни в какой папке.
+   */
+  productId?: number
+}
+
+/** Кортеж хранения: `[userId, rate, from]` или `[userId, rate, from, productId]`. */
+export type StoredRate = [number, number, string] | [number, number, string, number]
+
+/** Верхняя граница ставки — защита от опечатки «лишний ноль» и от мусора в хранилище. */
+export const MAX_RATE = 1_000_000
+
+/** Сколько версий ставок принимаем максимум. Реальный предел — бюджет хранилища (storageBudget.ts). */
+export const MAX_RATE_ENTRIES = 5000
+
+function positiveInt(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+/** Денежное значение ставки: конечное, неотрицательное, не больше {@link MAX_RATE}, 2 знака. */
+export function normalizeRate(value: unknown): number | null {
+  const n = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
+  if (!Number.isFinite(n) || n < 0 || n > MAX_RATE) return null
+  return Math.round(n * 100) / 100
+}
+
+/**
+ * Разбор ставок из хранилища. Никогда не бросает: хранилище — внешние данные, битая запись
+ * отбрасывается, а не роняет экран. Дубли (сотрудник + дата) схлопываются: побеждает последняя.
+ */
+export function parseRates(raw: unknown): RateEntry[] {
+  let data: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(data)) return []
+  const byKey = new Map<string, RateEntry>()
+  for (const item of data.slice(0, MAX_RATE_ENTRIES)) {
+    if (!Array.isArray(item)) continue
+    const userId = positiveInt(item[0])
+    const rate = normalizeRate(item[1])
+    const from = item[2]
+    if (userId === null || rate === null || !isIsoDate(from)) continue
+    const productId = positiveInt(item[3])
+    byKey.set(`${userId}|${from}`, productId ? { userId, rate, from, productId } : { userId, rate, from })
+  }
+  return sortRates([...byKey.values()])
+}
+
+/** Порядок для хранения и показа: по сотруднику, затем по дате. Детерминирован — диффы читаемы. */
+export function sortRates(entries: RateEntry[]): RateEntry[] {
+  return [...entries].sort((a, b) => a.userId - b.userId || a.from.localeCompare(b.from))
+}
+
+/** Сериализация в компактный JSON. Порядок стабильный, лишних ключей нет. */
+export function serializeRates(entries: RateEntry[]): string {
+  const tuples: StoredRate[] = sortRates(entries).map(e =>
+    e.productId ? [e.userId, e.rate, e.from, e.productId] : [e.userId, e.rate, e.from]
+  )
+  return JSON.stringify(tuples)
+}
+
+/** Ошибка в строке таблицы ставок — для подсветки в форме. */
+export interface RateIssue {
+  index: number
+  message: string
+}
+
+/**
+ * Проверка ставок перед сохранением. Возвращает все проблемы сразу, а не первую:
+ * человек правит таблицу один раз, а не по кругу.
+ */
+export function validateRates(entries: RateEntry[]): RateIssue[] {
+  const issues: RateIssue[] = []
+  const seen = new Map<string, number>()
+  entries.forEach((e, index) => {
+    if (positiveInt(e.userId) === null) issues.push({ index, message: 'Не выбран сотрудник' })
+    if (normalizeRate(e.rate) === null) issues.push({ index, message: `Ставка должна быть числом от 0 до ${MAX_RATE}` })
+    if (!isIsoDate(e.from)) issues.push({ index, message: 'Дата начала должна быть в формате ГГГГ-ММ-ДД' })
+    if (e.productId !== undefined && positiveInt(e.productId) === null) issues.push({ index, message: 'Некорректный товар' })
+    const key = `${e.userId}|${e.from}`
+    const prev = seen.get(key)
+    if (prev !== undefined) issues.push({ index, message: `Дубль: у этого сотрудника уже есть ставка с этой даты (строка ${prev + 1})` })
+    else seen.set(key, index)
+  })
+  if (entries.length > MAX_RATE_ENTRIES) {
+    issues.push({ index: MAX_RATE_ENTRIES, message: `Не больше ${MAX_RATE_ENTRIES} версий ставок` })
+  }
+  return issues
+}
+
+/**
+ * Ставка сотрудника, действующая на дату: версия с наибольшей `from`, не позже `date`.
+ *
+ * @param date `YYYY-MM-DD` в часовом поясе портала (см. `portalDate`)
+ * @returns версия ставки или `null`, если на эту дату у сотрудника ставки нет
+ */
+export function findRate(entries: RateEntry[], userId: number, date: string): RateEntry | null {
+  let best: RateEntry | null = null
+  for (const e of entries) {
+    if (e.userId !== userId || e.from > date) continue
+    if (!best || e.from > best.from) best = e
+  }
+  return best
+}
