@@ -36,6 +36,7 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 | `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
 | `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |
 | `tests/` | юнит-тесты (vitest, node); `tests/server/` — серверные модули; `repoGuards` — гарды репо |
+| `docker-compose.prod.yml`, `Makefile` | выкат как в client-bank: `main` → GHCR → Watchtower → nginx-proxy, `invoice-from-tasks.bx-shef.by` — `docs/DEPLOY.md` |
 | `smoke/` | смок на тестовом портале (`pnpm smoke`, свой vitest-конфиг, не в CI): страж портала, засев, формы REST, матрица расчёта, BitrixGPT — `docs/SMOKE.md` |
 
 Подробно: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), правила расчёта —

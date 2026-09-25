@@ -42,6 +42,44 @@ describe('CI запускает проверки и падает на них', (
   })
 })
 
+describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-proxy', () => {
+  const CI = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8')
+  const COMPOSE = readFileSync(join(ROOT, 'docker-compose.prod.yml'), 'utf8')
+  // Блок джобы deploy: от `  deploy:` до следующей джобы или конца файла.
+  const DEPLOY = /^ {2}deploy:\n(?: {4}.*\n|\s*\n)*/m.exec(`${CI}\n`)?.[0] ?? ''
+
+  it('deploy ждёт зелёный ci и выкатывает только main', () => {
+    expect(DEPLOY, 'нет джобы deploy').not.toBe('')
+    expect(DEPLOY).toMatch(/^ {4}needs: ci$/m)
+    expect(DEPLOY).toMatch(/^ {4}if: .*github\.ref == 'refs\/heads\/main'/m)
+    expect(DEPLOY).toMatch(/^ {10}push: true$/m)
+  })
+
+  it('сервер тянет тот образ, который публикует deploy', () => {
+    expect(DEPLOY).toMatch(/images: ghcr\.io\/\$\{\{ github\.repository \}\}$/m)
+    expect(DEPLOY).toMatch(/type=raw,value=latest/)
+    expect(COMPOSE).toMatch(/^ {4}image: ghcr\.io\/bx-shef\/invoice-from-tasks:latest$/m)
+  })
+
+  it('токены установки живут в томе: Watchtower пересоздаёт контейнер на каждом выкате', () => {
+    // Каталог данных = рабочий каталог образа + база fs-хранилища Nitro (nuxt.config.ts).
+    const dockerfile = readFileSync(join(ROOT, 'Dockerfile'), 'utf8')
+    const workdir = [...dockerfile.matchAll(/^WORKDIR (\S+)$/gm)].at(-1)?.[1]
+    const base = /portals: \{ driver: 'fs', base: '\.\/([^/']+)\/portals' \}/.exec(readFileSync(join(ROOT, 'nuxt.config.ts'), 'utf8'))?.[1]
+    expect(workdir && base, 'не нашли WORKDIR или базу хранилища portals').toBeTruthy()
+    expect(COMPOSE).toMatch(new RegExp(`^ {6}- portals:${workdir}/${base}$`, 'm'))
+    expect(COMPOSE).toMatch(/^volumes:\n {2}portals:$/m)
+  })
+
+  it('за nginx-proxy: адрес из DOMAIN, TRUST_PROXY=1, метка Watchtower, сеть proxy-net', () => {
+    expect(COMPOSE).toMatch(/^ {6}NUXT_PUBLIC_SITE_URL: https:\/\/\$\{DOMAIN\}$/m)
+    expect(COMPOSE).toMatch(/^ {6}TRUST_PROXY: "1"$/m)
+    expect(COMPOSE).toMatch(/^ {6}- "com\.centurylinklabs\.watchtower\.enable=true"$/m)
+    expect(COMPOSE).toMatch(/^networks:\n {2}proxy-net:\n {4}external: true$/m)
+    expect(COMPOSE).toMatch(/^ {6}B24_TOKEN_ENC_KEY: \$\{B24_TOKEN_ENC_KEY:\?/m)
+  })
+})
+
 /** Все .ts/.vue файлы каталога рекурсивно. */
 function sources(dir: string): string[] {
   const out: string[] = []

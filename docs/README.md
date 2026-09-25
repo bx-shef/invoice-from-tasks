@@ -28,9 +28,9 @@
 | Документ | О чём |
 |---|---|
 | [`PAGE_GUIDE.md`](PAGE_GUIDE.md) | как делать страницы на b24ui во фрейме портала |
-| [`DEPLOY.md`](DEPLOY.md) | сервер, окружение, регистрация приложения в портале, первая настройка |
+| [`DEPLOY.md`](DEPLOY.md) | выкат (GHCR + Watchtower + nginx-proxy), сервер, окружение, регистрация в Маркете, первая настройка |
 | [`SMOKE.md`](SMOKE.md) | живой прогон на тестовом портале (`pnpm smoke`): окружение, страж, варианты, как читать красное |
-| [`REPO_SETUP_CHECKLIST.md`](REPO_SETUP_CHECKLIST.md) | защита `main`, ветки, dependabot — разово владельцу |
+| [`REPO_SETUP_CHECKLIST.md`](REPO_SETUP_CHECKLIST.md) | защита `main`, ветки, dependabot, пакет GHCR — разово владельцу |
 
 ## Навыки агентов (`.claude/skills/`)
 

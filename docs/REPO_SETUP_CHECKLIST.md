@@ -1,6 +1,6 @@
 # Настройки репозитория (разово, владельцу)
 
-> Last reviewed: 2026-09-24
+> Last reviewed: 2026-09-25
 
 Перенесено из эталона `client-bank-alfa-by`. Делается в интерфейсе GitHub один раз; агент
 этого сделать не может и не должен (`docs/AGENT_RULES.md` §5.8).
@@ -31,7 +31,15 @@ Settings → General → **Automatically delete head branches** — включи
 Settings → Code security: alerts, security updates, version updates — включить.
 Конфигурация — `.github/dependabot.yml` (группы `nuxt`, `b24`, `dev-deps`, actions, docker).
 
-## 4. Жизненный цикл изменения
+## 4. Пакет GHCR
+
+Первый push в `main` после выката (джоба `deploy`) создаст пакет `ghcr.io/bx-shef/invoice-from-tasks`.
+Сделать его публичным: github.com/orgs/bx-shef/packages → `invoice-from-tasks` → Package settings →
+Change visibility → Public. Тогда серверу и Watchtower не нужен `docker login` (`docs/DEPLOY.md`).
+
+Проверка: `docker pull ghcr.io/bx-shef/invoice-from-tasks:latest` без логина проходит.
+
+## 5. Жизненный цикл изменения
 
 ветка от `main` → код + тесты + документация одним PR → `/code-review` + панель из пяти →
 исправления в том же PR → зелёный `ci` → squash-мерж → удаление ветки → комментарий в issue.
