@@ -9,19 +9,12 @@
 
 # Ветка или тег репозитория, откуда self-update берёт свежий Makefile.
 REF ?= main
-COMPOSE = docker compose -f docker-compose.prod.yml
-
-# Прочитать ОДНО значение из ./.env, не исполняя файл (макрос эталона client-bank-alfa-by, #487
-# там). Берёт первую строку `КЛЮЧ=значение`, понимает `export`, пробелы вокруг `=`, комментарий в
-# конце строки, обрамляющие кавычки; CR из CRLF уходит вместе с хвостовыми пробелами. Файл не
-# исполняется, лишнего в окружение не попадает. Поведение закреплено tests/makefileEnv.test.ts.
-env-value = $$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$(1)[[:space:]]*=//p" ./.env 2>/dev/null \
-	  | head -1 \
-	  | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*\#.*\$$//" -e "s/[[:space:]]*\$$//" \
-	        -e "s/^\"\(.*\)\"\$$/\1/" -e "s/^'\(.*\)'\$$/\1/")
-
-# Сколько общий nginx-proxy ждёт ответа приложения: BitrixGPT с повторами — до 120 с × 3.
-PROXY_TIMEOUT ?= 400s
+# compose подставляет ${DOMAIN}, ${LETSENCRYPT_EMAIL} и ${B24_TOKEN_ENC_KEY} из окружения оболочки
+# РАНЬШЕ, чем из ./.env: экспортированный на общем хосте DOMAIN соседнего проекта увёл бы наш
+# VIRTUAL_HOST (и сертификат) на чужой домен. Поэтому compose запускается без них — источник один, ./.env.
+COMPOSE = env -u DOMAIN -u LETSENCRYPT_EMAIL -u B24_TOKEN_ENC_KEY docker compose -f docker-compose.prod.yml
+# Имя контейнера приложения — container_name в docker-compose.prod.yml (сверяет tests/makefileProd.test.ts).
+APP_CONTAINER = invoice-from-tasks
 
 # ─── Локально ────────────────────────────────────────────────────────
 
@@ -79,26 +72,30 @@ backup:
 
 ## Поднять таймаут общего nginx-proxy для нашего домена (по умолчанию он ждёт 60 с — мало для BitrixGPT)
 #
-#   make proxy-timeout                 # прокси найдётся по образу *nginx-proxy* (не acme/companion)
-#   make proxy-timeout PROXY=<имя>     # если прокси не нашёлся или их несколько
+#   make proxy-timeout                      # прокси найдётся по образу *nginx-proxy* (не acme/companion)
+#   make proxy-timeout PROXY=<имя>          # если прокси не нашёлся или их несколько
+#   make proxy-timeout PROXY_TIMEOUT=600s   # другой таймаут (по умолчанию 400s: BitrixGPT — до 120 с × 3)
 #
-# nginx-proxy подключает /etc/nginx/vhost.d/<домен>_location в блок location нашего домена, но
-# только когда перестраивает конфигурацию. Поэтому после записи пересоздаём СВОЙ контейнер
-# (прокси видит событие и перестраивает конфиг) и проверяем, что файл в конфиг попал. Повторный
-# запуск безопасен: файл перезапишется тем же, приложение перезапустится.
-# Домен — из ./.env или явно `make proxy-timeout DOMAIN=…`. Переменную DOMAIN из окружения оболочки
-# НЕ берём: на общем хосте в ней легко оказаться домену соседнего проекта, и таймаут записался бы в
-# чужой vhost. Значения идут в оболочку переменными окружения, а не текстом рецепта, и проверяются по
-# формату: подставленный текстом домен с `$(…)` выполнился бы на хосте, `'` в таймауте — внутри
-# общего контейнера прокси, `../` писал бы мимо vhost.d (находки ревью безопасности).
-proxy-timeout: export PT_DOMAIN = $(if $(filter command line,$(origin DOMAIN)),$(DOMAIN))
-proxy-timeout: export PT_TIMEOUT = $(PROXY_TIMEOUT)
-proxy-timeout: export PT_PROXY = $(PROXY)
+# nginx-proxy подключает /etc/nginx/vhost.d/<домен>_location в блок location нашего домена, когда
+# перестраивает конфиг. Цель:
+# - берёт домен из VIRTUAL_HOST работающего контейнера приложения — того, что прокси реально
+#   обслуживает, а не из разбора .env;
+# - дописывает в файл строку таймаута, сохраняя другие директивы; новый файл начинает с содержимого
+#   default_location, иначе общие настройки прокси перестали бы действовать на наш домен;
+# - перестраивает конфиг прямо в прокси (docker-gen → nginx -t → reload), не трогая приложение, и
+#   проверяет, что файл подключён. Уже настроено — ничего не делает.
+# Значения передаются аргументами, а не текстом команд, и проверяются по формату (ревью безопасности
+# на #16). PROXY и PROXY_TIMEOUT — только из командной строки: в окружении общего хоста там может
+# оказаться чужое.
+proxy-timeout: export PT_TIMEOUT = $(if $(filter command line,$(origin PROXY_TIMEOUT)),$(PROXY_TIMEOUT),400s)
+proxy-timeout: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
 proxy-timeout:
-	@d="$${PT_DOMAIN:-$(call env-value,DOMAIN)}"; \
-	printf '%s' "$$d" | grep -Eqx '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+' \
-	  || { echo "[make] DOMAIN (из ./.env или DOMAIN=…) не похож на домен: '$$d'"; exit 1; }; \
-	printf '%s' "$$PT_TIMEOUT" | grep -Eqx '[0-9]{1,4}[smh]?' \
+	@one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
+	d=$$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $(APP_CONTAINER) 2>/dev/null | sed -n 's/^VIRTUAL_HOST=//p'); \
+	[ -n "$$d" ] || { echo "[make] контейнер $(APP_CONTAINER) не запущен или без VIRTUAL_HOST — сначала make prod-up"; exit 1; }; \
+	{ one_line "$$d" && printf '%s' "$$d" | grep -Eqx '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+'; } \
+	  || { echo "[make] VIRTUAL_HOST контейнера не похож на один домен: '$$d'"; exit 1; }; \
+	{ one_line "$$PT_TIMEOUT" && printf '%s' "$$PT_TIMEOUT" | grep -Eqx '[0-9]{1,4}[smh]?'; } \
 	  || { echo "[make] PROXY_TIMEOUT — число с s/m/h, например 400s: '$$PT_TIMEOUT'"; exit 1; }; \
 	p="$$PT_PROXY"; \
 	if [ -z "$$p" ]; then \
@@ -109,21 +106,27 @@ proxy-timeout:
 	  echo "[make] контейнеров nginx-proxy найдено: $$n. Укажите нужный: make proxy-timeout PROXY=<имя>"; \
 	  docker ps --format '  {{.Names}}\t{{.Image}}'; exit 1; \
 	fi; \
-	printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*' || { echo "[make] странное имя контейнера: '$$p'"; exit 1; }; \
+	{ one_line "$$p" && printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*'; } || { echo "[make] странное имя контейнера: '$$p'"; exit 1; }; \
 	f="/etc/nginx/vhost.d/$${d}_location"; want="proxy_read_timeout $$PT_TIMEOUT;"; \
 	echo "[make] прокси: $$p, домен: $$d, таймаут: $$PT_TIMEOUT"; \
-	if [ "$$(docker exec "$$p" cat "$$f" 2>/dev/null)" = "$$want" ] \
-	   && docker exec "$$p" grep -rqs "$$f" /etc/nginx/conf.d/; then \
-	  echo "[make] уже настроено: $$f подключён — приложение не трогаю"; exit 0; \
+	docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "$$p" | grep -qx /etc/nginx/vhost.d \
+	  || echo "[make] ⚠ /etc/nginx/vhost.d у прокси — не отдельный том: настройка пропадёт, когда прокси пересоздадут"; \
+	if docker exec "$$p" grep -qsxF "$$want" "$$f" && docker exec "$$p" grep -rqsF "include $$f;" /etc/nginx/conf.d/; then \
+	  echo "[make] уже настроено: $$f подключён"; exit 0; \
 	fi; \
-	docker exec "$$p" sh -c "mkdir -p /etc/nginx/vhost.d && echo '$$want' > $$f" \
-	  && $(COMPOSE) up -d --force-recreate app \
-	  && sleep $${PT_SETTLE:-5} \
-	  && if docker exec "$$p" grep -rqs "$$f" /etc/nginx/conf.d/; then \
-	       echo "[make] готово: конфиг прокси подключает $$f"; \
-	     else \
-	       echo "[make] ⚠ файл записан, но прокси ещё не перестроил конфиг — через минуту повторите: make proxy-timeout"; exit 1; \
-	     fi
+	docker exec "$$p" sh -c 'f=$$1; w=$$2; d=$${f%/*}; mkdir -p "$$d" || exit 1; \
+	  if [ ! -f "$$f" ] && [ -f "$$d/default_location" ]; then cp "$$d/default_location" "$$f" || exit 1; fi; \
+	  { if [ -f "$$f" ]; then grep -v "^[[:space:]]*proxy_read_timeout[[:space:]]" "$$f"; fi; printf "%s\n" "$$w"; } > "$$f.new" \
+	  && mv "$$f.new" "$$f"' _ "$$f" "$$want" \
+	  && docker exec "$$p" docker-gen /app/nginx.tmpl /etc/nginx/conf.d/default.conf \
+	  && docker exec "$$p" nginx -t \
+	  && docker exec "$$p" nginx -s reload \
+	  || { echo "[make] ⚠ конфиг прокси не перестроен (ошибка выше); если docker-gen не найден — прокси из отдельных контейнеров, перезапустите его docker-gen"; exit 1; }; \
+	if docker exec "$$p" grep -rqsF "include $$f;" /etc/nginx/conf.d/; then \
+	  echo "[make] готово: конфиг прокси подключает $$f"; \
+	else \
+	  echo "[make] ⚠ конфиг перестроен, но $$f не подключён — проверьте, нет ли для домена своего _location_override"; exit 1; \
+	fi
 
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
 #
