@@ -7,23 +7,35 @@
 
 ## Состояние (сверено 2026-09-25)
 
-Правила ветки `main` и настройки репозитория читаются публичным API GitHub без токена — так их
-может перепроверить кто угодно:
+Правила ветки `main` читаются публичным API GitHub без токена — перепроверить может кто угодно
+(без токена — 60 запросов в час; `-f` покажет отказ, а не пустой ответ):
 
 ```bash
-curl -s https://api.github.com/repos/bx-shef/invoice-from-tasks/rules/branches/main   # §1
-curl -s https://api.github.com/repos/bx-shef/invoice-from-tasks | grep delete_branch_on_merge   # §2
+curl -fsS https://api.github.com/repos/bx-shef/invoice-from-tasks/rules/branches/main   # §1
 ```
 
-| Пункт | Состояние |
-|---|---|
-| §1 Защита `main` | ✅ ruleset действует: удаление и force-push запрещены; PR обязателен, одобрений — 0, «Dismiss stale approvals» и «Require conversation resolution» включены; мерж — только squash |
-| §1 Обязательные проверки | ✅ `ci` и `docker-build` (второй владелец включил 2026-09-25), «Require branches to be up to date» включено |
-| §2 Удаление веток после мержа | ✅ |
-| §3 Dependabot | не сверялось: настройки безопасности API без токена не отдаёт |
-| §4 Пакет GHCR публичный | ⏳ пакет появится с первым выкатом в `main` |
+Остальное API отдаёт только с правами на репозиторий — это проверяет владелец своим `gh`:
 
-Поменяли настройку — обновите строку и дату.
+```bash
+gh api repos/bx-shef/invoice-from-tasks --jq .delete_branch_on_merge                        # §2: true
+gh api repos/bx-shef/invoice-from-tasks/vulnerability-alerts --silent && echo alerts on      # §3
+gh api repos/bx-shef/invoice-from-tasks/automated-security-fixes --jq .enabled               # §3: true
+```
+
+| Пункт | Состояние | Как сверено |
+|---|---|---|
+| §1 Защита `main` | ✅ удаление и force-push запрещены; PR обязателен, одобрений — 0, «Dismiss stale approvals» и «Require conversation resolution» включены; мерж — только squash | API без токена |
+| §1 Обязательные проверки | ✅ `ci` и `docker-build` (`docker-build` владелец включил 2026-09-25), «Require branches to be up to date» включено | API без токена |
+| §1 Bypass list пуст | не сверялось: список обходов API показывает только администратору — смотрите Settings → Rules | — |
+| §2 Удаление веток после мержа | ✅ | API с токеном сессии агента |
+| §3 Dependabot | не сверялось — команды выше | — |
+| §4 Пакет GHCR публичный | ⏳ пакет появится с первым выкатом в `main` | — |
+
+Одобрений 0, потому что человек в репозитории один: одобрять свой же PR — не защита. Ревью держит
+процесс — `/code-review` и панель из пяти перед каждым мержем (`docs/AGENT_RULES.md` §3); GitHub его
+не проверяет, поэтому его и не ослабляем.
+
+Таблица ведётся руками: поменяли настройку — обновите строку и дату.
 
 ## 1. Защита `main` — ruleset `protect-main`
 
@@ -33,14 +45,16 @@ Settings → Rules → Rulesets → New branch ruleset:
 - **Restrict deletions** и **Block force pushes** — включить.
 - **Require a pull request before merging** — включить; approvals — 0 или 1; «Dismiss stale
   approvals» и «Require conversation resolution» — включить; **Allowed merge methods** — только
-  Squash (мержим squash-коммитом, `docs/AGENT_RULES.md` §4.2).
+  Squash (мержим squash-коммитом, `docs/AGENT_RULES.md` §4.1).
 - **Require status checks to pass** — включить, проверки **`ci`** и **`docker-build`**, «Require
   branches to be up to date» — включить. `docker-build` обязателен с тех пор, как `main` выкатывается
   в GHCR (`docs/DEPLOY.md`): PR с несобираемым образом иначе влился бы, и выкат молча встал бы на
   всех следующих мержах.
 
-⚠ Имена джоб `ci` и `docker-build` — то, на что ссылается правило. Переименуете джобу — защита
-молча перестанет её требовать; это стережёт `tests/repoGuards.test.ts`.
+⚠ Имена джоб `ci` и `docker-build` — то, на что ссылается правило. Переименуете джобу — правило
+продолжит ждать проверку со старым именем, и каждый PR встанет на «Expected — Waiting for status to
+be reported» без возможности мержа. Имена стережёт `tests/repoGuards.test.ts`; переименовывать —
+только вместе с правилом.
 
 Проверка: попытка `git push --force` в `main` и удаление ветки должны отклоняться.
 
@@ -65,5 +79,6 @@ Settings → Code security: alerts, security updates, version updates — вкл
 ## 5. Жизненный цикл изменения
 
 ветка от `main` → код + тесты + документация одним PR → `/code-review` + панель из пяти →
-исправления в том же PR → зелёный `ci` → squash-мерж → удаление ветки → комментарий в issue.
+исправления в том же PR → зелёные `ci` и `docker-build` → squash-мерж → удаление ветки →
+комментарий в issue.
 Подробно — `docs/AGENT_RULES.md`.
