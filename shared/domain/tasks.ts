@@ -98,25 +98,20 @@ export function parseTask(row: Row): TaskInfo | null {
 const MAX_TASK_TAGS = 100
 
 /**
- * Теги задачи из ответа портала. Две живые формы (замер 2026-09-24):
- * • REST v3 `tasks.task.get`, `select: ['id', 'tags.id', 'tags.name']` →
- *   `{ item: { tags: [{ id, name }] } }`, без тегов — `[]`;
- * • REST v2 `tasks.task.list` / `tasks.task.get`, `select: ['TAGS']` → `tags: { "<id>": { id, title } }`,
- *   без тегов — `[]`. Теги читаются ИМЕННО так — в том же списке задач, без лишних запросов
- *   (решение владельца); v3-форма разбирается, чтобы возврат к v3 (issue #13) не требовал нового
- *   разбора.
- * Принимаем и голый объект задачи, и строки вместо объектов.
+ * Теги задачи из строки ответа REST v2 `tasks.task.list` / `tasks.task.get` с `select: ['TAGS']`
+ * (замер 2026-09-24): `tags: { "<id>": { id, title } }`, без тегов — `[]`. Теги читаются в том же
+ * списке задач, без лишних запросов (решение владельца). Форма v3 (`tags: [{ id, name }]`) здесь
+ * не разбирается: вернёмся к v3 — добавим вместе с переходом (issue #13).
  *
  * Тег длиннее {@link MAX_TAG_LENGTH} отбрасывается, а не обрезается: правило не бывает длиннее,
  * так что совпасть он не может, а обрезанный мог бы совпасть с правилом ЛОЖНО (находка
  * безопасности панели).
  */
-export function parseTaskTags(result: unknown): string[] {
-  const item = result && typeof result === 'object' && 'item' in result ? (result as Row).item : result
-  const raw = item && typeof item === 'object' ? (item as Row).tags : undefined
-  const tags = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : []
+export function parseTaskTags(row: unknown): string[] {
+  const raw = row && typeof row === 'object' ? (row as Row).tags : undefined
+  const tags = raw && typeof raw === 'object' ? Object.values(raw) : []
   const names = tags
-    .map(t => (t && typeof t === 'object' ? toText((t as Row).name ?? (t as Row).title) : toText(t)).trim())
+    .map(t => (t && typeof t === 'object' ? toText((t as Row).title).trim() : ''))
     .filter(name => name && name.length <= MAX_TAG_LENGTH)
   return [...new Set(names)].slice(0, MAX_TASK_TAGS)
 }

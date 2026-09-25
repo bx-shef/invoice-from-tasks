@@ -52,16 +52,6 @@ export function connectPortal(hook: string): Portal {
     return (res.getData() as { result?: T } | undefined)?.result as T
   }
 
-  async function runBatch(method: string, run: () => Promise<{ isSuccess: boolean, getData: () => unknown, getErrorMessages: () => string[] }>) {
-    try {
-      const res = await run()
-      const data = res.getData()
-      return { ok: res.isSuccess, errors: res.getErrorMessages(), answers: (Array.isArray(data) ? data as AjaxLike[] : []).map(answer) }
-    } catch (e) {
-      throw safe(method, e)
-    }
-  }
-
   return {
     call: (method, params = {}) => unwrap(method, () => b24.actions.v2.call.make({ method, params: params as Record<string, unknown> })),
     callV3: (method, params = {}) => unwrap(method, () => b24.actions.v3.call.make({ method, params })),
@@ -75,9 +65,18 @@ export function connectPortal(hook: string): Portal {
       if (!res.isSuccess) throw new Error(`${method}: ${res.getErrorMessages().join('; ')}`)
       return res.getData() ?? []
     },
-    batch: (calls, haltOnError) => runBatch('batch', () => b24.actions.v2.batch.make({
-      calls: calls as Array<[string, Record<string, unknown>]>,
-      options: { isHaltOnError: haltOnError, returnAjaxResult: true }
-    }) as Promise<AjaxLike>)
+    async batch(calls, haltOnError) {
+      let res: AjaxLike
+      try {
+        res = await b24.actions.v2.batch.make({
+          calls: calls as Array<[string, Record<string, unknown>]>,
+          options: { isHaltOnError: haltOnError, returnAjaxResult: true }
+        }) as AjaxLike
+      } catch (e) {
+        throw safe('batch', e)
+      }
+      const data = res.getData()
+      return { ok: res.isSuccess, errors: res.getErrorMessages(), answers: (Array.isArray(data) ? data as AjaxLike[] : []).map(answer) }
+    }
   }
 }

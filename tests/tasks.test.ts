@@ -13,17 +13,17 @@ describe('разбор задач', () => {
     expect(parseTask({ ID: '3', TITLE: 'X', RESPONSIBLE_ID: '1', UF_CRM_TASK: 'D_1' })?.crmBindings).toEqual(['D_1'])
   })
 
-  it('теги из ответа REST v3 tasks.task.get: имена, без пустых и дублей', () => {
-    expect(parseTaskTags({ item: { id: 5, tags: [{ id: 1, name: ' ЧЧ1 ' }, { id: 2, name: '' }, { id: 3, name: 'ЧЧ1' }, null, 'Срочно'] } }))
-      .toEqual(['ЧЧ1', 'Срочно'])
-    expect(parseTaskTags({ item: { id: 5 } })).toEqual([])
-    expect(parseTaskTags(null)).toEqual([])
-    expect(parseTaskTags({ tags: [{ name: 'Без обёртки' }] })).toEqual(['Без обёртки'])
+  it('теги v2 (замер: tags — объект «id → { id, title }»): имена, без пустых, мусора и дублей', () => {
+    expect(parseTaskTags({ id: '2', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } })).toEqual(['Срочно', 'ЧЧ1'])
+    expect(parseTaskTags({ id: '5', tags: { 1: { id: 1, title: ' ЧЧ1 ' }, 2: { id: 2, title: '' }, 3: { id: 3, title: 'ЧЧ1' }, 6: null, 7: 'Срочно' } }))
+      .toEqual(['ЧЧ1'])
   })
 
-  it('v2-форма тегов (замер: tags — объект «id → { id, title }») тоже разбирается', () => {
-    expect(parseTaskTags({ id: '2', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } })).toEqual(['Срочно', 'ЧЧ1'])
+  it('задача без тегов (замер: tags — []), без поля или не объект — пусто', () => {
     expect(parseTaskTags({ id: '4', tags: [] })).toEqual([])
+    expect(parseTaskTags({ id: '4' })).toEqual([])
+    expect(parseTaskTags(null)).toEqual([])
+    expect(parseTaskTags({ id: '4', tags: 'Срочно' })).toEqual([])
   })
 
   it('живой ответ v2 tasks.task.list (замер): числа строками, timeSpentInLogs при нуле — null', () => {
@@ -38,7 +38,7 @@ describe('разбор задач', () => {
 
   it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
     const exact = 'т'.repeat(100)
-    expect(parseTaskTags({ item: { tags: [{ name: exact }, { name: `${exact}ы` }] } })).toEqual([exact])
+    expect(parseTaskTags({ tags: { 1: { id: 1, title: exact }, 2: { id: 2, title: `${exact}ы` } } })).toEqual([exact])
   })
 
   it('берёт строки из обёртки { tasks: [...] }', () => {
