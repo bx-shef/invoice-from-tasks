@@ -18,8 +18,6 @@ export interface Portal {
   callList<T = unknown>(method: string, params: Record<string, unknown>, opts: { idKey: string, cursorIdKey: string, customKeyForResult: string }): Promise<T[]>
   /** Пакет v2 до 50 команд: ответ каждой команды, что вернул портал (с `halt` — меньше, чем команд). */
   batch(calls: Array<[string, Record<string, unknown> | unknown[]]>, haltOnError: boolean): Promise<{ ok: boolean, errors: string[], answers: BatchAnswer[] }>
-  /** Пакет v3: целиком или никак. */
-  batchV3(calls: Array<[string, Record<string, unknown>]>): Promise<{ ok: boolean, errors: string[], answers: BatchAnswer[] }>
 }
 
 interface AjaxLike {
@@ -80,10 +78,6 @@ export function connectPortal(hook: string): Portal {
     batch: (calls, haltOnError) => runBatch('batch', () => b24.actions.v2.batch.make({
       calls: calls as Array<[string, Record<string, unknown>]>,
       options: { isHaltOnError: haltOnError, returnAjaxResult: true }
-    }) as Promise<AjaxLike>),
-    batchV3: calls => runBatch('batch v3', () => b24.actions.v3.batch.make({
-      calls,
-      options: { isHaltOnError: true, returnAjaxResult: true }
     }) as Promise<AjaxLike>)
   }
 }
