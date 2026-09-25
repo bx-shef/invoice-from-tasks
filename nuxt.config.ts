@@ -31,6 +31,10 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-01-15',
 
   nitro: {
+    // Скрипты и стили (/_nuxt, ~2 МБ) сжимаются при сборке в .gz и .br, и Nitro отдаёт их по
+    // Accept-Encoding. В эталоне client-bank это делал его nginx; у нас его нет, а общий
+    // nginx-proxy сам не сжимает (замер 2026-09-25: скрипт ушёл 95 КБ без Content-Encoding).
+    compressPublicAssets: true,
     storage: {
       // Токены установки порталов (server/utils/tokenStore.ts). Путь относительно рабочего
       // каталога процесса; в Docker на `/app/.data` смонтирован том — см. docs/DEPLOY.md.

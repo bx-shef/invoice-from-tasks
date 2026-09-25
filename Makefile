@@ -1,5 +1,5 @@
-.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health backup proxy-timeout \
-        self-update help
+.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health doctor backup proxy-timeout \
+        compose-update self-update help
 
 # Голый `make` на сервере печатает справку, а не запускает первую цель.
 .DEFAULT_GOAL := help
@@ -12,10 +12,31 @@ REF ?= main
 # compose подставляет ${DOMAIN}, ${LETSENCRYPT_EMAIL} и ${B24_TOKEN_ENC_KEY} из окружения оболочки
 # РАНЬШЕ, чем из ./.env: экспортированный на общем хосте DOMAIN соседнего проекта увёл бы наш
 # VIRTUAL_HOST (и сертификат) на чужой домен. Поэтому compose запускается без них — источник один, ./.env.
-COMPOSE = env -u DOMAIN -u LETSENCRYPT_EMAIL -u B24_TOKEN_ENC_KEY docker compose -f docker-compose.prod.yml
+COMPOSE_ENV = env -u DOMAIN -u LETSENCRYPT_EMAIL -u B24_TOKEN_ENC_KEY docker compose
+COMPOSE = $(COMPOSE_ENV) -f docker-compose.prod.yml
 # Имя контейнера приложения — container_name в docker-compose.prod.yml (сверяет tests/makefileProd.test.ts).
 # override: ни `make … APP_CONTAINER=…`, ни MAKEFLAGS не подменят, чей VIRTUAL_HOST берёт proxy-timeout.
 override APP_CONTAINER := invoice-from-tasks
+
+# Общие shell-функции proxy-timeout и doctor. make склеивает `\`-переносы присваивания в одну
+# строку, поэтому команды разделены `;`. Ошибку функции кладут в $$err и возвращают 1.
+#   app_domain — d: VIRTUAL_HOST работающего контейнера приложения (одна строка, формат домена);
+#   find_proxy — p: контейнер nginx-proxy — PROXY из командной строки или единственный по образу
+#                (acme, companion и docker-gen не считаются).
+SH_LIB = one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
+	app_domain() { \
+	  d=$$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $(APP_CONTAINER) 2>/dev/null | sed -n 's/^VIRTUAL_HOST=//p'); \
+	  [ -n "$$d" ] || { err="контейнер $(APP_CONTAINER) не запущен или без VIRTUAL_HOST — сначала make prod-up"; return 1; }; \
+	  { one_line "$$d" && printf '%s' "$$d" | grep -Eqx '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+'; } \
+	    || { err="VIRTUAL_HOST контейнера не похож на один домен: '$$d'"; return 1; }; \
+	}; \
+	find_proxy() { \
+	  p="$$PT_PROXY"; \
+	  [ -n "$$p" ] || p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme|letsencrypt|companion|docker-gen/ {print $$1}'); \
+	  n=$$(printf '%s\n' "$$p" | grep -c . || true); \
+	  [ "$$n" = 1 ] || { err="контейнеров nginx-proxy найдено: $$n. Укажите нужный: make $@ PROXY=<имя>"; return 1; }; \
+	  { one_line "$$p" && printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*'; } || { err="странное имя контейнера: '$$p'"; return 1; }; \
+	};
 
 # ─── Локально ────────────────────────────────────────────────────────
 
@@ -63,6 +84,75 @@ ps:
 health:
 	$(COMPOSE) exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r => r.text()).then(t => console.log(t))"
 
+## Проверить выкат одной командой: контейнер, настройки, прокси, https, сертификат, Watchtower, диск
+#
+#   make doctor               # только читает, ничего не меняет
+#   make doctor PROXY=<имя>   # если прокси не нашёлся или их несколько
+#
+# Каждая строка — ✓ или ✗ и после «→» что делать; есть ✗ — make завершится с ошибкой. Как в эталоне client-bank
+# (make doctor): одна команда вместо ручного обхода. Что проверяет, кроме контейнера и /api/health:
+# - прокси ходит в приложение без keepalive — иначе 502 на POST из портала (метка в compose);
+# - таймаут прокси для домена подключён (make proxy-timeout);
+# - https снаружи отвечает и видит адрес клиента; сертификат не истекает в ближайшие 14 дней;
+# - Watchtower запущен, диск docker занят меньше чем на 90 %.
+# https проверяется с самого сервера: если он не видит себя по внешнему адресу, проверьте с другого
+# компьютера — curl -s https://<домен>/api/health.
+doctor: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
+doctor:
+	@$(SH_LIB) \
+	bad=0; ok() { echo "  ✓ $$*"; }; fail() { echo "  ✗ $$*"; bad=$$((bad + 1)); }; \
+	s=$$(docker inspect -f '{{.State.Status}}{{if .State.Health}} {{.State.Health.Status}}{{end}}' $(APP_CONTAINER) 2>/dev/null); \
+	case "$$s" in \
+	  "running healthy") ok "контейнер $(APP_CONTAINER) работает, healthcheck зелёный";; \
+	  "") fail "контейнера $(APP_CONTAINER) нет → make prod-up"; echo "[make] проблем: 1"; exit 1;; \
+	  *) fail "контейнер $(APP_CONTAINER): $$s → make logs";; \
+	esac; \
+	h=$$(docker exec $(APP_CONTAINER) node -e "const n = { siteUrl: 'DOMAIN', oauth: 'B24_CLIENT_ID/B24_CLIENT_SECRET', tokenKey: 'B24_TOKEN_ENC_KEY', appCode: 'B24_APP_CODE', trustProxy: 'TRUST_PROXY', bitrixGpt: 'VIBE_API_KEY' }; fetch('http://127.0.0.1:3000/api/health').then(r => r.json()).then(j => { const c = j.config || {}; console.log((j.commit || '-') + ' ' + (Object.keys(c).filter(k => c[k] !== true).map(k => n[k] || k).join(',') || '-')) }).catch(() => process.exit(1))" 2>/dev/null); \
+	if [ -z "$$h" ]; then fail "GET /api/health изнутри контейнера не ответил → make logs"; \
+	elif [ "$${h#* }" = - ]; then ok "настройки сервера заданы, сборка $$(printf '%.7s' "$${h%% *}")"; \
+	else fail "не задано в .env: $${h#* } → вписать и make prod-up (таблица переменных — docs/DEPLOY.md)"; fi; \
+	[ "$$(docker inspect -f '{{index .Config.Labels "com.github.nginx-proxy.nginx-proxy.keepalive"}}' $(APP_CONTAINER) 2>/dev/null)" = disabled ] \
+	  && ok "у контейнера метка keepalive=disabled" \
+	  || fail "нет метки keepalive=disabled — жди 502 из портала → make compose-update CONFIRM=1 и make prod-up"; \
+	if ! app_domain; then fail "$$err"; else \
+	  if ! find_proxy; then fail "$$err"; else \
+	    conf=$$(docker exec "$$p" cat /etc/nginx/conf.d/default.conf 2>/dev/null); \
+	    up=$$(printf '%s\n' "$$conf" | awk -v h="upstream $$d {" '$$0 == h {f = 1} f {print} f && /^}/ {exit}'); \
+	    if [ -z "$$up" ]; then fail "в конфиге прокси $$p нет upstream $$d → make prod-up и снова make doctor"; \
+	    elif printf '%s\n' "$$up" | grep -Eq '^[[:space:]]*keepalive[[:space:]]'; then fail "прокси $$p держит соединения с приложением (keepalive) — жди 502 → метка выше, затем make prod-up"; \
+	    else ok "прокси $$p ходит в приложение без keepalive"; fi; \
+	    f="/etc/nginx/vhost.d/$${d}_location"; \
+	    t=$$(docker exec "$$p" cat "$$f" 2>/dev/null | sed -n 's/^[[:space:]]*proxy_read_timeout[[:space:]]*\([^;]*\);.*/\1/p' | tail -n 1); \
+	    if [ -n "$$t" ] && printf '%s\n' "$$conf" | grep -qF "include $$f;"; then ok "таймаут прокси для $$d: $$t"; \
+	    else fail "таймаут прокси для $$d не подключён — 60 с мало для BitrixGPT → make proxy-timeout"; fi; \
+	  fi; \
+	  if command -v curl >/dev/null 2>&1; then \
+	    r=$$(curl -fsS --max-time 10 "https://$$d/api/health" 2>&1); \
+	    if [ $$? -ne 0 ]; then fail "https://$$d/api/health не ответил: $$r"; \
+	    else case "$$r" in \
+	      *'"forwardedFor":"used"'*) ok "https://$$d отвечает, адрес клиента виден через прокси";; \
+	      *) fail "https://$$d отвечает, но адрес клиента не виден (forwardedFor не used) — лимиты по IP общие на всех → TRUST_PROXY";; \
+	    esac; fi; \
+	  fi; \
+	  if command -v openssl >/dev/null 2>&1; then \
+	    cert=$$(echo | timeout 10 openssl s_client -servername "$$d" -connect "$$d:443" 2>/dev/null); \
+	    e=$$(printf '%s\n' "$$cert" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2); \
+	    if [ -z "$$e" ]; then fail "сертификат $$d не прочитан → DNS и docker logs контейнера acme-companion"; \
+	    elif printf '%s\n' "$$cert" | openssl x509 -noout -checkend 1209600 >/dev/null 2>&1; then ok "сертификат действует до $$e"; \
+	    else fail "сертификат истекает меньше чем через 14 дней ($$e) → docker logs контейнера acme-companion"; fi; \
+	  fi; \
+	fi; \
+	docker ps --format '{{.Image}}' | grep -q watchtower \
+	  && ok "Watchtower запущен: новые образы из main приедут сами" \
+	  || fail "Watchtower не запущен: обновления сами не приедут (он общий на хост — docs/DEPLOY.md §1)"; \
+	u=$$(df -P /var/lib/docker 2>/dev/null | awk 'NR == 2 {sub(/%/, "", $$5); print $$5}'); \
+	if [ -n "$$u" ]; then \
+	  if [ "$$u" -lt 90 ]; then ok "диск docker занят на $$u%"; \
+	  else fail "диск docker занят на $$u% → docker system df; make prod-redeploy убирает старые образы приложения"; fi; \
+	fi; \
+	if [ "$$bad" -eq 0 ]; then echo "[make] всё в порядке"; \
+	else echo "[make] проблем: $$bad — что делать, написано после «→»; частые сбои — docs/DEPLOY.md"; exit 1; fi
+
 ## Копия тома с токенами установки в ./backups (токены в нём зашифрованы B24_TOKEN_ENC_KEY)
 #
 # Без ключа копия бесполезна, ключ — отдельно и вне сервера. Восстановление — docs/DEPLOY.md.
@@ -92,23 +182,11 @@ backup:
 proxy-timeout: export PT_TIMEOUT = $(if $(filter command line,$(origin PROXY_TIMEOUT)),$(PROXY_TIMEOUT),400s)
 proxy-timeout: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
 proxy-timeout:
-	@one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
-	d=$$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $(APP_CONTAINER) 2>/dev/null | sed -n 's/^VIRTUAL_HOST=//p'); \
-	[ -n "$$d" ] || { echo "[make] контейнер $(APP_CONTAINER) не запущен или без VIRTUAL_HOST — сначала make prod-up"; exit 1; }; \
-	{ one_line "$$d" && printf '%s' "$$d" | grep -Eqx '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+'; } \
-	  || { echo "[make] VIRTUAL_HOST контейнера не похож на один домен: '$$d'"; exit 1; }; \
+	@$(SH_LIB) \
+	app_domain || { echo "[make] $$err"; exit 1; }; \
 	{ one_line "$$PT_TIMEOUT" && printf '%s' "$$PT_TIMEOUT" | grep -Eqx '[0-9]{1,4}[smh]?'; } \
 	  || { echo "[make] PROXY_TIMEOUT — число с s/m/h, например 400s: '$$PT_TIMEOUT'"; exit 1; }; \
-	p="$$PT_PROXY"; \
-	if [ -z "$$p" ]; then \
-	  p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme|letsencrypt|companion|docker-gen/ {print $$1}'); \
-	fi; \
-	n=$$(printf '%s\n' "$$p" | grep -c . || true); \
-	if [ "$$n" != 1 ]; then \
-	  echo "[make] контейнеров nginx-proxy найдено: $$n. Укажите нужный: make proxy-timeout PROXY=<имя>"; \
-	  docker ps --format '  {{.Names}}\t{{.Image}}'; exit 1; \
-	fi; \
-	{ one_line "$$p" && printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*'; } || { echo "[make] странное имя контейнера: '$$p'"; exit 1; }; \
+	find_proxy || { echo "[make] $$err"; docker ps --format '  {{.Names}}\t{{.Image}}'; exit 1; }; \
 	f="/etc/nginx/vhost.d/$${d}_location"; want="proxy_read_timeout $$PT_TIMEOUT;"; \
 	echo "[make] прокси: $$p, домен: $$d, таймаут: $$PT_TIMEOUT"; \
 	docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "$$p" | grep -qx /etc/nginx/vhost.d \
@@ -132,6 +210,30 @@ proxy-timeout:
 	  echo "[make] ⚠ конфиг перестроен, но $$f не подключён — проверьте, нет ли для домена своего _location_override"; exit 1; \
 	fi
 
+## Обновить docker-compose.prod.yml из репозитория: показать разницу, заменить — только с CONFIRM=1
+#
+#   make compose-update             # скачать и показать, что изменится; файл не трогается
+#   make compose-update CONFIRM=1   # заменить (копия прежнего — рядом), затем make prod-up
+#
+# Как в эталоне client-bank (compose-update): репозитория на сервере нет, и новые настройки
+# контейнера (метки, переменные) приезжают только так — Watchtower обновляет образ, а не этот файл.
+# Скачанное проверяет сам compose (`config`) с нашим .env: битый файл не заменит рабочий. Пин
+# `:sha-…` (откат, пауза автообновлений) замена вернёт на `:latest` — это видно в разнице.
+# CONFIRM — только из командной строки make, не из окружения: как PROXY.
+compose-update: export CU_CONFIRM = $(if $(filter command line,$(origin CONFIRM)),$(CONFIRM))
+compose-update:
+	@t=$$(mktemp ./.docker-compose.prod.yml.XXXXXX) && trap 'rm -f "$$t"' EXIT \
+	  && curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$(REF)/docker-compose.prod.yml" \
+	  && grep -q '^services:' "$$t" \
+	  && $(COMPOSE_ENV) -f "$$t" config -q \
+	  || { echo "[make] новый docker-compose.prod.yml не скачался или не прошёл проверку compose — рабочий не тронут"; exit 1; }; \
+	if cmp -s "$$t" docker-compose.prod.yml; then echo "[make] docker-compose.prod.yml уже как в $(REF)"; exit 0; fi; \
+	diff -u docker-compose.prod.yml "$$t"; \
+	if [ "$$CU_CONFIRM" != 1 ]; then echo "[make] выше — что изменится. Заменить: make compose-update CONFIRM=1"; exit 0; fi; \
+	b="./docker-compose.prod.yml.bak-$$(date +%Y%m%d-%H%M%S)"; \
+	cp docker-compose.prod.yml "$$b" && cp "$$t" docker-compose.prod.yml \
+	  && echo "[make] docker-compose.prod.yml обновлён из $(REF), копия прежнего: $$b. Теперь make prod-up"
+
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
 #
 # Репозитория на сервере нет: Makefile кладётся туда один раз и сам не обновляется. Скачанное
@@ -153,5 +255,5 @@ self-update:
 # целью бывают строки комментария, и наивный `grep -B1` их терял.
 help:
 	@awk '/^## /{d=substr($$0,4)} \
-	      /^[A-Za-z0-9_][A-Za-z0-9_.-]*:/{if(d!=""){printf "  %-14s %s\n", substr($$1,1,length($$1)-1), d; d=""}}' \
+	      /^[A-Za-z0-9_][A-Za-z0-9_.-]*:/{if(d!=""){printf "  %-15s %s\n", substr($$1,1,length($$1)-1), d; d=""}}' \
 	      $(MAKEFILE_LIST)

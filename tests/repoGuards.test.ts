@@ -98,6 +98,18 @@ describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-pr
     expect(COMPOSE).toMatch(/^networks:\n {2}proxy-net:\n {4}external: true$/m)
     expect(COMPOSE).toMatch(/^ {6}B24_TOKEN_ENC_KEY: \$\{B24_TOKEN_ENC_KEY:\?/m)
   })
+
+  it('образ знает свой коммит: deploy передаёт его, Dockerfile кладёт в окружение, health читает', () => {
+    expect(DEPLOY).toMatch(/^ {10}build-args: COMMIT_SHA=\$\{\{ github\.sha \}\}$/m)
+    const dockerfile = readFileSync(join(ROOT, 'Dockerfile'), 'utf8')
+    const runner = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '))
+    expect(runner).toMatch(/^ARG COMMIT_SHA=""\nENV COMMIT_SHA=\$COMMIT_SHA$/m)
+    expect(readFileSync(join(ROOT, 'server/api/health.get.ts'), 'utf8')).toMatch(/buildCommit\(process\.env\.COMMIT_SHA\)/)
+  })
+
+  it('скрипты и стили уходят сжатыми: перед Nitro нет своего nginx, а общий nginx-proxy не сжимает', () => {
+    expect(readFileSync(join(ROOT, 'nuxt.config.ts'), 'utf8')).toMatch(/^ {4}compressPublicAssets: true,$/m)
+  })
 })
 
 /** Все .ts/.vue файлы каталога рекурсивно. */
