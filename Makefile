@@ -7,25 +7,24 @@
 # Обёртки над командами выката — как в эталоне client-bank-alfa-by. Подробности — docs/DEPLOY.md.
 # Прод-цели читают ./.env рядом с docker-compose.prod.yml (DOMAIN, ключи — см. .env.example).
 
-# Внешние значения — REF, PROXY, PROXY_TIMEOUT, CONFIRM — только из командной строки make, не из
-# окружения: на общем хосте там может оказаться чужое. И только как текст ($(value …)): иначе make
-# сам выполнил бы `$(shell …)` из значения ещё до оболочки (ревью безопасности на #16). В рецепт они
-# приходят переменными окружения, а не текстом команды, и там проверяются по формату.
-# ⚠ Командная строка make — это команды: чужого туда не вписывать. MAKEFLAGS в окружении make
-# считает той же командной строкой и разбирает ДО чтения этого файла — `$(shell …)` в нём
-# выполнится при любой цели, и отсюда это не остановить. На сервере MAKEFLAGS в окружении быть
-# не должно (docs/DEPLOY.md).
-# override — у всего, что исполняется или защищает: переменная командной строки иначе заменила бы
-# и функцию проверки, и сами команды (ревью безопасности на #16, как APP_CONTAINER ниже).
+# От чего защищаемся (ревью безопасности на #16):
+# - окружение общего хоста: чужой экспортированный DOMAIN, REF, PROXY… не должен ничего менять —
+#   внешние значения REF, PROXY, PROXY_TIMEOUT, CONFIRM берутся только из командной строки make;
+# - значения, которые вставляют из чужих сообщений как есть (`REF=<ветка>`, `CONFIRM=<sha256>`):
+#   берутся как текст ($(value …) — иначе make сам выполнил бы `$(shell …)` из значения ещё до
+#   оболочки), в рецепт приходят переменными окружения, а не текстом команды, и проверяются по формату.
+# От чего НЕ защищаемся: командная строка make — это команды оператора. `REF:=$(shell …)`, любая
+# другая переменная с `$(…)`, `SHELL=` выполнят что угодно, и Makefile это не остановит. То же —
+# MAKEFLAGS в окружении: make считает его командной строкой и разбирает ДО чтения этого файла. На
+# сервере MAKEFLAGS в окружении быть не должно (docs/DEPLOY.md).
+# override — у всего, что исполняется или проверяет: иначе переменная с тем же именем заменила бы
+# функцию проверки или сами команды (как APP_CONTAINER ниже).
 #   $(call cli,ИМЯ,умолчание)
 override cli = $(if $(filter command line,$(origin $(1))),$(value $(1)),$(2))
 # Переменные командной строки make сам кладёт в окружение каждой команды и для этого раскрывает их
 # значение — `$(shell …)` в нём сработал бы там. unexport: в рецепт они попадают только копиями
 # через cli (U_REF, PT_*, CU_CONFIRM), уже как текст.
 unexport REF PROXY PROXY_TIMEOUT CONFIRM
-# Вложенный make — через эту переменную, а не прямо $(MAKE): строку с $(MAKE) make выполняет даже
-# под `make -n`, и `make -n self-update` скачивал бы и заменял Makefile (ревью на #16).
-override SUBMAKE = $(MAKE)
 # compose подставляет ${DOMAIN}, ${LETSENCRYPT_EMAIL} и ${B24_TOKEN_ENC_KEY} из окружения оболочки
 # РАНЬШЕ, чем из ./.env: экспортированный на общем хосте DOMAIN соседнего проекта увёл бы наш
 # VIRTUAL_HOST (и сертификат) на чужой домен. Поэтому compose запускается без них — источник один, ./.env.
@@ -53,7 +52,7 @@ override SH_LIB = one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
 	}; \
 	find_proxy() { \
 	  p="$$PT_PROXY"; \
-	  [ -n "$$p" ] || p=$$(docker ps -q | xargs -r docker inspect -f '{{.Name}} {{.Config.Image}}' | awk '$$2 ~ /(^|\/)nginx-proxy(:|@|$$)/ {sub(/^\//, "", $$1); print $$1}'); \
+	  [ -n "$$p" ] || p=$$(docker ps -q | xargs -r docker inspect -f '{{.Name}} {{.Config.Image}}' 2>/dev/null | awk '$$2 ~ /(^|\/)nginx-proxy(:|@|$$)/ {sub(/^\//, "", $$1); print $$1}'); \
 	  n=$$(printf '%s\n' "$$p" | grep -c . || true); \
 	  [ "$$n" = 1 ] || { err="контейнеров nginx-proxy найдено: $$n. Укажите нужный: make $@ PROXY=<имя>"; return 1; }; \
 	  { one_line "$$p" && printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*'; } || { err="странное имя контейнера: '$$p'"; return 1; }; \
@@ -176,7 +175,7 @@ doctor:
 	    else fail "сертификат истекает меньше чем через 14 дней ($$e) → docker logs контейнера acme-companion"; fi; \
 	  fi; \
 	fi; \
-	docker ps -q | xargs -r docker inspect -f '{{.Config.Image}}' | grep -q watchtower \
+	docker ps -q | xargs -r docker inspect -f '{{.Config.Image}}' 2>/dev/null | grep -Eq '(^|/)watchtower(:|@|$$)' \
 	  && ok "Watchtower запущен: новые образы из main приедут сами" \
 	  || fail "Watchtower не запущен: обновления сами не приедут (он общий на хост — docs/DEPLOY.md §1)"; \
 	root=$$(docker info -f '{{.DockerRootDir}}' 2>/dev/null); root=$${root:-/var/lib/docker}; \
@@ -257,8 +256,9 @@ proxy-timeout:
 # `:sha-…` (откат, пауза автообновлений) замена вернёт на `:latest` — это видно в разнице.
 # Подтверждение — sha256 показанного файла (12 знаков), а не «да»: между показом и заменой в ветку
 # мог прийти коммит, и тогда скачанное уже другое — отказ (ревью на #16). Файла ещё нет — ставит
-# его. Запись — `cat >`, чтобы права файла остались прежними (у mktemp — только владельцу).
-# Временный файл лежит рядом (compose ищет .env возле compose-файла) и убирается и при Ctrl+C.
+# его. Замена атомарная: временный файл лежит рядом (compose ищет .env возле compose-файла), получает
+# права прежнего (новый — 644: у mktemp только владельцу) и переименовывается поверх — оборванная
+# запись не оставит полфайла. При Ctrl+C временный файл убирается.
 compose-update: export U_REF = $(call cli,REF,main)
 compose-update: export CU_CONFIRM = $(call cli,CONFIRM,)
 compose-update:
@@ -279,8 +279,9 @@ compose-update:
 	[ "$$CU_CONFIRM" = "$$sum" ] \
 	  || { echo "[make] подтверждён sha256 $$CU_CONFIRM, а скачанный сейчас — $$sum: файл в $$U_REF изменился после показа. Разница выше; заменить её — make compose-update CONFIRM=$$sum"; exit 1; }; \
 	b="нет"; \
-	if [ -f docker-compose.prod.yml ]; then b="./docker-compose.prod.yml.bak-$$(date +%Y%m%d-%H%M%S)"; cp docker-compose.prod.yml "$$b" || exit 1; fi; \
-	cat "$$t" > docker-compose.prod.yml \
+	if [ -f docker-compose.prod.yml ]; then b="./docker-compose.prod.yml.bak-$$(date +%Y%m%d-%H%M%S)"; cp -p docker-compose.prod.yml "$$b" && chmod --reference=docker-compose.prod.yml "$$t" || exit 1; \
+	else chmod 644 "$$t" || exit 1; fi; \
+	mv "$$t" docker-compose.prod.yml \
 	  && echo "[make] docker-compose.prod.yml обновлён из $$U_REF (sha256 $$sum), копия прежнего: $$b. Теперь make prod-up"
 
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
@@ -291,21 +292,23 @@ compose-update:
 # Репозитория на сервере нет: Makefile кладётся туда один раз и сам не обновляется. Скачанное
 # проверяется по признаку, который есть в любой версии файла (.PHONY и цель prod-redeploy), —
 # иначе проверка не пропустила бы как раз то обновление, ради которого написана (грабли эталона).
-# Вложенный make — через SUBMAKE: `make -n self-update` только показывает команды.
+# Вложенный make — буквально `make`, а не $(MAKE): строку с $(MAKE) make выполняет и под `make -n`,
+# и `make -n self-update` скачивал и заменял бы Makefile (ревью на #16). Замена — как у
+# compose-update: временный файл рядом, права прежнего, mv поверх.
 self-update: export U_REF = $(call cli,REF,main)
 self-update:
 	@$(SH_LIB) \
 	check_ref || { echo "[make] $$err"; exit 1; }; \
-	t=$$(mktemp /tmp/Makefile.XXXXXX) || exit 1; \
+	t=$$(mktemp ./.Makefile.XXXXXX) || exit 1; \
 	trap 'rm -f "$$t"' EXIT; trap 'rm -f "$$t"; exit 130' INT TERM; \
 	{ curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$$U_REF/Makefile" \
 	  && grep -q '^\.PHONY:' "$$t" \
-	  && $(SUBMAKE) -n -f "$$t" prod-redeploy >/dev/null 2>&1; } \
+	  && make -n -f "$$t" prod-redeploy >/dev/null 2>&1; } \
 	  || { echo "[make] Makefile из $$U_REF не скачался или не прошёл проверку — рабочий не тронут"; exit 1; }; \
 	b="./Makefile.bak-$$(date +%Y%m%d-%H%M%S)"; \
-	cp ./Makefile "$$b" && cat "$$t" > ./Makefile \
+	cp -p ./Makefile "$$b" && chmod --reference=./Makefile "$$t" && mv "$$t" ./Makefile \
 	  && echo "[make] Makefile обновлён из $$U_REF, копия прежнего: $$b" \
-	  && $(SUBMAKE) --no-print-directory help
+	  && make --no-print-directory help
 
 ## Список целей с описаниями
 #

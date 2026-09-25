@@ -2,7 +2,7 @@
 // ciWorkflowGuard.test.ts) и дополнены сверкой реестра REST-методов, которую там оставили в TODO.
 
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -123,18 +123,23 @@ describe('шаблоны Vue', () => {
     expect(config.vueCompilerOptions?.checkUnknownComponents).toBe(true)
   })
 
-  // То же, но и в быстром `pnpm test`, а не только в typecheck: каждый тег с большой буквы в
-  // <template> страниц и компонентов — компонент, который Nuxt зарегистрировал (.nuxt/components.d.ts,
-  // его пишет nuxt prepare при установке зависимостей).
+  // То же, но и в быстром `pnpm test`, а не только в typecheck: каждый компонент в <template> страниц и
+  // компонентов — тот, что Nuxt зарегистрировал (.nuxt/components.d.ts пишет nuxt prepare при установке
+  // зависимостей), или встроенный в Vue. Компонент — тег с большой буквы или с дефисом (fill-preview →
+  // FillPreview); обычные теги HTML дефиса не содержат.
   it('каждый компонент в шаблонах зарегистрирован Nuxt под этим именем', () => {
-    const registered = new Set([...readFileSync(join(ROOT, '.nuxt/components.d.ts'), 'utf8').matchAll(/^export const (\w+):/gm)].map(m => m[1]))
+    const dts = join(ROOT, '.nuxt/components.d.ts')
+    expect(existsSync(dts), 'нет .nuxt/components.d.ts — запустите pnpm install (nuxt prepare)').toBe(true)
+    const registered = new Set([...readFileSync(dts, 'utf8').matchAll(/^export const (\w+):/gm)].map(m => m[1]))
+    for (const builtin of ['Component', 'KeepAlive', 'Suspense', 'Teleport', 'Transition', 'TransitionGroup']) registered.add(builtin)
     expect(registered.has('InvoiceFillPreview')).toBe(true)
+    const pascal = (tag: string) => tag.includes('-') ? tag.split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('') : tag
     const unknown: string[] = []
     for (const file of sources(join(ROOT, 'app')).filter(f => f.endsWith('.vue'))) {
       const text = readFileSync(file, 'utf8')
       const template = text.slice(text.indexOf('<template>'), text.lastIndexOf('</template>'))
-      for (const m of template.matchAll(/<([A-Z][A-Za-z0-9]*)[\s/>]/g)) {
-        if (!registered.has(m[1]!)) unknown.push(`${relative(ROOT, file)}: <${m[1]}>`)
+      for (const m of template.matchAll(/<([A-Z][A-Za-z0-9]*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s/>]/g)) {
+        if (!registered.has(pascal(m[1]!))) unknown.push(`${relative(ROOT, file)}: <${m[1]}>`)
       }
     }
     expect(unknown).toEqual([])

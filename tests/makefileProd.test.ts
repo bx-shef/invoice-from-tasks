@@ -610,6 +610,11 @@ describe('make doctor', () => {
     expect(failures(r)).toEqual([])
   })
 
+  it('образ, лишь похожий на Watchtower по имени (watchtower-ui), — не Watchtower', () => {
+    const r = doctor({ env: { FAKE_PS: `${ONE_PROXY}wtui someone/watchtower-ui:1\\n` } })
+    expect(failures(r)).toEqual([expect.stringContaining('Watchtower не запущен')])
+  })
+
   it('Watchtower не запущен — ✗', () => {
     const r = doctor({ env: { FAKE_PS: ONE_PROXY } })
     expect(failures(r)).toEqual([expect.stringContaining('Watchtower не запущен')])
@@ -800,7 +805,8 @@ describe('внутренние переменные Makefile не подмени
   it.each([
     ['SH_LIB — начало рецепта', 'doctor', ['SH_LIB=touch PWNED;']],
     ['cli — функция проверки значений', 'doctor', ['cli=$(shell touch PWNED)', 'PROXY=x']],
-    ['SUBMAKE — вложенный make', 'self-update', ['SUBMAKE=touch PWNED;']]
+    // Вложенный make в self-update — буквально `make`: MAKE= из командной строки его не подменяет.
+    ['MAKE — вложенный make', 'self-update', ['MAKE=touch PWNED;']]
   ])('%s', (_label, target, args) => {
     const r = make(target, { ...HEALTHY, args, env: { ...HEALTHY.env, FAKE_DL: MAKEFILE } })
     expect(existsSync(join(r.dir, 'PWNED')), r.out).toBe(false)
@@ -820,6 +826,7 @@ describe('make self-update', () => {
   it('скачанный Makefile заменяет рабочий, прежний — в копии, затем справка', () => {
     const r = make('self-update', { env: { FAKE_DL: NEXT } })
     expect(r.code, r.out).toBe(0)
+    expect(readdirSync(r.dir).filter(f => f.startsWith('.Makefile.')), 'временный файл убран').toEqual([])
     expect(readFileSync(join(r.dir, 'Makefile'), 'utf8')).toBe(NEXT)
     const backups = readdirSync(r.dir).filter(f => f.startsWith('Makefile.bak-'))
     expect(backups).toHaveLength(1)
@@ -836,6 +843,13 @@ describe('make self-update', () => {
     expect(r.code).not.toBe(0)
     expect(r.out).toContain('Makefile из main не скачался или не прошёл проверку — рабочий не тронут')
     expect(readFileSync(join(r.dir, 'Makefile'), 'utf8')).toBe(MAKEFILE)
+  })
+
+  it('права Makefile при замене остаются прежними: замена — mv временного файла с правами прежнего', () => {
+    const r = make('self-update', { env: { FAKE_DL: NEXT }, modes: { Makefile: 0o640 } })
+    expect(r.code, r.out).toBe(0)
+    expect(readFileSync(join(r.dir, 'Makefile'), 'utf8')).toBe(NEXT)
+    expect(statSync(join(r.dir, 'Makefile')).mode & 0o777).toBe(0o640)
   })
 
   it('make -n self-update только показывает команды: ничего не скачивает и не заменяет', () => {
