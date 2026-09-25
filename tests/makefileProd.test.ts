@@ -15,30 +15,50 @@ import { afterEach, describe, expect, it } from 'vitest'
 const ROOT = join(import.meta.dirname, '..')
 const MAKEFILE = readFileSync(join(ROOT, 'Makefile'), 'utf8')
 
-const FAKE_DOCKER = `#!/bin/sh
-printf '%s\\n' "$*" >> "$DOCKER_LOG"
-case "$1" in
-  ps) printf '%b' "$FAKE_PS" ;;
-  inspect)
-    case "$*" in
-      *Config.Env*) [ -n "$FAKE_VHOST" ] || exit 1; printf 'PATH=/usr/bin\\nVIRTUAL_HOST=%b\\nTRUST_PROXY=1\\n' "$FAKE_VHOST" ;;
-      *Mounts*) [ "\${FAKE_MOUNTED:-1}" = 1 ] && printf '/etc/nginx/vhost.d\\n/etc/nginx/certs\\n' ;;
-    esac ;;
-  exec)
-    shift; shift
-    case "$1" in
-      sh) sh -c "$3" _ "$FAKE_ROOT$5" "$6" ;;
-      grep)
-        case "$*" in
-          *include*) if [ -f "$DOCKER_LOG.gen" ]; then exit \${FAKE_GEN_INCLUDES:-0}; else exit \${FAKE_INCLUDED_BEFORE:-1}; fi ;;
-          *) grep -qsxF "$3" "$FAKE_ROOT$4" ;;
-        esac ;;
-      docker-gen) touch "$DOCKER_LOG.gen"; exit \${FAKE_GEN_FAIL:-0} ;;
-      nginx) [ "$2" = -t ] && exit \${FAKE_NGINX_T:-0} ;;
-    esac ;;
-  compose) printf 'compose-env DOMAIN=%s KEY=%s\\n' "\${DOMAIN-unset}" "\${B24_TOKEN_ENC_KEY-unset}" >> "$DOCKER_LOG" ;;
-esac
-exit 0
+// Подставной docker на node: журнал вызовов, «контейнер прокси» — каталог FAKE_ROOT. Скрипт записи
+// (`exec … sh -c`) и проверки (`exec … grep`) выполняются ПО-НАСТОЯЩЕМУ с теми аргументами, что
+// передала цель, — пути подменяются на FAKE_ROOT. docker-gen повторяет шаблон nginx-proxy: include
+// строится по файлам vhost.d, которые лежат в момент генерации, и `_location_override` хоста
+// вытесняет его `_location`.
+const FAKE_DOCKER = `#!/usr/bin/env node
+const fs = require('fs'), path = require('path'), cp = require('child_process')
+const a = process.argv.slice(2), env = process.env, R = env.FAKE_ROOT
+fs.appendFileSync(env.DOCKER_LOG, a.join(' ') + '\\n')
+const nl = s => s.replace(/\\\\n/g, '\\n')
+if (a[0] === 'ps') { process.stdout.write(nl(env.FAKE_PS)); process.exit(0) }
+if (a[0] === 'inspect') {
+  const j = a.join(' ')
+  if (j.includes('Config.Env')) {
+    if (!env.FAKE_VHOST) process.exit(1)
+    process.stdout.write('PATH=/usr/bin\\nVIRTUAL_HOST=' + nl(env.FAKE_VHOST) + '\\nTRUST_PROXY=1\\n')
+  }
+  if (j.includes('Mounts') && (env.FAKE_MOUNTED ?? '1') === '1') process.stdout.write('/etc/nginx/vhost.d\\n/etc/nginx/certs\\n')
+  process.exit(0)
+}
+if (a[0] === 'compose') {
+  fs.appendFileSync(env.DOCKER_LOG, 'compose-env DOMAIN=' + (env.DOMAIN ?? 'unset') + ' KEY=' + (env.B24_TOKEN_ENC_KEY ?? 'unset') + '\\n')
+  process.exit(0)
+}
+if (a[0] === 'exec') {
+  const [cmd, ...rest] = a.slice(2)
+  if (cmd === 'sh') process.exit(cp.spawnSync('sh', ['-c', rest[1], '_', R + rest[3], rest[4]], { stdio: 'inherit' }).status ?? 1)
+  if (cmd === 'grep') {
+    rest[rest.length - 1] = R + rest[rest.length - 1]
+    process.exit(cp.spawnSync('grep', rest, { stdio: 'inherit' }).status ?? 2)
+  }
+  if (cmd === 'docker-gen') {
+    if (env.FAKE_GEN_FAIL === '1') process.exit(1)
+    const dir = R + '/etc/nginx/vhost.d'
+    const lines = (fs.existsSync(dir) ? fs.readdirSync(dir) : [])
+      .filter(f => f.endsWith('_location') && f !== 'default_location')
+      .map(f => fs.existsSync(path.join(dir, f + '_override')) ? 'include /etc/nginx/vhost.d/' + f + '_override;' : 'include /etc/nginx/vhost.d/' + f + ';')
+    fs.mkdirSync(R + '/etc/nginx/conf.d', { recursive: true })
+    fs.writeFileSync(R + '/etc/nginx/conf.d/default.conf', lines.join('\\n') + '\\n')
+    process.exit(0)
+  }
+  if (cmd === 'nginx') process.exit(Number((rest[0] === '-t' ? env.FAKE_NGINX_T : env.FAKE_RELOAD) ?? 0))
+}
+process.exit(0)
 `
 
 // Рядом с прокси — companion обоих поколений: старый образ тоже содержит «nginx-proxy» в имени.
@@ -53,15 +73,21 @@ afterEach(() => {
 
 interface Run { code: number, out: string, calls: string[], dir: string, root: string }
 
-function make(target: string, opts: { args?: string[], env?: Record<string, string>, files?: Record<string, string> } = {}): Run {
+interface MakeOpts { args?: string[], env?: Record<string, string>, files?: Record<string, string>, conf?: string, noVhostDir?: boolean }
+
+function make(target: string, opts: MakeOpts = {}): Run {
   const dir = mkdtempSync(join(tmpdir(), 'ift-make-'))
   dirs.push(dir)
   writeFileSync(join(dir, 'Makefile'), MAKEFILE)
   const bin = join(dir, 'bin')
   const root = join(dir, 'proxy-root')
   mkdirSync(bin)
-  mkdirSync(join(root, VHOST_DIR), { recursive: true })
+  mkdirSync(opts.noVhostDir ? root : join(root, VHOST_DIR), { recursive: true })
   for (const [name, text] of Object.entries(opts.files ?? {})) writeFileSync(join(root, VHOST_DIR, name), text)
+  if (opts.conf !== undefined) {
+    mkdirSync(join(root, '/etc/nginx/conf.d'), { recursive: true })
+    writeFileSync(join(root, '/etc/nginx/conf.d/default.conf'), opts.conf)
+  }
   writeFileSync(join(bin, 'docker'), FAKE_DOCKER)
   chmodSync(join(bin, 'docker'), 0o755)
   const log = join(dir, 'docker.log')
@@ -97,7 +123,14 @@ describe('make proxy-timeout', () => {
     const order = ['docker-gen', 'nginx -t', 'nginx -s reload'].map(s => r.calls.findIndex(c => c.includes(s)))
     expect(order).toEqual([...order].sort((a, b) => a - b))
     expect(r.calls.some(c => c.startsWith('compose'))).toBe(false)
+    expect(existsSync(join(r.root, `${FILE}.new`)), 'временный файл убран (mv, не cp)').toBe(false)
     expect(r.out).toContain('готово')
+  })
+
+  it('vhost.d у прокси ещё нет — каталог создаётся, файл пишется', () => {
+    const r = proxyTimeout({ noVhostDir: true })
+    expect(r.code, r.out).toBe(0)
+    expect(vhostFile(r)).toBe('proxy_read_timeout 400s;\n')
   })
 
   it('другие директивы в файле сохраняются, старый таймаут заменяется', () => {
@@ -112,11 +145,47 @@ describe('make proxy-timeout', () => {
     expect(vhostFile(r)).toBe('add_header X-Common 1;\nproxy_read_timeout 400s;\n')
   })
 
-  it('уже настроено — ничего не пишет и не перестраивает', () => {
-    const r = proxyTimeout({ files: { 'invoice.example.by_location': 'proxy_read_timeout 400s;\n' }, env: { FAKE_INCLUDED_BEFORE: '0' } })
+  it('уже настроено — ничего не пишет и не перестраивает, только мягкий reload', () => {
+    const r = proxyTimeout({
+      files: { 'invoice.example.by_location': 'proxy_read_timeout 400s;\n' },
+      conf: `include ${FILE};\n`
+    })
     expect(r.code, r.out).toBe(0)
     expect(r.out).toContain('уже настроено')
-    expect(r.calls.some(c => c.includes('sh -c') || c.includes('docker-gen') || c.includes('reload'))).toBe(false)
+    expect(r.calls.some(c => c.includes('sh -c') || c.includes('docker-gen'))).toBe(false)
+    expect(r.calls).toEqual(expect.arrayContaining(['exec nginx-proxy nginx -t', 'exec nginx-proxy nginx -s reload']))
+  })
+
+  it('reload упал — ошибка; повторный запуск видит «уже настроено» и перечитывает конфиг', () => {
+    const first = proxyTimeout({ env: { FAKE_RELOAD: '1' } })
+    expect(first.code).not.toBe(0)
+    expect(first.out).toContain('повторите make proxy-timeout')
+    const again = proxyTimeout({
+      files: { 'invoice.example.by_location': 'proxy_read_timeout 400s;\n' },
+      conf: `include ${FILE};\n`,
+      env: { FAKE_RELOAD: '1' }
+    })
+    expect(again.code, 'и в ветке «уже настроено» провал reload — не успех').not.toBe(0)
+  })
+
+  it('наш файл есть, но в конфиге подключён только соседний хост — перестраивает, а не «уже настроено»', () => {
+    const r = proxyTimeout({
+      files: { 'invoice.example.by_location': 'proxy_read_timeout 400s;\n', 'invoicexexample.by_location': 'gzip on;\n' },
+      conf: 'include /etc/nginx/vhost.d/invoicexexample.by_location;\n'
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).not.toContain('уже настроено')
+    expect(r.calls).toContain('exec nginx-proxy docker-gen /app/nginx.tmpl /etc/nginx/conf.d/default.conf')
+  })
+
+  it('таймаут в файле только в комментарии — это не «уже настроено»', () => {
+    const r = proxyTimeout({
+      files: { 'invoice.example.by_location': '#proxy_read_timeout 400s;\n' },
+      conf: `include ${FILE};\n`
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).not.toContain('уже настроено')
+    expect(vhostFile(r)).toBe('#proxy_read_timeout 400s;\nproxy_read_timeout 400s;\n')
   })
 
   it('nginx -t не прошёл — без reload и с ошибкой', () => {
@@ -126,8 +195,10 @@ describe('make proxy-timeout', () => {
     expect(r.out).toContain('не перестроен')
   })
 
-  it('конфиг перестроен, но файл не подключён — ошибка, а не «готово»', () => {
-    const r = proxyTimeout({ env: { FAKE_GEN_INCLUDES: '1' } })
+  it('для домена есть _location_override — файл не подключён: ошибка, а не «готово»', () => {
+    // Соседний хост, отличающийся от нашего одной буквой на месте точки: подстрока или регулярное
+    // выражение вместо точной строки include приняли бы его include за наш.
+    const r = proxyTimeout({ files: { 'invoice.example.by_location_override': 'return 503;\n', 'invoicexexample.by_location': 'gzip on;\n' } })
     expect(r.code).not.toBe(0)
     expect(r.out).toContain('не подключён')
   })
@@ -158,6 +229,17 @@ describe('make proxy-timeout', () => {
     const r = proxyTimeout({ args: ['PROXY=edge-proxy', 'PROXY_TIMEOUT=600s'], env: { FAKE_PS: '' } })
     expect(r.code, r.out).toBe(0)
     expect(r.out).toContain('прокси: edge-proxy, домен: invoice.example.by, таймаут: 600s')
+  })
+
+  it('контейнер приложения не подменить ни командной строкой, ни MAKEFLAGS', () => {
+    for (const r of [
+      proxyTimeout({ args: ['APP_CONTAINER=evil'] }),
+      proxyTimeout({ env: { MAKEFLAGS: 'APP_CONTAINER=evil' } })
+    ]) {
+      expect(r.code, r.out).toBe(0)
+      expect(readFileSync(join(r.dir, 'docker.log'), 'utf8')).toMatch(/^inspect .* invoice-from-tasks$/m)
+      expect(readFileSync(join(r.dir, 'docker.log'), 'utf8')).not.toContain('evil')
+    }
   })
 
   it('PROXY и PROXY_TIMEOUT из окружения оболочки — не берутся', () => {
@@ -206,7 +288,7 @@ describe('compose на сервере берёт окружение только
   })
 
   it('имя контейнера в Makefile совпадает с container_name в docker-compose.prod.yml', () => {
-    const name = /^APP_CONTAINER = (\S+)$/m.exec(MAKEFILE)?.[1]
+    const name = /^override APP_CONTAINER := (\S+)$/m.exec(MAKEFILE)?.[1]
     const compose = readFileSync(join(ROOT, 'docker-compose.prod.yml'), 'utf8')
     expect(name).toBeTruthy()
     expect(compose).toMatch(new RegExp(`^ {4}container_name: ${name}$`, 'm'))

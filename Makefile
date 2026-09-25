@@ -14,7 +14,8 @@ REF ?= main
 # VIRTUAL_HOST (и сертификат) на чужой домен. Поэтому compose запускается без них — источник один, ./.env.
 COMPOSE = env -u DOMAIN -u LETSENCRYPT_EMAIL -u B24_TOKEN_ENC_KEY docker compose -f docker-compose.prod.yml
 # Имя контейнера приложения — container_name в docker-compose.prod.yml (сверяет tests/makefileProd.test.ts).
-APP_CONTAINER = invoice-from-tasks
+# override: ни `make … APP_CONTAINER=…`, ни MAKEFLAGS не подменят, чей VIRTUAL_HOST берёт proxy-timeout.
+override APP_CONTAINER := invoice-from-tasks
 
 # ─── Локально ────────────────────────────────────────────────────────
 
@@ -83,10 +84,11 @@ backup:
 # - дописывает в файл строку таймаута, сохраняя другие директивы; новый файл начинает с содержимого
 #   default_location, иначе общие настройки прокси перестали бы действовать на наш домен;
 # - перестраивает конфиг прямо в прокси (docker-gen → nginx -t → reload), не трогая приложение, и
-#   проверяет, что файл подключён. Уже настроено — ничего не делает.
+#   проверяет, что файл подключён. Уже настроено — ничего не пишет, только nginx -t и мягкий reload:
+#   так повторный запуск чинит случай, когда в прошлый раз упал reload (ревью на #16).
 # Значения передаются аргументами, а не текстом команд, и проверяются по формату (ревью безопасности
-# на #16). PROXY и PROXY_TIMEOUT — только из командной строки: в окружении общего хоста там может
-# оказаться чужое.
+# на #16). PROXY и PROXY_TIMEOUT — только из командной строки make (или MAKEFLAGS — для make это то же
+# самое), не из окружения: в окружении общего хоста там может оказаться чужое. Формат проверяется всегда.
 proxy-timeout: export PT_TIMEOUT = $(if $(filter command line,$(origin PROXY_TIMEOUT)),$(PROXY_TIMEOUT),400s)
 proxy-timeout: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
 proxy-timeout:
@@ -112,7 +114,9 @@ proxy-timeout:
 	docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "$$p" | grep -qx /etc/nginx/vhost.d \
 	  || echo "[make] ⚠ /etc/nginx/vhost.d у прокси — не отдельный том: настройка пропадёт, когда прокси пересоздадут"; \
 	if docker exec "$$p" grep -qsxF "$$want" "$$f" && docker exec "$$p" grep -rqsF "include $$f;" /etc/nginx/conf.d/; then \
-	  echo "[make] уже настроено: $$f подключён"; exit 0; \
+	  docker exec "$$p" nginx -t && docker exec "$$p" nginx -s reload \
+	    || { echo "[make] ⚠ файл подключён, но прокси не перечитал конфиг (ошибка выше)"; exit 1; }; \
+	  echo "[make] уже настроено: $$f подключён, прокси перечитал конфиг"; exit 0; \
 	fi; \
 	docker exec "$$p" sh -c 'f=$$1; w=$$2; d=$${f%/*}; mkdir -p "$$d" || exit 1; \
 	  if [ ! -f "$$f" ] && [ -f "$$d/default_location" ]; then cp "$$d/default_location" "$$f" || exit 1; fi; \
@@ -121,7 +125,7 @@ proxy-timeout:
 	  && docker exec "$$p" docker-gen /app/nginx.tmpl /etc/nginx/conf.d/default.conf \
 	  && docker exec "$$p" nginx -t \
 	  && docker exec "$$p" nginx -s reload \
-	  || { echo "[make] ⚠ конфиг прокси не перестроен (ошибка выше); если docker-gen не найден — прокси из отдельных контейнеров, перезапустите его docker-gen"; exit 1; }; \
+	  || { echo "[make] ⚠ конфиг прокси не перестроен или не перечитан (ошибка выше). docker-gen не найден — прокси из отдельных контейнеров, перезапустите его docker-gen; упал reload — повторите make proxy-timeout"; exit 1; }; \
 	if docker exec "$$p" grep -rqsF "include $$f;" /etc/nginx/conf.d/; then \
 	  echo "[make] готово: конфиг прокси подключает $$f"; \
 	else \
