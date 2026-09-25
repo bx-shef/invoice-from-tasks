@@ -112,6 +112,15 @@ describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-pr
   })
 })
 
+describe('шаблоны Vue', () => {
+  // Nuxt называет компоненты из подкаталогов с приставкой каталога (components/invoice/FillPreview.vue →
+  // InvoiceFillPreview). Незнакомый тег Vue рисует пустым элементом без ошибки — так предпросмотр
+  // счёта не показывался вовсе (живой прогон 2026-09-25). Проверку делает pnpm typecheck — если она включена.
+  it('незнакомый компонент в шаблоне — ошибка typecheck', () => {
+    expect(readFileSync(join(ROOT, 'tsconfig.json'), 'utf8')).toMatch(/^ {4}"checkUnknownComponents": true$/m)
+  })
+})
+
 /** Все .ts/.vue файлы каталога рекурсивно. */
 function sources(dir: string): string[] {
   const out: string[] = []

@@ -5,7 +5,7 @@ import { forwardedStatus } from '../utils/requestLimits'
 
 export default defineEventHandler(event => ({
   ok: true,
-  // Коммит запущенного образа (null — локальная сборка): первые 7 знаков — тег `sha-…` для отката.
+  // Коммит запущенного образа, 7 знаков — как в теге `sha-…` для отката (null — локальная сборка).
   commit: buildCommit(process.env.COMMIT_SHA),
   config: {
     siteUrl: Boolean(useRuntimeConfig().public.siteUrl),

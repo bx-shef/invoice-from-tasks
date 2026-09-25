@@ -7,8 +7,17 @@
 # Обёртки над командами выката — как в эталоне client-bank-alfa-by. Подробности — docs/DEPLOY.md.
 # Прод-цели читают ./.env рядом с docker-compose.prod.yml (DOMAIN, ключи — см. .env.example).
 
-# Ветка или тег репозитория, откуда self-update берёт свежий Makefile.
-REF ?= main
+# Внешние значения — REF, PROXY, PROXY_TIMEOUT, CONFIRM — только из командной строки make (или
+# MAKEFLAGS — для make это то же самое), не из окружения: на общем хосте там может оказаться чужое.
+# И только как текст ($(value …)): иначе make сам выполнил бы `$(shell …)` из значения ещё до
+# оболочки (ревью безопасности на #16). В рецепт они приходят переменными окружения, а не текстом
+# команды, и там проверяются по формату.
+#   $(call cli,ИМЯ,умолчание)
+cli = $(if $(filter command line,$(origin $(1))),$(value $(1)),$(2))
+# Переменные командной строки make сам кладёт в окружение каждой команды и для этого раскрывает их
+# значение — `$(shell …)` в нём сработал бы там. unexport: в рецепт они попадают только копиями
+# через cli (U_REF, PT_*, CU_CONFIRM), уже как текст.
+unexport REF PROXY PROXY_TIMEOUT CONFIRM
 # compose подставляет ${DOMAIN}, ${LETSENCRYPT_EMAIL} и ${B24_TOKEN_ENC_KEY} из окружения оболочки
 # РАНЬШЕ, чем из ./.env: экспортированный на общем хосте DOMAIN соседнего проекта увёл бы наш
 # VIRTUAL_HOST (и сертификат) на чужой домен. Поэтому compose запускается без них — источник один, ./.env.
@@ -18,11 +27,13 @@ COMPOSE = $(COMPOSE_ENV) -f docker-compose.prod.yml
 # override: ни `make … APP_CONTAINER=…`, ни MAKEFLAGS не подменят, чей VIRTUAL_HOST берёт proxy-timeout.
 override APP_CONTAINER := invoice-from-tasks
 
-# Общие shell-функции proxy-timeout и doctor. make склеивает `\`-переносы присваивания в одну
-# строку, поэтому команды разделены `;`. Ошибку функции кладут в $$err и возвращают 1.
+# Общие shell-функции целей. make склеивает `\`-переносы присваивания в одну строку, поэтому
+# команды разделены `;`. Ошибку функции кладут в $$err и возвращают 1.
 #   app_domain — d: VIRTUAL_HOST работающего контейнера приложения (одна строка, формат домена);
-#   find_proxy — p: контейнер nginx-proxy — PROXY из командной строки или единственный по образу
-#                (acme, companion и docker-gen не считаются).
+#   find_proxy — p: контейнер nginx-proxy — PROXY из командной строки или единственный, чей образ
+#                называется ровно nginx-proxy (nginxproxy/nginx-proxy:1.7, jwilder/nginx-proxy):
+#                подстрока приняла бы и чужой образ вроде nginx-proxy-dashboard (ревью на #16);
+#   check_ref  — U_REF: имя ветки или тега для адреса raw.githubusercontent.com.
 SH_LIB = one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
 	app_domain() { \
 	  d=$$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $(APP_CONTAINER) 2>/dev/null | sed -n 's/^VIRTUAL_HOST=//p'); \
@@ -32,10 +43,14 @@ SH_LIB = one_line() { [ "$$(printf '%s' "$$1" | wc -l)" -eq 0 ]; }; \
 	}; \
 	find_proxy() { \
 	  p="$$PT_PROXY"; \
-	  [ -n "$$p" ] || p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme|letsencrypt|companion|docker-gen/ {print $$1}'); \
+	  [ -n "$$p" ] || p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /(^|\/)nginx-proxy(:|@|$$)/ {print $$1}'); \
 	  n=$$(printf '%s\n' "$$p" | grep -c . || true); \
 	  [ "$$n" = 1 ] || { err="контейнеров nginx-proxy найдено: $$n. Укажите нужный: make $@ PROXY=<имя>"; return 1; }; \
 	  { one_line "$$p" && printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*'; } || { err="странное имя контейнера: '$$p'"; return 1; }; \
+	}; \
+	check_ref() { \
+	  { one_line "$$U_REF" && printf '%s' "$$U_REF" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._/-]{0,199}' && ! printf '%s' "$$U_REF" | grep -qF '..'; } \
+	    || { err="REF — имя ветки или тега (буквы, цифры, . _ / -): '$$U_REF'"; return 1; }; \
 	};
 
 # ─── Локально ────────────────────────────────────────────────────────
@@ -89,69 +104,77 @@ health:
 #   make doctor               # только читает, ничего не меняет
 #   make doctor PROXY=<имя>   # если прокси не нашёлся или их несколько
 #
-# Каждая строка — ✓ или ✗ и после «→» что делать; есть ✗ — make завершится с ошибкой. Как в эталоне client-bank
-# (make doctor): одна команда вместо ручного обхода. Что проверяет, кроме контейнера и /api/health:
-# - прокси ходит в приложение без keepalive — иначе 502 на POST из портала (метка в compose);
+# Как в эталоне client-bank (make doctor): одна команда вместо ручного обхода. Каждая строка — ✓,
+# ✗ (после «→» — что делать; есть ✗ — make завершится с ошибкой) или ⚠ (необязательное не задано
+# или проверить нечем — не ошибка, но и не «всё в порядке»). Что проверяет, кроме контейнера:
+# - /api/health изнутри: сборка и что не задано — в .env, в compose-файле или необязательное;
+# - прокси ходит в приложение без keepalive — иначе 502 на POST из портала (метка в compose) — и
+#   видит хотя бы один рабочий сервер приложения;
 # - таймаут прокси для домена подключён (make proxy-timeout);
-# - https снаружи отвечает и видит адрес клиента; сертификат не истекает в ближайшие 14 дней;
-# - Watchtower запущен, диск docker занят меньше чем на 90 %.
+# - https снаружи отвечает и видит адрес клиента; сертификат доверенный, на наш домен и не
+#   истекает в ближайшие 14 дней;
+# - Watchtower запущен; диск с каталогом данных docker занят меньше чем на 90 %.
 # https проверяется с самого сервера: если он не видит себя по внешнему адресу, проверьте с другого
 # компьютера — curl -s https://<домен>/api/health.
-doctor: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
+doctor: export PT_PROXY = $(call cli,PROXY,)
 doctor:
 	@$(SH_LIB) \
-	bad=0; ok() { echo "  ✓ $$*"; }; fail() { echo "  ✗ $$*"; bad=$$((bad + 1)); }; \
+	bad=0; skip=0; ok() { echo "  ✓ $$*"; }; fail() { echo "  ✗ $$*"; bad=$$((bad + 1)); }; warn() { echo "  ⚠ $$*"; skip=$$((skip + 1)); }; \
 	s=$$(docker inspect -f '{{.State.Status}}{{if .State.Health}} {{.State.Health.Status}}{{end}}' $(APP_CONTAINER) 2>/dev/null); \
 	case "$$s" in \
 	  "running healthy") ok "контейнер $(APP_CONTAINER) работает, healthcheck зелёный";; \
 	  "") fail "контейнера $(APP_CONTAINER) нет → make prod-up"; echo "[make] проблем: 1"; exit 1;; \
 	  *) fail "контейнер $(APP_CONTAINER): $$s → make logs";; \
 	esac; \
-	h=$$(docker exec $(APP_CONTAINER) node -e "const n = { siteUrl: 'DOMAIN', oauth: 'B24_CLIENT_ID/B24_CLIENT_SECRET', tokenKey: 'B24_TOKEN_ENC_KEY', appCode: 'B24_APP_CODE', trustProxy: 'TRUST_PROXY', bitrixGpt: 'VIBE_API_KEY' }; fetch('http://127.0.0.1:3000/api/health').then(r => r.json()).then(j => { const c = j.config || {}; console.log((j.commit || '-') + ' ' + (Object.keys(c).filter(k => c[k] !== true).map(k => n[k] || k).join(',') || '-')) }).catch(() => process.exit(1))" 2>/dev/null); \
-	if [ -z "$$h" ]; then fail "GET /api/health изнутри контейнера не ответил → make logs"; \
-	elif [ "$${h#* }" = - ]; then ok "настройки сервера заданы, сборка $$(printf '%.7s' "$${h%% *}")"; \
-	else fail "не задано в .env: $${h#* } → вписать и make prod-up (таблица переменных — docs/DEPLOY.md)"; fi; \
+	h=$$(docker exec $(APP_CONTAINER) node -e "const env = { oauth: 'B24_CLIENT_ID/B24_CLIENT_SECRET', tokenKey: 'B24_TOKEN_ENC_KEY', appCode: 'B24_APP_CODE' }; const compose = { siteUrl: 'NUXT_PUBLIC_SITE_URL', trustProxy: 'TRUST_PROXY' }; const optional = { bitrixGpt: 'VIBE_API_KEY' }; fetch('http://127.0.0.1:3000/api/health').then(r => r.json()).then(j => { const c = j.config || {}; const off = Object.keys(c).filter(k => c[k] !== true); const list = pick => off.filter(pick).map(k => env[k] || compose[k] || optional[k] || k).join(',') || '-'; console.log([String(j.commit || 'неизвестна').replace(/\s/g, ''), list(k => !(k in compose) && !(k in optional)), list(k => k in compose), list(k => k in optional)].join(' ')) }).catch(() => process.exit(1))" 2>/dev/null); \
+	if [ -z "$$h" ]; then fail "GET /api/health изнутри контейнера не ответил → make logs"; else \
+	  set -- $$h; \
+	  if [ "$$2" = - ] && [ "$$3" = - ]; then ok "настройки сервера заданы, сборка $$1"; fi; \
+	  [ "$$2" = - ] || fail "не задано в .env: $$2 → вписать и make prod-up (таблица переменных — docs/DEPLOY.md); сборка $$1"; \
+	  [ "$$3" = - ] || fail "не задано в docker-compose.prod.yml: $$3 → make compose-update CONFIRM=1 и make prod-up"; \
+	  [ "$$4" = - ] || warn "не задано (необязательно): $$4 — без него не работают названия через BitrixGPT и консультации"; \
+	fi; \
 	[ "$$(docker inspect -f '{{index .Config.Labels "com.github.nginx-proxy.nginx-proxy.keepalive"}}' $(APP_CONTAINER) 2>/dev/null)" = disabled ] \
 	  && ok "у контейнера метка keepalive=disabled" \
 	  || fail "нет метки keepalive=disabled — жди 502 из портала → make compose-update CONFIRM=1 и make prod-up"; \
 	if ! app_domain; then fail "$$err"; else \
 	  if ! find_proxy; then fail "$$err"; else \
 	    conf=$$(docker exec "$$p" cat /etc/nginx/conf.d/default.conf 2>/dev/null); \
-	    up=$$(printf '%s\n' "$$conf" | awk -v h="upstream $$d {" '$$0 == h {f = 1} f {print} f && /^}/ {exit}'); \
+	    up=$$(printf '%s\n' "$$conf" | awk -v h="upstream $$d {" '{ sub(/^[ \t]+/, ""); sub(/[ \t\r]+$$/, "") } $$0 == h {f = 1} f {print} f && $$0 == "}" {exit}'); \
 	    if [ -z "$$up" ]; then fail "в конфиге прокси $$p нет upstream $$d → make prod-up и снова make doctor"; \
-	    elif printf '%s\n' "$$up" | grep -Eq '^[[:space:]]*keepalive[[:space:]]'; then fail "прокси $$p держит соединения с приложением (keepalive) — жди 502 → метка выше, затем make prod-up"; \
+	    elif ! printf '%s\n' "$$up" | grep -E '^server[[:space:]]' | grep -vqE '[[:space:]]down;'; then fail "в upstream $$d у прокси $$p нет рабочего сервера — прокси не видит приложение → make ps, make logs"; \
+	    elif printf '%s\n' "$$up" | grep -Eq '^keepalive[[:space:]]'; then fail "прокси $$p держит соединения с приложением (keepalive) — жди 502 → метка выше, затем make prod-up"; \
 	    else ok "прокси $$p ходит в приложение без keepalive"; fi; \
 	    f="/etc/nginx/vhost.d/$${d}_location"; \
 	    t=$$(docker exec "$$p" cat "$$f" 2>/dev/null | sed -n 's/^[[:space:]]*proxy_read_timeout[[:space:]]*\([^;]*\);.*/\1/p' | tail -n 1); \
 	    if [ -n "$$t" ] && printf '%s\n' "$$conf" | grep -qF "include $$f;"; then ok "таймаут прокси для $$d: $$t"; \
 	    else fail "таймаут прокси для $$d не подключён — 60 с мало для BitrixGPT → make proxy-timeout"; fi; \
 	  fi; \
-	  if command -v curl >/dev/null 2>&1; then \
+	  if ! command -v curl >/dev/null 2>&1; then warn "https не проверен: на сервере нет curl (sudo apt install curl)"; else \
 	    r=$$(curl -fsS --max-time 10 "https://$$d/api/health" 2>&1); \
 	    if [ $$? -ne 0 ]; then fail "https://$$d/api/health не ответил: $$r"; \
-	    else case "$$r" in \
-	      *'"forwardedFor":"used"'*) ok "https://$$d отвечает, адрес клиента виден через прокси";; \
-	      *) fail "https://$$d отвечает, но адрес клиента не виден (forwardedFor не used) — лимиты по IP общие на всех → TRUST_PROXY";; \
-	    esac; fi; \
+	    elif printf '%s' "$$r" | grep -Eq '"forwardedFor"[[:space:]]*:[[:space:]]*"used"'; then ok "https://$$d отвечает, адрес клиента виден через прокси"; \
+	    else fail "https://$$d отвечает, но адрес клиента не виден (forwardedFor не used) — лимиты по IP общие на всех → TRUST_PROXY в docker-compose.prod.yml"; fi; \
 	  fi; \
-	  if command -v openssl >/dev/null 2>&1; then \
-	    cert=$$(echo | timeout 10 openssl s_client -servername "$$d" -connect "$$d:443" 2>/dev/null); \
+	  if ! command -v openssl >/dev/null 2>&1; then warn "сертификат не проверен: на сервере нет openssl (sudo apt install openssl)"; else \
+	    cert=$$(echo | timeout 10 openssl s_client -servername "$$d" -verify_hostname "$$d" -verify_return_error -connect "$$d:443" 2>/dev/null); \
 	    e=$$(printf '%s\n' "$$cert" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2); \
-	    if [ -z "$$e" ]; then fail "сертификат $$d не прочитан → DNS и docker logs контейнера acme-companion"; \
-	    elif printf '%s\n' "$$cert" | openssl x509 -noout -checkend 1209600 >/dev/null 2>&1; then ok "сертификат действует до $$e"; \
+	    if [ -z "$$e" ]; then fail "сертификат $$d не прочитан или не доверенный (ещё не выпущен, самоподписанный, на другой домен) → DNS и docker logs контейнера acme-companion"; \
+	    elif printf '%s\n' "$$cert" | openssl x509 -noout -checkend 1209600 >/dev/null 2>&1; then ok "сертификат доверенный, действует до $$e"; \
 	    else fail "сертификат истекает меньше чем через 14 дней ($$e) → docker logs контейнера acme-companion"; fi; \
 	  fi; \
 	fi; \
 	docker ps --format '{{.Image}}' | grep -q watchtower \
 	  && ok "Watchtower запущен: новые образы из main приедут сами" \
 	  || fail "Watchtower не запущен: обновления сами не приедут (он общий на хост — docs/DEPLOY.md §1)"; \
-	u=$$(df -P /var/lib/docker 2>/dev/null | awk 'NR == 2 {sub(/%/, "", $$5); print $$5}'); \
-	if [ -n "$$u" ]; then \
-	  if [ "$$u" -lt 90 ]; then ok "диск docker занят на $$u%"; \
-	  else fail "диск docker занят на $$u% → docker system df; make prod-redeploy убирает старые образы приложения"; fi; \
-	fi; \
-	if [ "$$bad" -eq 0 ]; then echo "[make] всё в порядке"; \
-	else echo "[make] проблем: $$bad — что делать, написано после «→»; частые сбои — docs/DEPLOY.md"; exit 1; fi
+	root=$$(docker info -f '{{.DockerRootDir}}' 2>/dev/null); root=$${root:-/var/lib/docker}; \
+	u=$$(df -P "$$root" 2>/dev/null | awk 'NR == 2 {sub(/%/, "", $$5); print $$5}'); \
+	if [ -z "$$u" ]; then warn "место на диске не проверено (df $$root не ответил) → df -h"; \
+	elif [ "$$u" -lt 90 ]; then ok "диск docker ($$root) занят на $$u%"; \
+	else fail "диск docker ($$root) занят на $$u% → docker system df; make prod-redeploy убирает старые образы приложения"; fi; \
+	if [ "$$bad" -gt 0 ]; then echo "[make] проблем: $$bad — что делать, написано после «→»; частые сбои — docs/DEPLOY.md"; exit 1; \
+	elif [ "$$skip" -gt 0 ]; then echo "[make] ошибок нет, предупреждений: $$skip (⚠ выше)"; \
+	else echo "[make] всё в порядке"; fi
 
 ## Копия тома с токенами установки в ./backups (токены в нём зашифрованы B24_TOKEN_ENC_KEY)
 #
@@ -177,10 +200,9 @@ backup:
 #   проверяет, что файл подключён. Уже настроено — ничего не пишет, только nginx -t и мягкий reload:
 #   так повторный запуск чинит случай, когда в прошлый раз упал reload (ревью на #16).
 # Значения передаются аргументами, а не текстом команд, и проверяются по формату (ревью безопасности
-# на #16). PROXY и PROXY_TIMEOUT — только из командной строки make (или MAKEFLAGS — для make это то же
-# самое), не из окружения: в окружении общего хоста там может оказаться чужое. Формат проверяется всегда.
-proxy-timeout: export PT_TIMEOUT = $(if $(filter command line,$(origin PROXY_TIMEOUT)),$(PROXY_TIMEOUT),400s)
-proxy-timeout: export PT_PROXY = $(if $(filter command line,$(origin PROXY)),$(PROXY))
+# на #16). PROXY и PROXY_TIMEOUT — только из командной строки make и только как текст (cli вверху файла).
+proxy-timeout: export PT_TIMEOUT = $(call cli,PROXY_TIMEOUT,400s)
+proxy-timeout: export PT_PROXY = $(call cli,PROXY,)
 proxy-timeout:
 	@$(SH_LIB) \
 	app_domain || { echo "[make] $$err"; exit 1; }; \
@@ -214,39 +236,54 @@ proxy-timeout:
 #
 #   make compose-update             # скачать и показать, что изменится; файл не трогается
 #   make compose-update CONFIRM=1   # заменить (копия прежнего — рядом), затем make prod-up
+#   make compose-update REF=<ветка> # взять файл из ветки или тега, а не из main
 #
 # Как в эталоне client-bank (compose-update): репозитория на сервере нет, и новые настройки
 # контейнера (метки, переменные) приезжают только так — Watchtower обновляет образ, а не этот файл.
 # Скачанное проверяет сам compose (`config`) с нашим .env: битый файл не заменит рабочий. Пин
-# `:sha-…` (откат, пауза автообновлений) замена вернёт на `:latest` — это видно в разнице.
-# CONFIRM — только из командной строки make, не из окружения: как PROXY.
-compose-update: export CU_CONFIRM = $(if $(filter command line,$(origin CONFIRM)),$(CONFIRM))
+# `:sha-…` (откат, пауза автообновлений) замена вернёт на `:latest` — это видно в разнице. Оба
+# запуска печатают sha256 скачанного файла: между показом и CONFIRM=1 в ветку мог прийти коммит —
+# сверьте, что sha256 тот же. Файла ещё нет — ставит его без копии. Временный файл лежит рядом
+# (compose ищет .env возле compose-файла) и убирается и при Ctrl+C.
+compose-update: export U_REF = $(call cli,REF,main)
+compose-update: export CU_CONFIRM = $(call cli,CONFIRM,)
 compose-update:
-	@t=$$(mktemp ./.docker-compose.prod.yml.XXXXXX) && trap 'rm -f "$$t"' EXIT \
-	  && curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$(REF)/docker-compose.prod.yml" \
+	@$(SH_LIB) \
+	check_ref || { echo "[make] $$err"; exit 1; }; \
+	t=$$(mktemp ./.docker-compose.prod.yml.XXXXXX) || exit 1; \
+	trap 'rm -f "$$t"' EXIT; trap 'rm -f "$$t"; exit 130' INT TERM; \
+	{ curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$$U_REF/docker-compose.prod.yml" \
 	  && grep -q '^services:' "$$t" \
-	  && $(COMPOSE_ENV) -f "$$t" config -q \
-	  || { echo "[make] новый docker-compose.prod.yml не скачался или не прошёл проверку compose — рабочий не тронут"; exit 1; }; \
-	if cmp -s "$$t" docker-compose.prod.yml; then echo "[make] docker-compose.prod.yml уже как в $(REF)"; exit 0; fi; \
-	diff -u docker-compose.prod.yml "$$t"; \
-	if [ "$$CU_CONFIRM" != 1 ]; then echo "[make] выше — что изменится. Заменить: make compose-update CONFIRM=1"; exit 0; fi; \
-	b="./docker-compose.prod.yml.bak-$$(date +%Y%m%d-%H%M%S)"; \
-	cp docker-compose.prod.yml "$$b" && cp "$$t" docker-compose.prod.yml \
-	  && echo "[make] docker-compose.prod.yml обновлён из $(REF), копия прежнего: $$b. Теперь make prod-up"
+	  && $(COMPOSE_ENV) -f "$$t" config -q; } \
+	  || { echo "[make] docker-compose.prod.yml из $$U_REF не скачался или не прошёл проверку compose (ошибка выше; нет .env?) — рабочий не тронут"; exit 1; }; \
+	sum=$$(sha256sum "$$t" | cut -c1-12); \
+	if [ -f docker-compose.prod.yml ] && cmp -s "$$t" docker-compose.prod.yml; then echo "[make] docker-compose.prod.yml уже как в $$U_REF (sha256 $$sum…)"; exit 0; fi; \
+	if [ -f docker-compose.prod.yml ]; then diff -u docker-compose.prod.yml "$$t"; else echo "[make] docker-compose.prod.yml здесь ещё нет — будет поставлен"; fi; \
+	if [ "$$CU_CONFIRM" != 1 ]; then echo "[make] выше — что изменится ($$U_REF, sha256 $$sum…). Заменить: make compose-update CONFIRM=1 — и сверьте sha256"; exit 0; fi; \
+	b="нет"; \
+	if [ -f docker-compose.prod.yml ]; then b="./docker-compose.prod.yml.bak-$$(date +%Y%m%d-%H%M%S)"; cp docker-compose.prod.yml "$$b" || exit 1; fi; \
+	cp "$$t" docker-compose.prod.yml \
+	  && echo "[make] docker-compose.prod.yml обновлён из $$U_REF (sha256 $$sum…), копия прежнего: $$b. Теперь make prod-up"
 
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
+#
+#   make self-update                # из main
+#   make self-update REF=<ветка>    # из ветки или тега
 #
 # Репозитория на сервере нет: Makefile кладётся туда один раз и сам не обновляется. Скачанное
 # проверяется по признаку, который есть в любой версии файла (.PHONY и цель prod-redeploy), —
 # иначе проверка не пропустила бы как раз то обновление, ради которого написана (грабли эталона).
+self-update: export U_REF = $(call cli,REF,main)
 self-update:
-	@t=$$(mktemp /tmp/Makefile.XXXXXX) && trap 'rm -f "$$t"' EXIT \
-	  && curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$(REF)/Makefile" \
+	@$(SH_LIB) \
+	check_ref || { echo "[make] $$err"; exit 1; }; \
+	t=$$(mktemp /tmp/Makefile.XXXXXX) && trap 'rm -f "$$t"' EXIT \
+	  && curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$$U_REF/Makefile" \
 	  && grep -q '^\.PHONY:' "$$t" \
 	  && $(MAKE) -n -f "$$t" prod-redeploy >/dev/null 2>&1 \
 	  && { b="./Makefile.bak-$$(date +%Y%m%d-%H%M%S)"; \
 	       cp ./Makefile "$$b" && cp "$$t" ./Makefile \
-	       && echo "[make] Makefile обновлён из $(REF), копия прежнего: $$b"; \
+	       && echo "[make] Makefile обновлён из $$U_REF, копия прежнего: $$b"; \
 	       $(MAKE) --no-print-directory help; }
 
 ## Список целей с описаниями

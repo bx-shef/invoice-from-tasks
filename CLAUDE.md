@@ -65,5 +65,8 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 - **Язык** — по таблице `docs/AGENT_RULES.md` §0: код по-английски; комментарии, документация,
   коммиты, PR и issues — по-русски.
 - **Штамп `> Last reviewed: YYYY-MM-DD`** под заголовком каждого `.md`.
+- **Компоненты из подкаталогов — с приставкой каталога**: `components/invoice/FillPreview.vue` —
+  тег `<InvoiceFillPreview>`. Незнакомый тег Vue рисует пустым без ошибки; ловит `pnpm typecheck`
+  (`checkUnknownComponents` в `tsconfig.json`).
 - **Тест должен краснеть при мутации кода** (`AGENT_RULES.md` §5.2); откат мутации — из копии,
   не `git checkout --`.
