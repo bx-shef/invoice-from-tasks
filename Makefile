@@ -1,4 +1,5 @@
-.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health backup self-update help
+.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health backup proxy-timeout \
+        self-update help
 
 # Голый `make` на сервере печатает справку, а не запускает первую цель.
 .DEFAULT_GOAL := help
@@ -9,6 +10,14 @@
 # Ветка или тег репозитория, откуда self-update берёт свежий Makefile.
 REF ?= main
 COMPOSE = docker compose -f docker-compose.prod.yml
+
+# Домен — первое `DOMAIN=` из ./.env (можно с `export`), без комментария в конце строки, кавычек,
+# пробелов и CR. Файл не исполняем. Цели домен печатают: неверно прочитанный видно глазом.
+# Задать руками: make proxy-timeout DOMAIN=…
+DOMAIN ?= $(shell sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DOMAIN[[:space:]]*=//p' .env 2>/dev/null \
+  | head -1 | sed 's/[[:space:]]\#.*//' | tr -d "\r\"' ")
+# Сколько общий nginx-proxy ждёт ответа приложения: BitrixGPT с повторами — до 120 с × 3.
+PROXY_TIMEOUT ?= 400s
 
 # ─── Локально ────────────────────────────────────────────────────────
 
@@ -63,6 +72,37 @@ backup:
 	@mkdir -p backups && f="backups/portals-$$(date +%Y%m%d-%H%M%S).tgz" \
 	  && { $(COMPOSE) exec -T app tar czf - -C /app/.data . > "$$f" || { rm -f "$$f"; exit 1; }; } \
 	  && echo "[make] копия: $$f ($$(du -h "$$f" | cut -f1))"
+
+## Поднять таймаут общего nginx-proxy для нашего домена (по умолчанию он ждёт 60 с — мало для BitrixGPT)
+#
+#   make proxy-timeout                 # контейнер прокси найдётся по образу *nginx-proxy*
+#   make proxy-timeout PROXY=<имя>     # если прокси не нашёлся или их несколько
+#
+# nginx-proxy подключает /etc/nginx/vhost.d/<домен>_location в блок location нашего домена, но
+# только когда перестраивает конфигурацию. Поэтому после записи пересоздаём СВОЙ контейнер
+# (прокси видит событие и перестраивает конфиг) и проверяем, что файл в конфиг попал. Повторный
+# запуск безопасен: файл перезапишется тем же, приложение перезапустится.
+proxy-timeout:
+	@test -n "$(DOMAIN)" || { echo "[make] нет DOMAIN в ./.env"; exit 1; }
+	@p="$(PROXY)"; \
+	if [ -z "$$p" ]; then \
+	  p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme/ {print $$1}'); \
+	fi; \
+	n=$$(printf '%s\n' "$$p" | grep -c . || true); \
+	if [ "$$n" != 1 ]; then \
+	  echo "[make] контейнеров nginx-proxy найдено: $$n. Укажите нужный: make proxy-timeout PROXY=<имя>"; \
+	  docker ps --format '  {{.Names}}\t{{.Image}}'; exit 1; \
+	fi; \
+	f="/etc/nginx/vhost.d/$(DOMAIN)_location"; \
+	echo "[make] прокси: $$p, домен: $(DOMAIN), таймаут: $(PROXY_TIMEOUT)"; \
+	docker exec "$$p" sh -c "mkdir -p /etc/nginx/vhost.d && echo 'proxy_read_timeout $(PROXY_TIMEOUT);' > $$f" \
+	  && $(COMPOSE) up -d --force-recreate app \
+	  && sleep 5 \
+	  && if docker exec "$$p" sh -c "grep -rqs '$$f' /etc/nginx/conf.d/"; then \
+	       echo "[make] готово: конфиг прокси подключает $$f"; \
+	     else \
+	       echo "[make] ⚠ файл записан, но прокси ещё не перестроил конфиг — через минуту повторите: make proxy-timeout"; exit 1; \
+	     fi
 
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
 #

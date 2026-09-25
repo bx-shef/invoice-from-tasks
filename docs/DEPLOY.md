@@ -46,16 +46,11 @@ Watchtower не нужен `docker login`. Оставляете приватны
 **Долгие ответы BitrixGPT.** nginx-proxy ждёт ответа приложения 60 секунд, а запрос названий или
 консультации с повторами может идти дольше (до 120 с на попытку, до трёх попыток —
 `server/utils/llm.ts`). Иначе человек получит `504`, а запрос дойдёт до конца и потратит лимит
-впустую. Таймаут поднимается для нашего домена файлом в `vhost.d` прокси (имя контейнера прокси —
-из `docker ps`):
-
-```bash
-docker exec <контейнер nginx-proxy> sh -c \
-  'echo "proxy_read_timeout 400s;" > /etc/nginx/vhost.d/invoice-from-tasks.bx-shef.by_location'
-```
-
-Прокси подхватит файл, когда перестроит конфигурацию: после первого `make prod-up` или
-`docker compose -f docker-compose.prod.yml up -d --force-recreate`.
+впустую. Таймаут для нашего домена поднимает `make proxy-timeout` (шаг в «Развёртывании» ниже):
+находит контейнер nginx-proxy, пишет `proxy_read_timeout 400s;` в его
+`/etc/nginx/vhost.d/<домен>_location`, пересоздаёт контейнер приложения, чтобы прокси перестроил
+конфигурацию, и проверяет, что файл в неё попал. Прокси не нашёлся или их несколько —
+`make proxy-timeout PROXY=<имя контейнера>`.
 
 ### Развёртывание
 
@@ -84,9 +79,10 @@ VIBE_API_KEY=
 EOF
 grep B24_TOKEN_ENC_KEY .env   # ⚠ сохраните ключ вне сервера (менеджер паролей)
 
-make prod-up    # поднять контейнер (образ из GHCR)
-make ps         # через ~20 секунд — healthy
-make health     # какие настройки заданы (без секретов); ключи и код — false до раздела 2
+make prod-up          # поднять контейнер (образ из GHCR)
+make proxy-timeout    # таймаут прокси для BitrixGPT (см. выше); контейнер пересоздастся
+make ps               # через ~20 секунд — healthy
+make health           # какие настройки заданы (без секретов); ключи и код — false до раздела 2
 curl -s https://invoice-from-tasks.bx-shef.by/api/health   # через прокси: request.forwardedFor = used
 ```
 
