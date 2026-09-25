@@ -20,6 +20,10 @@ Nuxt 4 (SPA, `ssr: false`) + `@bitrix24/b24ui-nuxt` (интерфейс) + `@bit
 избавляет от гидрации с редиректами. Настройки окружения (`NUXT_PUBLIC_SITE_URL`) подхватываются
 при запуске — проверено на сборке, пересборка образа под другой адрес не нужна.
 
+**Выкат — как в client-bank.** `main` → образ в GHCR → Watchtower на сервере → общий nginx-proxy с
+TLS Let's Encrypt, адрес `https://invoice-from-tasks.bx-shef.by` (`docs/DEPLOY.md`). Образ один,
+build-args нет.
+
 ## Страницы (`app/pages/`)
 
 | Путь | Когда открывается | Что делает |

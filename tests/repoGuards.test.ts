@@ -37,8 +37,64 @@ describe('CI запускает проверки и падает на них', (
     }
   })
 
-  it('имя джобы `ci` сохранено — на него ссылается защита main', () => {
+  it('имена джоб `ci` и `docker-build` сохранены — на них ссылается защита main', () => {
     expect(CI).toMatch(/^ {2}ci:\n {4}name: ci$/m)
+    expect(CI).toMatch(/^ {2}docker-build:\n {4}name: docker-build$/m)
+  })
+})
+
+describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-proxy', () => {
+  const CI = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8')
+  const COMPOSE = readFileSync(join(ROOT, 'docker-compose.prod.yml'), 'utf8')
+  // Блок джобы deploy: от `  deploy:` до заголовка следующей джобы (`  имя:`) или конца файла.
+  // Граница — по следующей джобе, а не по отступам строк: комментарий с любым отступом блок не рвёт.
+  const DEPLOY = (() => {
+    const start = CI.search(/^ {2}deploy:\s*$/m)
+    if (start < 0) return ''
+    const rest = CI.slice(start + 1)
+    const next = rest.search(/^ {2}[A-Za-z0-9_-]+:\s*$/m)
+    return next < 0 ? CI.slice(start) : CI.slice(start, start + 1 + next)
+  })()
+
+  it('deploy ждёт зелёный ci и выкатывает только main — пушем или ручным запуском', () => {
+    expect(DEPLOY, 'нет джобы deploy').not.toBe('')
+    expect(DEPLOY).toMatch(/^ {4}needs: (?:ci|\[[^\]]*\bci\b[^\]]*\])\s*$/m)
+    // Условие целиком: `&&` → `||` пустил бы в GHCR как latest образ любой ветки.
+    expect(DEPLOY).toMatch(/^ {4}if: \$\{\{ \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\) && github\.ref == 'refs\/heads\/main' \}\}$/m)
+    expect(DEPLOY).toMatch(/^ {10}push: true$/m)
+  })
+
+  it('сервер тянет тот образ, который публикует deploy', () => {
+    expect(DEPLOY).toMatch(/images: ghcr\.io\/\$\{\{ github\.repository \}\}$/m)
+    expect(DEPLOY).toMatch(/type=raw,value=latest/)
+    expect(COMPOSE).toMatch(/^ {4}image: ghcr\.io\/bx-shef\/invoice-from-tasks:latest$/m)
+  })
+
+  it('токены установки живут в томе: Watchtower пересоздаёт контейнер на каждом выкате', () => {
+    // Каталог данных = рабочий каталог образа + база fs-хранилища Nitro (nuxt.config.ts).
+    const dockerfile = readFileSync(join(ROOT, 'Dockerfile'), 'utf8')
+    const workdir = [...dockerfile.matchAll(/^WORKDIR (\S+)$/gm)].at(-1)?.[1]
+    const base = /portals: \{ driver: 'fs', base: '\.\/([^/']+)\/portals' \}/.exec(readFileSync(join(ROOT, 'nuxt.config.ts'), 'utf8'))?.[1]
+    expect(workdir && base, 'не нашли WORKDIR или базу хранилища portals').toBeTruthy()
+    expect(COMPOSE).toMatch(new RegExp(`^ {6}- portals:${workdir}/${base}$`, 'm'))
+    expect(COMPOSE).toMatch(/^volumes:\n {2}portals:$/m)
+  })
+
+  it('nginx-proxy ходит на тот порт, который слушает сервер образа', () => {
+    const port = /^ENV PORT=(\d+)$/m.exec(readFileSync(join(ROOT, 'Dockerfile'), 'utf8'))?.[1]
+    expect(port, 'нет ENV PORT в Dockerfile').toBeTruthy()
+    expect(COMPOSE).toMatch(new RegExp(`^ {6}VIRTUAL_PORT: ${port}$`, 'm'))
+    expect(COMPOSE).toMatch(new RegExp(`^ {6}- "${port}"$`, 'm'))
+  })
+
+  it('за nginx-proxy: окружение из .env, адрес из DOMAIN, TRUST_PROXY=1, перезапуск, метка Watchtower, proxy-net', () => {
+    expect(COMPOSE).toMatch(/^ {4}env_file: \.env$/m)
+    expect(COMPOSE).toMatch(/^ {4}restart: unless-stopped$/m)
+    expect(COMPOSE).toMatch(/^ {6}NUXT_PUBLIC_SITE_URL: https:\/\/\$\{DOMAIN\}$/m)
+    expect(COMPOSE).toMatch(/^ {6}TRUST_PROXY: "1"$/m)
+    expect(COMPOSE).toMatch(/^ {6}- "com\.centurylinklabs\.watchtower\.enable=true"$/m)
+    expect(COMPOSE).toMatch(/^networks:\n {2}proxy-net:\n {4}external: true$/m)
+    expect(COMPOSE).toMatch(/^ {6}B24_TOKEN_ENC_KEY: \$\{B24_TOKEN_ENC_KEY:\?/m)
   })
 })
 
