@@ -21,6 +21,7 @@
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit && vue-tsc -p tsconfig.node.json --noEmit",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "smoke": "vitest run --config vitest.smoke.config.ts",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {

@@ -9,7 +9,9 @@
     "./server/**/*",
     "./shared/**/*",
     "./tests/**/*",
-    "./vitest.config.ts"
+    "./smoke/**/*",
+    "./vitest.config.ts",
+    "./vitest.smoke.config.ts"
   ],
   "exclude": [
     "./node_modules",

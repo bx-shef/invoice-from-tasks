@@ -26,7 +26,7 @@ onMounted(async () => {
     currencies.value = settings.value.currency ? [{ label: settings.value.currency, value: settings.value.currency }] : []
   }
   try {
-    measures.value = (await catalog.measures()).map(m => ({ label: `${m.title} (код ${m.code})`, value: m.code }))
+    measures.value = (await catalog.measures()).map(m => ({ label: m.label, value: m.code }))
   } catch {
     measures.value = []
   }

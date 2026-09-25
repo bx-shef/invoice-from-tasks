@@ -26,9 +26,9 @@ export interface TaskInfo {
   /** Затраченное время по журналу (секунды), как его считает портал. */
   timeSpentInLogs: number
   /**
-   * Теги задачи — по ним выбирается наценка (markup.ts). Список задач их не отдаёт: теги
-   * дочитываются отдельно (REST v3 tasks.task.get, {@link parseTaskTags}); пусто — тегов нет
-   * или правил по тегам нет и читать их не понадобилось.
+   * Теги задачи — по ним выбирается наценка (markup.ts). Приходят в том же списке задач v2
+   * (`select: ['TAGS']`, решение владельца; вернуться к v3 — issue #13), разбор —
+   * {@link parseTaskTags}.
    */
   tags: string[]
 }
@@ -90,7 +90,7 @@ export function parseTask(row: Row): TaskInfo | null {
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
-    tags: []
+    tags: parseTaskTags(row)
   }
 }
 
@@ -98,20 +98,20 @@ export function parseTask(row: Row): TaskInfo | null {
 const MAX_TASK_TAGS = 100
 
 /**
- * Теги из ответа REST v3 `tasks.task.get` с `select: ['id', 'tags.id', 'tags.name']`:
- * `{ item: { tags: [{ id, name }] } }` (статья «Поля задачи в REST 3.0»). Принимаем и голый
- * объект задачи, и строки вместо объектов — форма ответа на живом портале ещё не замерена (#2).
+ * Теги задачи из строки ответа REST v2 `tasks.task.list` / `tasks.task.get` с `select: ['TAGS']`
+ * (замер 2026-09-24): `tags: { "<id>": { id, title } }`, без тегов — `[]`. Теги читаются в том же
+ * списке задач, без лишних запросов (решение владельца). Форма v3 (`tags: [{ id, name }]`) здесь
+ * не разбирается: вернёмся к v3 — добавим вместе с переходом (issue #13).
  *
  * Тег длиннее {@link MAX_TAG_LENGTH} отбрасывается, а не обрезается: правило не бывает длиннее,
  * так что совпасть он не может, а обрезанный мог бы совпасть с правилом ЛОЖНО (находка
  * безопасности панели).
  */
-export function parseTaskTags(result: unknown): string[] {
-  const item = result && typeof result === 'object' && 'item' in result ? (result as Row).item : result
-  const tags = item && typeof item === 'object' ? (item as Row).tags : undefined
-  if (!Array.isArray(tags)) return []
+export function parseTaskTags(row: unknown): string[] {
+  const raw = row && typeof row === 'object' ? (row as Row).tags : undefined
+  const tags = raw && typeof raw === 'object' ? Object.values(raw) : []
   const names = tags
-    .map(t => (t && typeof t === 'object' ? toText((t as Row).name) : toText(t)).trim())
+    .map(t => (t && typeof t === 'object' ? toText((t as Row).title).trim() : ''))
     .filter(name => name && name.length <= MAX_TAG_LENGTH)
   return [...new Set(names)].slice(0, MAX_TASK_TAGS)
 }
@@ -138,11 +138,11 @@ export function parseTimeEntry(row: Row): TimeEntry | null {
 /**
  * Коды привязки задачи к элементу CRM (значения UF_CRM_TASK).
  *
- * ⚠ Для сделки код `D_<id>` описан в документации. Для нового счёта код НЕ подтверждён ни
- * документацией, ни живым порталом: по аналогии с `ownerType = SI` у товарных позиций
- * ожидаем `SI_<id>`, но смарт-сущности в задачах кодируются и как `T<hex типа>_<id>`
- * (31 = 0x1f). Ищем по обоим и сверяем сами — лишний запрос дешевле пропущенных задач.
- * Замер на живом портале — follow-up issue.
+ * Для сделки код `D_<id>` описан в документации. Для нового счёта — `SI_<id>`: так его пишет
+ * REST v3 (`crmItemIds`), а поле `UF_CRM_TASK` тестового портала разрешает тип `SMART_INVOICE`
+ * (замер 2026-09-24). Портал хранит код как записали, и смарт-сущности встречаются и как
+ * `T<hex типа>_<id>` (31 = 0x1f) — задачи с обоими кодами находятся своим фильтром. Поэтому
+ * ищем по обоим и сверяем сами: лишний запрос дешевле пропущенных задач.
  */
 export function crmBindingCodes(entityTypeId: number, id: number): string[] {
   if (entityTypeId === DEAL_ENTITY_TYPE_ID) return [`D_${id}`]

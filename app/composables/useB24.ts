@@ -12,7 +12,7 @@ import { B24CallError, unwrapBatchPart, type BatchCall, type BatchItem } from '~
 let frame: B24Frame | undefined
 let inFlight: Promise<B24Frame | undefined> | undefined
 
-/** Максимум команд в одном batch-запросе — и REST v2, и v3 (документация BatchV2/BatchV3.make). */
+/** Максимум команд в одном batch-запросе REST v2 (документация BatchV2.make). */
 export const BATCH_MAX = 50
 
 export function useB24() {
@@ -64,15 +64,22 @@ export function useB24() {
   }
 
   /**
-   * Порции пакета по {@link BATCH_MAX} команд — общий цикл для v2 и v3. Возвращает результат
-   * каждой команды по порядку; первая же ошибка — исключение с методом и текстом портала
-   * (частичный результат нам не нужен).
+   * Пачка вызовов REST v2 порциями по {@link BATCH_MAX} команд. Возвращает результат каждой
+   * команды по порядку; первая же ошибка — исключение с методом и текстом портала (частичный
+   * результат нам не нужен).
+   *
+   * `haltOnError` — портал прекращает выполнять команды пакета после первой ошибки, а следующие
+   * порции не отправляются. Нужен для ЗАПИСИ: без него ошибка в середине не мешала бы порталу
+   * выполнить остальные команды порции (`isHaltOnError: false`).
    */
-  async function inPortions<T>(calls: BatchCall[], send: (part: BatchCall[]) => Promise<Result<AjaxResult<T>[]>>): Promise<T[]> {
+  async function batch<T = unknown>(calls: BatchCall[], opts: { haltOnError?: boolean } = {}): Promise<T[]> {
     const out: T[] = []
     for (let i = 0; i < calls.length; i += BATCH_MAX) {
       const part = calls.slice(i, i + BATCH_MAX)
-      const res = await send(part)
+      const res = await getOrThrow().actions.v2.batch.make({
+        calls: part,
+        options: { isHaltOnError: opts.haltOnError ?? false, returnAjaxResult: true }
+      }) as Result<AjaxResult<T>[]>
       const data = res.getData()
       const items = (Array.isArray(data) ? data : []) as unknown as BatchItem<T>[]
       if (!res.isSuccess) {
@@ -89,20 +96,6 @@ export function useB24() {
   }
 
   /**
-   * Пачка вызовов REST v2.
-   *
-   * `haltOnError` — портал прекращает выполнять команды пакета после первой ошибки, а следующие
-   * порции не отправляются. Нужен для ЗАПИСИ: без него ошибка в середине не мешала бы портале
-   * выполнить остальные команды порции (`isHaltOnError: false`).
-   */
-  async function batch<T = unknown>(calls: BatchCall[], opts: { haltOnError?: boolean } = {}): Promise<T[]> {
-    return inPortions<T>(calls, async part => await getOrThrow().actions.v2.batch.make({
-      calls: part,
-      options: { isHaltOnError: opts.haltOnError ?? false, returnAjaxResult: true }
-    }) as Result<AjaxResult<T>[]>)
-  }
-
-  /**
    * Один вызов REST v3 (`/rest/api/…`). Владелец: «если можем — берём REST v3»; сейчас в v3 есть
    * только методы задач (docs/REST_METHODS.md, «REST v3»). Фильтр — массив троек
    * `[поле, оператор, значение]`, связанные объекты — через точку в `select`.
@@ -113,17 +106,5 @@ export function useB24() {
     return res.getData()?.result as T
   }
 
-  /**
-   * Пачка ЧТЕНИЙ REST v3. Пакет v3 — отдельный запрос: методы v2 в нём смешивать нельзя (у версий
-   * разные адреса), и портал выполняет его целиком или никак — нам это подходит, при сбое чтения
-   * счёт всё равно не заполняется.
-   */
-  async function batchV3<T = unknown>(calls: BatchCall[]): Promise<T[]> {
-    return inPortions<T>(calls, async part => await getOrThrow().actions.v3.batch.make({
-      calls: part,
-      options: { isHaltOnError: true, returnAjaxResult: true }
-    }) as Result<AjaxResult<T>[]>)
-  }
-
-  return { ready, init, get, getOrThrow, call, callList, batch, callV3, batchV3 }
+  return { ready, init, get, getOrThrow, call, callList, batch, callV3 }
 }
