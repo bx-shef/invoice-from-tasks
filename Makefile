@@ -11,11 +11,15 @@
 REF ?= main
 COMPOSE = docker compose -f docker-compose.prod.yml
 
-# Домен — первое `DOMAIN=` из ./.env (можно с `export`), без комментария в конце строки, кавычек,
-# пробелов и CR. Файл не исполняем. Цели домен печатают: неверно прочитанный видно глазом.
-# Задать руками: make proxy-timeout DOMAIN=…
-DOMAIN ?= $(shell sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DOMAIN[[:space:]]*=//p' .env 2>/dev/null \
-  | head -1 | sed 's/[[:space:]]\#.*//' | tr -d "\r\"' ")
+# Прочитать ОДНО значение из ./.env, не исполняя файл (макрос эталона client-bank-alfa-by, #487
+# там). Берёт первую строку `КЛЮЧ=значение`, понимает `export`, пробелы вокруг `=`, комментарий в
+# конце строки, обрамляющие кавычки; CR из CRLF уходит вместе с хвостовыми пробелами. Файл не
+# исполняется, лишнего в окружение не попадает. Поведение закреплено tests/makefileEnv.test.ts.
+env-value = $$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$(1)[[:space:]]*=//p" ./.env 2>/dev/null \
+	  | head -1 \
+	  | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*\#.*\$$//" -e "s/[[:space:]]*\$$//" \
+	        -e "s/^\"\(.*\)\"\$$/\1/" -e "s/^'\(.*\)'\$$/\1/")
+
 # Сколько общий nginx-proxy ждёт ответа приложения: BitrixGPT с повторами — до 120 с × 3.
 PROXY_TIMEOUT ?= 400s
 
@@ -75,30 +79,47 @@ backup:
 
 ## Поднять таймаут общего nginx-proxy для нашего домена (по умолчанию он ждёт 60 с — мало для BitrixGPT)
 #
-#   make proxy-timeout                 # контейнер прокси найдётся по образу *nginx-proxy*
+#   make proxy-timeout                 # прокси найдётся по образу *nginx-proxy* (не acme/companion)
 #   make proxy-timeout PROXY=<имя>     # если прокси не нашёлся или их несколько
 #
 # nginx-proxy подключает /etc/nginx/vhost.d/<домен>_location в блок location нашего домена, но
 # только когда перестраивает конфигурацию. Поэтому после записи пересоздаём СВОЙ контейнер
 # (прокси видит событие и перестраивает конфиг) и проверяем, что файл в конфиг попал. Повторный
 # запуск безопасен: файл перезапишется тем же, приложение перезапустится.
+# Домен — из ./.env или явно `make proxy-timeout DOMAIN=…`. Переменную DOMAIN из окружения оболочки
+# НЕ берём: на общем хосте в ней легко оказаться домену соседнего проекта, и таймаут записался бы в
+# чужой vhost. Значения идут в оболочку переменными окружения, а не текстом рецепта, и проверяются по
+# формату: подставленный текстом домен с `$(…)` выполнился бы на хосте, `'` в таймауте — внутри
+# общего контейнера прокси, `../` писал бы мимо vhost.d (находки ревью безопасности).
+proxy-timeout: export PT_DOMAIN = $(if $(filter command line,$(origin DOMAIN)),$(DOMAIN))
+proxy-timeout: export PT_TIMEOUT = $(PROXY_TIMEOUT)
+proxy-timeout: export PT_PROXY = $(PROXY)
 proxy-timeout:
-	@test -n "$(DOMAIN)" || { echo "[make] нет DOMAIN в ./.env"; exit 1; }
-	@p="$(PROXY)"; \
+	@d="$${PT_DOMAIN:-$(call env-value,DOMAIN)}"; \
+	printf '%s' "$$d" | grep -Eqx '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+' \
+	  || { echo "[make] DOMAIN (из ./.env или DOMAIN=…) не похож на домен: '$$d'"; exit 1; }; \
+	printf '%s' "$$PT_TIMEOUT" | grep -Eqx '[0-9]{1,4}[smh]?' \
+	  || { echo "[make] PROXY_TIMEOUT — число с s/m/h, например 400s: '$$PT_TIMEOUT'"; exit 1; }; \
+	p="$$PT_PROXY"; \
 	if [ -z "$$p" ]; then \
-	  p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme/ {print $$1}'); \
+	  p=$$(docker ps --format '{{.Names}} {{.Image}}' | awk '$$2 ~ /nginx-proxy/ && $$2 !~ /acme|letsencrypt|companion|docker-gen/ {print $$1}'); \
 	fi; \
 	n=$$(printf '%s\n' "$$p" | grep -c . || true); \
 	if [ "$$n" != 1 ]; then \
 	  echo "[make] контейнеров nginx-proxy найдено: $$n. Укажите нужный: make proxy-timeout PROXY=<имя>"; \
 	  docker ps --format '  {{.Names}}\t{{.Image}}'; exit 1; \
 	fi; \
-	f="/etc/nginx/vhost.d/$(DOMAIN)_location"; \
-	echo "[make] прокси: $$p, домен: $(DOMAIN), таймаут: $(PROXY_TIMEOUT)"; \
-	docker exec "$$p" sh -c "mkdir -p /etc/nginx/vhost.d && echo 'proxy_read_timeout $(PROXY_TIMEOUT);' > $$f" \
+	printf '%s' "$$p" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_.-]*' || { echo "[make] странное имя контейнера: '$$p'"; exit 1; }; \
+	f="/etc/nginx/vhost.d/$${d}_location"; want="proxy_read_timeout $$PT_TIMEOUT;"; \
+	echo "[make] прокси: $$p, домен: $$d, таймаут: $$PT_TIMEOUT"; \
+	if [ "$$(docker exec "$$p" cat "$$f" 2>/dev/null)" = "$$want" ] \
+	   && docker exec "$$p" grep -rqs "$$f" /etc/nginx/conf.d/; then \
+	  echo "[make] уже настроено: $$f подключён — приложение не трогаю"; exit 0; \
+	fi; \
+	docker exec "$$p" sh -c "mkdir -p /etc/nginx/vhost.d && echo '$$want' > $$f" \
 	  && $(COMPOSE) up -d --force-recreate app \
-	  && sleep 5 \
-	  && if docker exec "$$p" sh -c "grep -rqs '$$f' /etc/nginx/conf.d/"; then \
+	  && sleep $${PT_SETTLE:-5} \
+	  && if docker exec "$$p" grep -rqs "$$f" /etc/nginx/conf.d/; then \
 	       echo "[make] готово: конфиг прокси подключает $$f"; \
 	     else \
 	       echo "[make] ⚠ файл записан, но прокси ещё не перестроил конфиг — через минуту повторите: make proxy-timeout"; exit 1; \
