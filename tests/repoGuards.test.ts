@@ -93,6 +93,8 @@ describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-pr
     expect(COMPOSE).toMatch(/^ {6}NUXT_PUBLIC_SITE_URL: https:\/\/\$\{DOMAIN\}$/m)
     expect(COMPOSE).toMatch(/^ {6}TRUST_PROXY: "1"$/m)
     expect(COMPOSE).toMatch(/^ {6}- "com\.centurylinklabs\.watchtower\.enable=true"$/m)
+    // Без этого — 502 на POST-запросах портала после паузы (keepalive nginx-proxy против Node, 2026-09-25).
+    expect(COMPOSE).toMatch(/^ {6}- "com\.github\.nginx-proxy\.nginx-proxy\.keepalive=disabled"$/m)
     expect(COMPOSE).toMatch(/^networks:\n {2}proxy-net:\n {4}external: true$/m)
     expect(COMPOSE).toMatch(/^ {6}B24_TOKEN_ENC_KEY: \$\{B24_TOKEN_ENC_KEY:\?/m)
   })
