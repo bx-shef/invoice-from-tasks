@@ -115,9 +115,29 @@ describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-pr
 describe('шаблоны Vue', () => {
   // Nuxt называет компоненты из подкаталогов с приставкой каталога (components/invoice/FillPreview.vue →
   // InvoiceFillPreview). Незнакомый тег Vue рисует пустым элементом без ошибки — так предпросмотр
-  // счёта не показывался вовсе (живой прогон 2026-09-25). Проверку делает pnpm typecheck — если она включена.
+  // счёта не показывался вовсе (живой прогон 2026-09-25).
   it('незнакомый компонент в шаблоне — ошибка typecheck', () => {
-    expect(readFileSync(join(ROOT, 'tsconfig.json'), 'utf8')).toMatch(/^ {4}"checkUnknownComponents": true$/m)
+    // tsconfig.json — JSONC: убираем комментарии-строки и смотрим настройку там, где её читает vue-tsc.
+    const text = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '')
+    const config = JSON.parse(text) as { vueCompilerOptions?: { checkUnknownComponents?: unknown } }
+    expect(config.vueCompilerOptions?.checkUnknownComponents).toBe(true)
+  })
+
+  // То же, но и в быстром `pnpm test`, а не только в typecheck: каждый тег с большой буквы в
+  // <template> страниц и компонентов — компонент, который Nuxt зарегистрировал (.nuxt/components.d.ts,
+  // его пишет nuxt prepare при установке зависимостей).
+  it('каждый компонент в шаблонах зарегистрирован Nuxt под этим именем', () => {
+    const registered = new Set([...readFileSync(join(ROOT, '.nuxt/components.d.ts'), 'utf8').matchAll(/^export const (\w+):/gm)].map(m => m[1]))
+    expect(registered.has('InvoiceFillPreview')).toBe(true)
+    const unknown: string[] = []
+    for (const file of sources(join(ROOT, 'app')).filter(f => f.endsWith('.vue'))) {
+      const text = readFileSync(file, 'utf8')
+      const template = text.slice(text.indexOf('<template>'), text.lastIndexOf('</template>'))
+      for (const m of template.matchAll(/<([A-Z][A-Za-z0-9]*)[\s/>]/g)) {
+        if (!registered.has(m[1]!)) unknown.push(`${relative(ROOT, file)}: <${m[1]}>`)
+      }
+    }
+    expect(unknown).toEqual([])
   })
 })
 
