@@ -1,4 +1,7 @@
-.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health self-update help
+.PHONY: build-local prod-up prod-down prod-pull prod-redeploy logs ps health backup self-update help
+
+# Голый `make` на сервере печатает справку, а не запускает первую цель.
+.DEFAULT_GOAL := help
 
 # Обёртки над командами выката — как в эталоне client-bank-alfa-by. Подробности — docs/DEPLOY.md.
 # Прод-цели читают ./.env рядом с docker-compose.prod.yml (DOMAIN, ключи — см. .env.example).
@@ -9,7 +12,7 @@ COMPOSE = docker compose -f docker-compose.prod.yml
 
 # ─── Локально ────────────────────────────────────────────────────────
 
-## Собрать образ из исходников и запустить на 127.0.0.1:3000 (docker-compose.yml)
+## Собрать образ из исходников и запустить на 127.0.0.1:3000 на переднем плане (docker-compose.yml)
 build-local:
 	docker compose up --build
 
@@ -30,10 +33,13 @@ prod-pull:
 	$(COMPOSE) pull
 
 ## Обновить прямо сейчас, не дожидаясь Watchtower
+#
+# Чистим только свои висящие образы (метка source ставится при сборке в CI): хост общий, и чужие
+# проекты свои образы убирают сами.
 prod-redeploy:
 	$(COMPOSE) pull && \
 	$(COMPOSE) up -d && \
-	docker image prune -f
+	docker image prune -f --filter "label=org.opencontainers.image.source=https://github.com/bx-shef/invoice-from-tasks"
 
 ## Живой лог приложения (Ctrl+C — выйти)
 logs:
@@ -50,6 +56,14 @@ ps:
 health:
 	$(COMPOSE) exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r => r.text()).then(t => console.log(t))"
 
+## Копия тома с токенами установки в ./backups (токены в нём зашифрованы B24_TOKEN_ENC_KEY)
+#
+# Без ключа копия бесполезна, ключ — отдельно и вне сервера. Восстановление — docs/DEPLOY.md.
+backup:
+	@mkdir -p backups && f="backups/portals-$$(date +%Y%m%d-%H%M%S).tgz" \
+	  && { $(COMPOSE) exec -T app tar czf - -C /app/.data . > "$$f" || { rm -f "$$f"; exit 1; }; } \
+	  && echo "[make] копия: $$f ($$(du -h "$$f" | cut -f1))"
+
 ## Обновить САМ этот Makefile из репозитория (новые цели появляются на сервере только так)
 #
 # Репозитория на сервере нет: Makefile кладётся туда один раз и сам не обновляется. Скачанное
@@ -59,11 +73,11 @@ self-update:
 	@t=$$(mktemp /tmp/Makefile.XXXXXX) && trap 'rm -f "$$t"' EXIT \
 	  && curl -fsSL -o "$$t" "https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/$(REF)/Makefile" \
 	  && grep -q '^\.PHONY:' "$$t" \
-	  && make -n -f "$$t" prod-redeploy >/dev/null 2>&1 \
+	  && $(MAKE) -n -f "$$t" prod-redeploy >/dev/null 2>&1 \
 	  && { b="./Makefile.bak-$$(date +%Y%m%d-%H%M%S)"; \
 	       cp ./Makefile "$$b" && cp "$$t" ./Makefile \
 	       && echo "[make] Makefile обновлён из $(REF), копия прежнего: $$b"; \
-	       make help; }
+	       $(MAKE) --no-print-directory help; }
 
 ## Список целей с описаниями
 #

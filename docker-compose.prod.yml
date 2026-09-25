@@ -25,6 +25,10 @@ services:
     container_name: invoice-from-tasks
     expose:
       - "3000"
+    # Всё окружение приложения — из .env целиком: новая переменная сервера доедет до контейнера без
+    # правки этого файла. Ниже — только то, что compose задаёт сам или требует обязательно
+    # (environment главнее env_file).
+    env_file: .env
     environment:
       # nginx-proxy + acme-companion: по этим переменным прокси найдёт контейнер и выпустит TLS.
       # ⚠ DNS A-запись DOMAIN должна указывать на сервер ДО подъёма, иначе сертификат не выпустится.
@@ -40,29 +44,19 @@ services:
       TRUST_PROXY: "1"
       # Шифрование токенов установки. Обязателен: без него установка падает с 500.
       # ⚠ Копия ключа — вне сервера: потеря или смена делает сохранённые токены нечитаемыми.
+      # Остальное (ключи и код приложения из Маркета, BitrixGPT) — из .env; что не задано, показывают
+      # главная страница приложения администратору и GET /api/health.
       B24_TOKEN_ENC_KEY: ${B24_TOKEN_ENC_KEY:?set B24_TOKEN_ENC_KEY (openssl rand -hex 32)}
-      # Ключи приложения из кабинета разработчика Маркета («Протестировать» → client_id / secret_id)
-      # и его код. ⚠ Обязательны, хотя контейнер поднимется и без них: без ключей установка не
-      # сохраняется, без кода сервер отвечает 503 на всё из фрейма. Что не задано — показывает
-      # администратору главная страница приложения и GET /api/health.
-      B24_CLIENT_ID: ${B24_CLIENT_ID:-}
-      B24_CLIENT_SECRET: ${B24_CLIENT_SECRET:-}
-      B24_APP_CODE: ${B24_APP_CODE:-}
-      # Для приложения из Маркета — пустой: у каждого портала свой application_token, он приходит
-      # в ONAPPINSTALL и сохраняется (docs/B24_EVENTS.md).
-      B24_APPLICATION_TOKEN: ${B24_APPLICATION_TOKEN:-}
-      B24_SELFHOSTED_HOSTS: ${B24_SELFHOSTED_HOSTS:-}
-      # BitrixGPT: ключ Вайбкода. Без него названия «BitrixGPT» и консультации отвечают ошибкой.
-      VIBE_API_KEY: ${VIBE_API_KEY:-}
-      BITRIXGPT_API_KEY: ${BITRIXGPT_API_KEY:-}
-      BITRIXGPT_BASE_URL: ${BITRIXGPT_BASE_URL:-}
-      BITRIXGPT_MODEL: ${BITRIXGPT_MODEL:-}
     volumes:
       # Токены установки порталов (fs-хранилище Nitro). Без тома пересоздание контейнера — а
       # Watchtower пересоздаёт его на каждом выкате — их потеряет, и запись ставок
       # не-администраторами перестанет работать до переустановки приложения.
       - portals:/app/.data
     restart: unless-stopped
+    # Nitro на SIGTERM перестаёт принимать запросы и ждёт начатые до 30 с (NITRO_SHUTDOWN_TIMEOUT);
+    # по умолчанию Docker убил бы процесс через 10 с посреди ответа BitrixGPT. ⚠ Watchtower
+    # останавливает контейнер со своим --stop-timeout (по умолчанию 10 с) — это настройка хоста.
+    stop_grace_period: 40s
     healthcheck:
       # В node:22-slim нет wget и curl — проверяем самим node. 127.0.0.1, а не localhost:
       # localhost в контейнере резолвится и в ::1.

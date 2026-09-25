@@ -13,6 +13,19 @@ name: CI
 on:
   push:
     branches: [main]
+    # Правка только этих файлов образ не меняет. Без фильтра каждый мерж документации пересобирал бы
+    # образ (у нового digest другие метки времени), и Watchtower перезапускал бы прод. На PR проверки
+    # идут всегда; выкатить вручную — workflow_dispatch.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'tests/**'
+      - 'smoke/**'
+      - '.env*.example'
+      - 'Makefile'
+      - 'docker-compose*.yml'
+      - 'LICENSE'
   pull_request:
     branches: [main]
   # Ручной передеплой: тот же конвейер на `main` без коммита (образ пересобирается и уходит в GHCR).

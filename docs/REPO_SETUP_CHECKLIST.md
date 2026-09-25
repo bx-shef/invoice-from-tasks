@@ -13,12 +13,13 @@ Settings → Rules → Rulesets → New branch ruleset:
 - **Restrict deletions** и **Block force pushes** — включить.
 - **Require a pull request before merging** — включить; approvals — 0 или 1; «Dismiss stale
   approvals» и «Require conversation resolution» — включить.
-- **Require status checks to pass** — включить, проверка **`ci`**, «Require branches to be up to
-  date» — включить. `docker-build` обязательной не делаем: он идёт только на PR и нужен как
-  сигнал, а не как стоп.
+- **Require status checks to pass** — включить, проверки **`ci`** и **`docker-build`**, «Require
+  branches to be up to date» — включить. `docker-build` обязателен с тех пор, как `main` выкатывается
+  в GHCR (`docs/DEPLOY.md`): PR с несобираемым образом иначе влился бы, и выкат молча встал бы на
+  всех следующих мержах.
 
-⚠ Имя джобы `ci` — то, на что ссылается правило. Переименуете джобу — защита молча перестанет
-что-либо требовать; это стережёт `tests/repoGuards.test.ts`.
+⚠ Имена джоб `ci` и `docker-build` — то, на что ссылается правило. Переименуете джобу — защита
+молча перестанет её требовать; это стережёт `tests/repoGuards.test.ts`.
 
 Проверка: попытка `git push --force` в `main` и удаление ветки должны отклоняться.
 
@@ -34,8 +35,9 @@ Settings → Code security: alerts, security updates, version updates — вкл
 ## 4. Пакет GHCR
 
 Первый push в `main` после выката (джоба `deploy`) создаст пакет `ghcr.io/bx-shef/invoice-from-tasks`.
-Сделать его публичным: github.com/orgs/bx-shef/packages → `invoice-from-tasks` → Package settings →
-Change visibility → Public. Тогда серверу и Watchtower не нужен `docker login` (`docs/DEPLOY.md`).
+Сделать его публичным: профиль `bx-shef` на GitHub (это пользователь, не организация) → вкладка
+**Packages** → `invoice-from-tasks` → **Package settings** → **Change visibility** → Public. Тогда серверу
+и Watchtower не нужен `docker login` (`docs/DEPLOY.md`).
 
 Проверка: `docker pull ghcr.io/bx-shef/invoice-from-tasks:latest` без логина проходит.
 

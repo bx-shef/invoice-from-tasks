@@ -16,6 +16,8 @@ Let's Encrypt). Адрес приложения — **`https://invoice-from-task
 - `deploy` ждёт зелёный `ci`: красный CI до сервера не доходит.
 - В GHCR пушит встроенный `GITHUB_TOKEN` (`packages: write`), отдельный секрет не нужен.
 - Образ один на любой сервер: адрес и секреты он читает из окружения при запуске, build-args нет.
+- Мерж, который меняет только документацию, тесты, смок, `Makefile` или compose-файлы, образ не
+  пересобирает (`paths-ignore` в CI) — прод зря не перезапускается.
 - Выкатить заново без коммита — Actions → CI → Run workflow на `main` или `make prod-redeploy` на
   сервере.
 
@@ -37,11 +39,23 @@ docker ps --format '{{.Names}}\t{{.Image}}' | grep -E 'nginx-proxy|acme-companio
 `--label-enable`. **Второй Watchtower не поднимать**: он конфликтует по имени контейнера и
 перезапускает всё дважды.
 
-**Пакет GHCR — публичный.** Первый выкат в `main` создаст пакет
-`ghcr.io/bx-shef/invoice-from-tasks`. Сделайте его публичным: github.com/orgs/bx-shef/packages →
-`invoice-from-tasks` → Package settings → Change visibility → Public. Тогда серверу и Watchtower не
-нужен `docker login`. Оставляете приватным — на сервере `docker login ghcr.io` с токеном
-`read:packages` и креды для Watchtower, как в эталоне («Если репозиторий приватный»).
+**Пакет GHCR — публичный**: как сделать — `docs/REPO_SETUP_CHECKLIST.md` §4. Тогда серверу и
+Watchtower не нужен `docker login`. Оставляете приватным — на сервере `docker login ghcr.io` с
+токеном `read:packages` и креды для Watchtower, как в эталоне («Если репозиторий приватный»).
+
+**Долгие ответы BitrixGPT.** nginx-proxy ждёт ответа приложения 60 секунд, а запрос названий или
+консультации с повторами может идти дольше (до 120 с на попытку, до трёх попыток —
+`server/utils/llm.ts`). Иначе человек получит `504`, а запрос дойдёт до конца и потратит лимит
+впустую. Таймаут поднимается для нашего домена файлом в `vhost.d` прокси (имя контейнера прокси —
+из `docker ps`):
+
+```bash
+docker exec <контейнер nginx-proxy> sh -c \
+  'echo "proxy_read_timeout 400s;" > /etc/nginx/vhost.d/invoice-from-tasks.bx-shef.by_location'
+```
+
+Прокси подхватит файл, когда перестроит конфигурацию: после первого `make prod-up` или
+`docker compose -f docker-compose.prod.yml up -d --force-recreate`.
 
 ### Развёртывание
 
@@ -55,21 +69,24 @@ mkdir -p /home/bitrix/invoice-from-tasks && cd /home/bitrix/invoice-from-tasks
 curl -fsSL -O https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/main/docker-compose.prod.yml
 curl -fsSL -O https://raw.githubusercontent.com/bx-shef/invoice-from-tasks/main/Makefile
 
-cat > .env <<'EOF'
+umask 077   # .env и копии тома — только владельцу
+cat > .env <<EOF
 DOMAIN=invoice-from-tasks.bx-shef.by
-LETSENCRYPT_EMAIL=you@example.com
-B24_TOKEN_ENC_KEY=<openssl rand -hex 32>
-# Из кабинета разработчика Маркета (раздел 2):
-B24_CLIENT_ID=<«Протестировать» → client_id>
-B24_CLIENT_SECRET=<«Протестировать» → secret_id>
-B24_APP_CODE=<код приложения, вида код_партнёра.код_приложения>
-VIBE_API_KEY=<ключ Вайбкода для BitrixGPT>
+# Ваш e-mail для Let's Encrypt или пусто (адреса на example.com Let's Encrypt отвергает).
+LETSENCRYPT_EMAIL=
+B24_TOKEN_ENC_KEY=$(openssl rand -hex 32)
+# Заполнить после раздела 2 (кабинет разработчика Маркета):
+B24_CLIENT_ID=
+B24_CLIENT_SECRET=
+B24_APP_CODE=
+# Ключ Вайбкода для BitrixGPT:
+VIBE_API_KEY=
 EOF
-chmod 600 .env
+grep B24_TOKEN_ENC_KEY .env   # ⚠ сохраните ключ вне сервера (менеджер паролей)
 
 make prod-up    # поднять контейнер (образ из GHCR)
 make ps         # через ~20 секунд — healthy
-make health     # какие настройки заданы (без секретов)
+make health     # какие настройки заданы (без секретов); ключи и код — false до раздела 2
 curl -s https://invoice-from-tasks.bx-shef.by/api/health   # через прокси: request.forwardedFor = used
 ```
 
@@ -82,8 +99,26 @@ curl -s https://invoice-from-tasks.bx-shef.by/api/health   # через прок
 Список целей — `make help`.
 
 **Откат** на известную версию: в `docker-compose.prod.yml` на сервере заменить `:latest` на
-`:sha-<коммит>` и `make prod-up`. Watchtower следит за тегом из файла, поэтому, пока там `sha-…`,
-новые выкаты не приедут; вернуть `:latest` — вернутся.
+`:sha-<первые 7 знаков коммита>` (так тег ставит CI; список — на странице пакета) и `make prod-up`.
+Watchtower следит за тегом из файла, поэтому, пока там `sha-…`, новые выкаты не приедут; вернуть
+`:latest` — вернутся. Тот же приём — **пауза автообновлений**, например на время первых недель на
+рабочем портале.
+
+**Копия тома с токенами** — `make backup` (файл в `./backups`). Токены в ней зашифрованы
+`B24_TOKEN_ENC_KEY`: без ключа копия бесполезна, поэтому ключ хранится отдельно. Восстановить:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T app tar xzf - -C /app/.data < backups/portals-<дата>.tgz
+docker compose -f docker-compose.prod.yml restart app
+```
+
+Потеряли том без копии — порталам нужно переустановить приложение: без токенов установщика не
+работает запись ставок редакторами-не-администраторами.
+
+⚠ `TRUST_PROXY=1` верит `X-Forwarded-For` от любого адреса частной сети, а сеть `proxy-net` общая
+для проектов хоста. Соседний контейнер на ней может назвать себя любым адресом и обойти лимиты
+по IP (события установки, живые проверки фрейм-токена); лимиты BitrixGPT считаются по сотруднику и
+порталу и так не обходятся. Держите на `proxy-net` только свои проекты.
 
 ### Без nginx-proxy (локально или другой сервер)
 
@@ -93,8 +128,9 @@ curl -s https://invoice-from-tasks.bx-shef.by/api/health   # через прок
 закройте порт сетевым экраном: порт, доступный мимо прокси, позволяет обходить лимиты по IP.
 
 ```bash
-cp .env.example .env        # заполнить (см. ниже)
-make build-local            # = docker compose up --build
+cp .env.example .env               # заполнить (см. ниже)
+docker compose up -d --build       # на сервере — в фоне
+make build-local                   # локальная проверка: то же, но на переднем плане
 ```
 
 Токены установки — в томе `portals` (`/app/.data`). Без тома пересоздание контейнера их потеряет,
@@ -161,6 +197,7 @@ HTTPS обычно даёт обратный прокси перед конте�
    | Добавлять свою страницу и пункт в главном меню | да — у приложения есть главная `/app` |
    | Встраивать виджеты в интерфейс | да — кнопка «Заполнить из задач» в карточке счёта |
    | Может устанавливать любой пользователь | нет — ставит администратор |
+   | Тип приложения, минимальный тариф | на ваше усмотрение: приложению нужны CRM со счетами, задачи с учётом времени и REST |
    | Ссылка на приложение | `https://invoice-from-tasks.bx-shef.by/app` |
    | Ссылка на установочное приложение | `https://invoice-from-tasks.bx-shef.by/install` |
 
