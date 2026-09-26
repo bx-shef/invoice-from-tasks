@@ -5,7 +5,7 @@ description: Ревью PR в этом репозитории по правил�
 
 # Ревью PR: /code-review + панель из пяти
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Источник правил — `docs/AGENT_RULES.md` §3. Этот навык — порядок действий.
 

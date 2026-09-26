@@ -1,6 +1,6 @@
 # Настройки приложения
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Где лежат настройки, кто их меняет и сколько их влезает. Код формата —
 `shared/domain/settings.ts` и `shared/domain/rates.ts`, бюджет места — `shared/domain/storageBudget.ts`.

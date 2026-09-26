@@ -5,7 +5,7 @@ description: Закрытие PR в этом репозитории по пра�
 
 # Мерж PR
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Источник правил — `docs/AGENT_RULES.md` §4. Этот навык — порядок действий.
 

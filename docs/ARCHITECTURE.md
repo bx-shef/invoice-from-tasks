@@ -1,6 +1,6 @@
 # Архитектура
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Как устроено приложение и почему так. Правила расчёта — `docs/PROCESSING.md`, настройки —
 `docs/SETTINGS.md`, вызовы REST — `docs/REST_METHODS.md`.
