@@ -50,7 +50,7 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
   владельца — в `docs/REST_METHODS.md` («Версия REST»: теги задач из v2-списка, #13). Параметры
   запросов сценария счёта — только в `app/utils/invoiceRequests.ts` (их же шлёт смок).
   Уже пойманные расхождения — в `docs/REST_METHODS.md` (фильтр задач объектом, право `task`,
-  позиционные параметры `task.elapseditem.getlist`, `DESCRIPTION_TYPE` дела, сервер авторизации
+  позиционные параметры `task.elapseditem.getlist`, дело консультации — только из приложения, сервер авторизации
   `oauth.bitrix24.tech`, `keepAuthFresh` нет в SDK 2.2.0, `price` строки — с налогом).
 - **Добавил REST-метод — строка в `docs/REST_METHODS.md`.** Иначе краснеет `tests/repoGuards.test.ts`.
 - **Чистые функции отдельно**, с тестами; REST и запись — тонким слоем поверх. Серверные модули

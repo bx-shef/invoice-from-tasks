@@ -17,7 +17,7 @@ const source = ref<TaskSource>('deal')
 const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
-const consultAnswer = ref<{ title: string, text: string } | null>(null)
+const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | null>(null)
 
 const sourceItems = [
   { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
@@ -72,7 +72,8 @@ async function consult(promptId: string) {
   consultAnswer.value = null
   try {
     consultAnswer.value = await fill.consult(promptId)
-    toast.add({ title: 'Ответ сохранён в ленте счёта', color: 'air-primary-success' })
+    if (consultAnswer.value.notSaved) toast.add({ title: 'Ответ получен, но не сохранился в ленте счёта', description: consultAnswer.value.notSaved, color: 'air-primary-warning' })
+    else toast.add({ title: 'Ответ сохранён в ленте счёта', color: 'air-primary-success' })
   } catch (e) {
     toast.add({ title: 'Консультация не удалась', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
@@ -239,6 +240,7 @@ async function consult(promptId: string) {
             v-if="consultAnswer"
             :title="consultAnswer.title"
             :text="consultAnswer.text"
+            :not-saved="consultAnswer.notSaved"
             class="mt-4"
           />
         </B24Card>

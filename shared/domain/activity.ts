@@ -12,8 +12,12 @@
 // (документация). Поэтому дело создаёт только страница во фрейме, правами сотрудника — ему нужно
 // право изменять счёт, как и для записи товаров.
 
+import { parseAnswer, type AnswerBlock, type AnswerSpan } from './answer'
+
 /** Предел текста ответа в деле — стена текста в ленте всё равно не читается. */
 export const MAX_ACTIVITY_TEXT = 20_000
+/** Текст записи, если модель ответила пустотой: у блока `largeText` значение обязательно. */
+export const EMPTY_ANSWER = 'BitrixGPT вернул пустой ответ.'
 /** Предел заголовка записи. */
 export const MAX_ACTIVITY_TITLE = 255
 /** Источник данных дела (`originatorId`) — по нему дела приложения находятся в списке дел счёта. */
@@ -34,25 +38,48 @@ export function neutralizeMarkup(text: string): string {
     .replace(/</g, '＜').replace(/>/g, '＞')
 }
 
+/** BB-код куска: текст обезврежен, свои теги вложены правильно — [b][i]…[/i][/b]. */
+function spanToBB(span: AnswerSpan): string {
+  let text = neutralizeMarkup(span.text)
+  if (span.italic) text = `[i]${text}[/i]`
+  if (span.bold) text = `[b]${text}[/b]`
+  return text
+}
+
+const lineToBB = (spans: AnswerSpan[]): string => spans.map(spanToBB).join('')
+
+/** Блок ответа → строки BB-кода. Списки остаются строками «- пункт» / «1. пункт», как в ядре. */
+function blockToBB(block: AnswerBlock): string {
+  if (block.kind === 'h') return `[b]${block.spans.map(s => spanToBB({ ...s, bold: false })).join('')}[/b]`
+  if (block.kind === 'p') return block.lines.map(lineToBB).join('\n')
+  return block.items.map((item, n) => {
+    const marker = block.kind === 'ol' ? `${block.start + n}.` : '-'
+    return [`${marker} ${lineToBB(item.spans)}`, ...item.sub.map(sub => `   - ${lineToBB(sub)}`)].join('\n')
+  }).join('\n')
+}
+
 /**
  * Ответ модели (markdown) → BB-код для блока `largeText`: он разбирает BB (жирный, курсив) и
- * сворачивает длинный текст. Сначала обезвреживаем всё, что пришло от модели, и только потом
- * ставим свои теги — иначе `[URL]` из ответа стал бы ссылкой. Как в ядре
- * (`MarkdownToBBCodeTranslationService`): заголовки — жирной строкой, списки остаются строками
- * «- пункт» и «1. пункт».
+ * сворачивает длинный текст. Разбор — общий с окном приложения (answer.ts). Текст каждого куска
+ * обезврежен ДО своих тегов: `[URL]` из ответа не станет ссылкой. Не больше `max` символов —
+ * целыми блоками, чтобы обрезка не разорвала тег; не влез ни один блок — начало текста без разметки.
+ * Пустой ответ — пояснение: у блока `largeText` значение обязательно.
  */
-export function answerToBBCode(markdown: string): string {
-  return neutralizeMarkup(String(markdown ?? '').replace(/\r\n?/g, '\n'))
-    // Заголовки `#`…`######` — жирной строкой.
-    .replace(/^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm, '[b]$1[/b]')
-    // **жирный** и __жирный__.
-    .replace(/\*\*(?!\s)(.+?)(?<!\s)\*\*/g, '[b]$1[/b]')
-    .replace(/__(?!\s)(.+?)(?<!\s)__/g, '[b]$1[/b]')
-    // *курсив* — одиночные звёздочки внутри строки (маркер списка «* » в начале строки не трогаем).
-    .replace(/(^|[^*\n])\*(?![\s*])([^*\n]+?)(?<!\s)\*(?!\*)/g, '$1[i]$2[/i]')
-    // Маркеры списка `*` и `+` — к привычному «- ».
-    .replace(/^([ \t]*)[*+][ \t]+/gm, '$1- ')
-    .trim()
+export function answerToBBCode(markdown: string, max = MAX_ACTIVITY_TEXT): string {
+  // Разбор ограничен: ответ длиннее двух пределов всё равно не поместится.
+  const source = Array.from(String(markdown ?? '')).slice(0, max * 2).join('')
+  const parts: string[] = []
+  let length = 0
+  for (const block of parseAnswer(source)) {
+    const bb = blockToBB(block)
+    const add = (parts.length ? 2 : 0) + bb.length
+    if (length + add > max) break
+    parts.push(bb)
+    length += add
+  }
+  if (parts.length) return parts.join('\n\n')
+  const plain = Array.from(neutralizeMarkup(source.trim())).slice(0, max).join('')
+  return plain || EMPTY_ANSWER
 }
 
 /** Контентный блок записи (документация: ContentBlockDto) — те типы, что использует приложение. */
@@ -102,7 +129,7 @@ export function buildConsultActivity(input: ConsultActivityInput): ConsultActivi
       body: {
         logo: { code: AI_LOGO },
         blocks: {
-          answer: { type: 'largeText', properties: { value: answerToBBCode(String(input.answer ?? '').slice(0, MAX_ACTIVITY_TEXT)) } },
+          answer: { type: 'largeText', properties: { value: answerToBBCode(input.answer) } },
           disclaimer: { type: 'text', properties: { value: 'Ответ сформирован BitrixGPT и может быть неточным.', size: 'xs', color: 'base_60' } }
         }
       }

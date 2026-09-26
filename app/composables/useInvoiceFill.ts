@@ -351,8 +351,12 @@ export function useInvoiceFill() {
     step.value = 'done'
   }
 
-  /** Консультация: ответ BitrixGPT по промпту из настроек → закрытое дело в счёте (activity.ts). */
-  async function consult(promptId: string): Promise<{ title: string, text: string }> {
+  /**
+   * Консультация: ответ BitrixGPT по промпту из настроек → закрытое дело в счёте (activity.ts).
+   * Запись в ленту не удалась — ответ всё равно возвращаем (он уже получен и оплачен лимитом),
+   * с причиной в `notSaved`: сотрудник увидит ответ и узнает, что в ленте его нет.
+   */
+  async function consult(promptId: string): Promise<{ title: string, text: string, notSaved?: string }> {
     const inv = invoice.value
     if (!inv) throw new Error('Счёт не загружен')
     // Урезаем до того, что сервер отдаст модели: большой счёт иначе упёрся бы в предел тела запроса.
@@ -365,7 +369,11 @@ export function useInvoiceFill() {
     // Одна закрытая запись в ленте в виде ответа ИИ (activity.ts). Только из фрейма: вебхук этот
     // метод не принимает, и дело пишется правами сотрудника.
     const activity = buildConsultActivity({ invoiceId: inv.id, promptTitle: answer.title, answer: answer.text, responsibleId: userId.value })
-    await b24.call('crm.activity.configurable.add', { ...activity })
+    try {
+      await b24.call('crm.activity.configurable.add', { ...activity })
+    } catch (e) {
+      return { ...answer, notSaved: e instanceof Error ? e.message : String(e) }
+    }
     return answer
   }
 

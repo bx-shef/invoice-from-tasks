@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACTIVITY_ORIGINATOR, answerToBBCode, buildConsultActivity, MAX_ACTIVITY_TEXT, MAX_ACTIVITY_TITLE, neutralizeMarkup } from '#shared/domain/activity'
+import { ACTIVITY_ORIGINATOR, answerToBBCode, buildConsultActivity, EMPTY_ANSWER, MAX_ACTIVITY_TEXT, MAX_ACTIVITY_TITLE, neutralizeMarkup } from '#shared/domain/activity'
 import { parseExistingRows } from '#shared/domain/invoice'
 import { tokenNeedsRefresh } from '~/utils/frameToken'
 
@@ -61,11 +61,14 @@ describe('дело с ответом консультации — конфигу
   })
 })
 
-describe('answerToBBCode — markdown ответа в BB-код блока largeText', () => {
-  it('заголовки и **жирный** — [b], *курсив* — [i], списки остаются строками', () => {
-    expect(answerToBBCode('## Риски\r\n- **срок** оплаты\n* второй *пункт*\n+ третий\n1. первый шаг'))
-      .toBe('[b]Риски[/b]\n- [b]срок[/b] оплаты\n- второй [i]пункт[/i]\n- третий\n1. первый шаг')
-    expect(answerToBBCode('__важно__ и 2 * 3 = 6')).toBe('[b]важно[/b] и 2 * 3 = 6')
+describe('answerToBBCode — ответ в BB-код блока largeText (разбор общий с окном)', () => {
+  it('заголовки — [b], жирный/курсив — [b]/[i], ***оба*** — вложены правильно, списки строками', () => {
+    expect(answerToBBCode('## Риски\r\n- **срок** оплаты\n* второй *пункт*\n  - подпункт\n\n2. ***шаг***'))
+      .toBe('[b]Риски[/b]\n\n- [b]срок[/b] оплаты\n- второй [i]пункт[/i]\n   - подпункт\n\n2. [b][i]шаг[/i][/b]')
+  })
+
+  it('арифметика не становится курсивом', () => {
+    expect(answerToBBCode('ставка*2 и объём*3')).toBe('ставка*2 и объём*3')
   })
 
   it('BB и HTML из ответа обезврежены ДО своих тегов: [URL] модели не станет ссылкой', () => {
@@ -73,9 +76,16 @@ describe('answerToBBCode — markdown ответа в BB-код блока large
     expect(answerToBBCode('<script>x</script>')).toBe('＜script＞x＜/script＞')
   })
 
-  it('пустое и мусор — пустая строка', () => {
-    expect(answerToBBCode('')).toBe('')
-    expect(answerToBBCode(undefined as unknown as string)).toBe('')
+  it('пустой ответ — пояснение: у largeText значение обязательно', () => {
+    expect(answerToBBCode('')).toBe(EMPTY_ANSWER)
+    expect(answerToBBCode('  \n ')).toBe(EMPTY_ANSWER)
+    expect(answerToBBCode(undefined as unknown as string)).toBe(EMPTY_ANSWER)
+  })
+
+  it('предел — целыми блоками, теги не рвутся; не влез первый блок — текст без разметки', () => {
+    const bb = answerToBBCode('**один** два\n\n**три** четыре', 20)
+    expect(bb).toBe('[b]один[/b] два')
+    expect(answerToBBCode('**' + 'x'.repeat(50) + '**', 10)).toBe('**xxxxxxxx')
   })
 })
 
