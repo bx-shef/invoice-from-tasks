@@ -5,7 +5,8 @@ import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { parseCurrencies } from '#shared/domain/currency'
 import { normalizeTag } from '#shared/domain/markup'
 import { listRows, parseTask, parseTaskTags } from '#shared/domain/tasks'
-import { resultListCall, TASK_SELECT } from '~/utils/invoiceRequests'
+import { parseMyCompanies, parseVatRates } from '#shared/domain/vat'
+import { myCompaniesCall, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
 import { parseMeasures } from '~/utils/measures'
 import { connectPortal, type Portal } from './lib/portal'
 import { fetchEntries, readInvoice } from './lib/flow'
@@ -37,6 +38,22 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
     const measures = parseMeasures(res?.measures)
     expect(measures.length).toBeGreaterThan(0)
     for (const m of measures) expect(m.label).toMatch(/\S/)
+  })
+
+  it('catalog.vat.list: ответ { vats }, у активных ставок — число (варианты вкладки «НДС»)', async () => {
+    const { method, params } = vatListCall()
+    const vats = parseVatRates(await portal.call(method, params))
+    expect(vats.length).toBeGreaterThan(0)
+    for (const v of vats) expect(v.name).toMatch(/\S/)
+  })
+
+  it('crm.item.list isMyCompany = Y: реквизиты засева находятся, чужие компании — нет', async () => {
+    const { method, params } = myCompaniesCall(0)
+    const res = await portal.call<{ items?: Array<Record<string, unknown>> }>(method, params)
+    expect(parseMyCompanies(res).map(c => c.id)).toContain(fx!.myCompanyId)
+    const all = await portal.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', { entityTypeId: 4, select: ['id', 'isMyCompany'] })
+    const notMine = (all.items ?? []).filter(c => c.isMyCompany !== 'Y').map(c => Number(c.id))
+    for (const id of notMine) expect(parseMyCompanies(res).map(c => c.id)).not.toContain(id)
   })
 
   it('tasks.task.list: фильтр объектом, теги в том же списке (select TAGS)', async () => {

@@ -23,6 +23,9 @@ export const MAX_PRODUCT_ROWS = 10_000
 /** Сколько результатов задачи берём в контекст названий — последние важнее. */
 export const MAX_RESULTS = 20
 
+/** Тип объекта CRM «компания» (документация crm.item.*). */
+export const COMPANY_ENTITY_TYPE_ID = 4
+
 /** Вызов REST с именованными параметрами. */
 export interface RestCall {
   method: string
@@ -73,6 +76,23 @@ export function resultListCall(taskId: number): RestCall {
     method: 'tasks.task.result.list',
     params: { filter: [['taskId', '=', taskId]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: MAX_RESULTS } }
   }
+}
+
+/** Страница crm.item.list — 50 (документация метода). */
+export const MY_COMPANIES_PAGE = 50
+
+/**
+ * «Реквизиты вашей компании» — компании с признаком «моя компания»: crm.item.list, `entityTypeId = 4`,
+ * фильтр `isMyCompany = Y` (документация «Счета: обзор методов и событий»). Их ID — `mycompanyId`
+ * счёта, по нему выбирается ставка НДС (shared/domain/vat.ts).
+ */
+export function myCompaniesCall(start: number): RestCall {
+  return { method: 'crm.item.list', params: { entityTypeId: COMPANY_ENTITY_TYPE_ID, filter: { isMyCompany: 'Y' }, select: ['id', 'title'], order: { id: 'asc' }, start } }
+}
+
+/** Ставки НДС портала для выбора в настройках: catalog.vat.list (активные отбирает разбор). */
+export function vatListCall(): RestCall {
+  return { method: 'catalog.vat.list', params: {} }
 }
 
 /** «Заменить»: crm.item.productrow.set — все позиции счёта заменяются набором. */

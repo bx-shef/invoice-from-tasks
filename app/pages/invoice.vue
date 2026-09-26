@@ -146,7 +146,7 @@ async function consult(promptId: string) {
               />
               <span class="text-sm opacity-70">
                 Названия: {{ app.settings.value.naming === 'ai' ? 'BitrixGPT' : 'как есть из задач' }} · округление:
-                {{ roundingText }}
+                {{ roundingText }} · в счёт: {{ app.settings.value.priceMode === 'sum' ? 'сумма строки × 1' : 'цена часа × часы' }}
               </span>
             </div>
           </template>
@@ -165,7 +165,9 @@ async function consult(promptId: string) {
           :rows="result.rows"
           :errors="result.errors"
           :warnings="result.warnings"
-          :total="fill.total.value"
+          :totals="fill.totals.value"
+          :vat="fill.vat.value"
+          :price-mode="app.settings.value.priceMode"
           :currency="fill.invoice.value?.currencyId ?? ''"
           :rate-currency="app.settings.value.currency"
           :origin="origin"

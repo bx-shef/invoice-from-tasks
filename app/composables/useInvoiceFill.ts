@@ -5,7 +5,7 @@
 
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, buildRows, rowsTotal, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { applyNames, buildRows, rowsTotals, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
@@ -18,6 +18,7 @@ import {
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
+import { vatForInvoice, type VatRate } from '#shared/domain/vat'
 import { B24CallError, type BatchCall } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
 import {
@@ -58,6 +59,8 @@ export function useInvoiceFill() {
   const problems = ref<string[]>([])
   /** Пересчёт в валюту счёта последней сборки: его предупреждение показываем и после записи. */
   const conversion = ref<CurrencyConversion | null>(null)
+  /** НДС последней сборки: ставка и чьи это реквизиты — для предпросмотра. */
+  const vat = ref<{ rate: VatRate, company: string } | null>(null)
   const step = ref<Step>('idle')
   const error = ref('')
   /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
@@ -66,7 +69,7 @@ export function useInvoiceFill() {
   const writing = ref<WriteMode | null>(null)
 
   const canWrite = computed(() => step.value === 'preview' && !!result.value && result.value.errors.length === 0 && result.value.rows.length > 0)
-  const total = computed(() => rowsTotal(result.value?.rows ?? []))
+  const totals = computed(() => rowsTotals(result.value?.rows ?? []))
 
   /**
    * Все позиции счёта, постранично (paging.ts, покрыт тестом): у счёта их может быть больше
@@ -118,6 +121,7 @@ export function useInvoiceFill() {
     problems.value = []
     notice.value = ''
     conversion.value = null
+    vat.value = null
     step.value = 'idle'
   }
 
@@ -197,6 +201,7 @@ export function useInvoiceFill() {
     notice.value = ''
     result.value = null
     conversion.value = null
+    vat.value = null
     problems.value = invoiceProblems(inv, settings.value, source)
     if (!problems.value.length) {
       try {
@@ -205,10 +210,13 @@ export function useInvoiceFill() {
         problems.value = [e instanceof Error ? e.message : String(e)]
       }
     }
-    if (problems.value.length) {
+    // Ставка НДС — по реквизитам счёта; её отсутствие invoiceProblems уже превратил в остановку.
+    const vatChoice = vatForInvoice(settings.value.vat, inv.myCompanyId)
+    if (problems.value.length || !vatChoice.ok) {
       step.value = 'idle'
       return
     }
+    vat.value = { rate: vatChoice.rate, company: vatChoice.company }
     try {
       tasks.value = await fetchTasks(source, inv)
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
@@ -226,6 +234,7 @@ export function useInvoiceFill() {
         rates: rates.value,
         settings: settings.value,
         conversion: conversion.value,
+        vatRate: vatChoice.rate,
         userNames
       })
 
@@ -332,5 +341,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, step, error, notice, writing, canWrite, total, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, write, consult }
 }

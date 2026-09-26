@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canEditRates, defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
+import { canEditRates, defaultSettings, LIMITS, parseSettings, serializeSettings, settingsProblems } from '#shared/domain/settings'
 
 describe('parseSettings — защитный разбор app.option', () => {
   it('мусор и пустота дают настройки по умолчанию', () => {
@@ -92,5 +92,52 @@ describe('canEditRates', () => {
     expect(canEditRates(s, 1, true)).toBe(true)
     expect(canEditRates(s, 5, false)).toBe(true)
     expect(canEditRates(s, 6, false)).toBe(false)
+  })
+})
+
+describe('режим цены и НДС (2026-09-26)', () => {
+  it('по умолчанию — «цена часа» и НДС не задан: старые настройки читаются как раньше', () => {
+    expect(defaultSettings()).toMatchObject({ priceMode: 'hour', vat: [] })
+    expect(parseSettings({ currency: 'RUB' })).toMatchObject({ priceMode: 'hour', vat: [] })
+  })
+
+  it('priceMode: только известные значения', () => {
+    expect(parseSettings({ priceMode: 'sum' }).priceMode).toBe('sum')
+    expect(parseSettings({ priceMode: 'SUM' }).priceMode).toBe('hour')
+    expect(parseSettings({ priceMode: 1 }).priceMode).toBe('hour')
+  })
+
+  it('НДС по компаниям: ставка и «Без НДС» сохраняются, битые записи и повтор компании отбрасываются', () => {
+    const s = parseSettings({ vat: [
+      { companyId: 20, title: ' ООО Альфа ', rate: 20 },
+      { companyId: '22', title: 'ИП Бета', rate: null },
+      { companyId: 20, title: 'Повтор', rate: 10 },
+      { companyId: 23, title: 'Нет ставки' },
+      { companyId: 24, title: 'Битая ставка', rate: 120 },
+      { companyId: 0, title: 'Нет id', rate: 20 },
+      'мусор',
+      { companyId: 25, title: 'т'.repeat(300), rate: '10' }
+    ] })
+    expect(s.vat).toEqual([
+      { companyId: 20, title: 'ООО Альфа', rate: 20 },
+      { companyId: 22, title: 'ИП Бета', rate: null },
+      { companyId: 25, title: 'т'.repeat(255), rate: 10 }
+    ])
+    expect(parseSettings({ vat: { companyId: 20, rate: 20 } }).vat).toEqual([])
+  })
+
+  it('не больше LIMITS.vatCompanies записей', () => {
+    const many = Array.from({ length: LIMITS.vatCompanies + 5 }, (_, i) => ({ companyId: i + 1, title: `К${i}`, rate: 20 }))
+    expect(parseSettings({ vat: many }).vat).toHaveLength(LIMITS.vatCompanies)
+  })
+
+  it('сериализация сохраняет режим и НДС', () => {
+    const s = { ...defaultSettings(), priceMode: 'sum' as const, vat: [{ companyId: 20, title: 'А', rate: null }] }
+    expect(parseSettings(serializeSettings(s))).toEqual(s)
+  })
+
+  it('без НДС хотя бы одних реквизитов — предупреждение о готовности', () => {
+    expect(settingsProblems({ ...defaultSettings(), currency: 'RUB' })).toEqual(['Не задан НДС ни для одних «Реквизитов вашей компании»'])
+    expect(settingsProblems({ ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 20, title: 'А', rate: 20 }] })).toEqual([])
   })
 })

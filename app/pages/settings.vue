@@ -18,6 +18,7 @@ const tabs = computed<TabsItem[]>(() => {
     { label: 'Общие', slot: 'general' as const, value: 'general' },
     { label: 'Ставки', slot: 'rates' as const, value: 'rates' },
     { label: 'Наценки', slot: 'markup' as const, value: 'markup' },
+    { label: 'НДС', slot: 'vat' as const, value: 'vat' },
     { label: 'Промпты', slot: 'prompts' as const, value: 'prompts' },
     { label: 'Доступ', slot: 'access' as const, value: 'access' },
     { label: 'Хранилище', slot: 'storage' as const, value: 'storage' }
@@ -99,6 +100,12 @@ async function save() {
             </template>
             <template #markup>
               <SettingsMarkup
+                v-model="draft"
+                class="pt-4"
+              />
+            </template>
+            <template #vat>
+              <SettingsVat
                 v-model="draft"
                 class="pt-4"
               />

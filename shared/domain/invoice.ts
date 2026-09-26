@@ -2,6 +2,7 @@
 
 import type { AppSettings } from './settings'
 import type { TaskSource } from './fill'
+import { vatForInvoice } from './vat'
 
 export interface InvoiceInfo {
   id: number
@@ -9,6 +10,8 @@ export interface InvoiceInfo {
   currencyId: string
   /** Сделка, из которой выставлен счёт (`parentId2`); `null` — счёт без сделки. */
   dealId: number | null
+  /** «Реквизиты вашей компании» (`mycompanyId`, 0 — не выбраны) — по ним ставка НДС (vat.ts). */
+  myCompanyId: number | null
   opportunity: number
 }
 
@@ -22,11 +25,13 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
   const id = Number(o.id)
   if (!Number.isInteger(id) || id <= 0) return null
   const dealId = Number(o.parentId2)
+  const myCompanyId = Number(o.mycompanyId)
   return {
     id,
     title: typeof o.title === 'string' ? o.title : '',
     currencyId: typeof o.currencyId === 'string' ? o.currencyId.toUpperCase() : '',
     dealId: Number.isInteger(dealId) && dealId > 0 ? dealId : null,
+    myCompanyId: Number.isInteger(myCompanyId) && myCompanyId > 0 ? myCompanyId : null,
     opportunity: Number(o.opportunity) || 0
   }
 }
@@ -35,7 +40,8 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
  * Что мешает заполнить счёт ещё до чтения задач. Пусто — можно продолжать.
  *
  * Валюта счёта, отличная от валюты ставок, — НЕ помеха (#3): цены пересчитываются по курсу
- * портала (currency.ts), а если курса нет — остановка там же.
+ * портала (currency.ts), а если курса нет — остановка там же. Нет «Реквизитов вашей компании» или
+ * ставки НДС для них — помеха (vat.ts): без неё не посчитать налог.
  */
 export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, source: TaskSource): string[] {
   const problems: string[] = []
@@ -43,6 +49,8 @@ export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, sou
   if (source === 'deal' && invoice.dealId === null) {
     problems.push('Счёт не связан со сделкой — выберите задачи, привязанные к самому счёту')
   }
+  const vat = vatForInvoice(settings.vat, invoice.myCompanyId)
+  if (!vat.ok) problems.push(vat.problem)
   return problems
 }
 

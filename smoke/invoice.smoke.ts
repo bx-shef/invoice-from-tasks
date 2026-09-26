@@ -11,13 +11,14 @@
 import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
 import { currencyConversion, parseCurrencies, type CurrencyConversion, type PortalCurrency } from '#shared/domain/currency'
-import { buildRows, rowsTotal, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
+import { buildRows, rowsTotals, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, type InvoiceInfo } from '#shared/domain/invoice'
 import { normalizeTag, type MarkupSettings } from '#shared/domain/markup'
 import type { RateEntry } from '#shared/domain/rates'
-import { defaultSettings, type AppSettings } from '#shared/domain/settings'
+import { defaultSettings, type AppSettings, type PriceMode } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import type { RoundingDirection, RoundingStep } from '#shared/domain/time'
+import { grossPrice, roundMoney, vatForInvoice, type CompanyVat } from '#shared/domain/vat'
 import { addRowCall, replaceRowsCall } from '~/utils/invoiceRequests'
 import { describeWrite } from '~/utils/writeOutcome'
 import { connectPortal, type Portal } from './lib/portal'
@@ -57,11 +58,15 @@ const SOURCES = [
 const MODES: FillMode[] = ['task', 'time']
 const ROUNDINGS: Array<[RoundingStep, RoundingDirection]> = [[0, 'up'], [30, 'up'], [60, 'nearest']]
 const MARKUP_KINDS = ['none', 'tags'] as const
+const PRICE_MODES: PriceMode[] = ['hour', 'sum']
 
-const VARIANTS = SOURCES.flatMap(src => MODES.flatMap(mode => ROUNDINGS.flatMap(([step, direction]) => MARKUP_KINDS.map(markup => ({
-  label: `${src.name} · тип ${mode === 'task' ? 1 : 2} · округление ${step ? `${step} мин ${direction === 'up' ? 'вверх' : 'к ближайшему'}` : 'нет'} · наценка ${markup === 'tags' ? 'по тегам' : 'нет'}`,
-  src, mode, step, direction, markup
-})))))
+const VARIANTS = SOURCES.flatMap(src => MODES.flatMap(mode => ROUNDINGS.flatMap(([step, direction]) => MARKUP_KINDS.flatMap(markup => PRICE_MODES.map(priceMode => ({
+  label: `${src.name} · тип ${mode === 'task' ? 1 : 2} · округление ${step ? `${step} мин ${direction === 'up' ? 'вверх' : 'к ближайшему'}` : 'нет'} · наценка ${markup === 'tags' ? 'по тегам' : 'нет'} · в счёт ${priceMode === 'sum' ? 'сумма × 1' : 'цена часа × часы'}`,
+  src, mode, step, direction, markup, priceMode
+}))))))
+
+/** НДС смока: 20% на «реквизиты» засева — счета usd, base и noDeal (smoke/lib/seed.ts). */
+const VAT_RATE = 20
 
 describe.skipIf(!env || !fx)('счёт из задач на живом портале', () => {
   let portal: Portal
@@ -71,8 +76,24 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
   const entries: TimeEntry[] = []
   const nameOf = new Map<number, SeededTask>()
 
+  const vat = (): CompanyVat[] => [{ companyId: fx!.myCompanyId, title: 'IFT smoke', rate: VAT_RATE }]
+
   function settingsFor(v: typeof VARIANTS[number]): AppSettings {
-    return { ...defaultSettings(), currency: fx!.baseCurrency, rounding: v.step, roundingDirection: v.direction, markup: MARKUPS[v.markup], measureCode: 796 }
+    return { ...defaultSettings(), currency: fx!.baseCurrency, rounding: v.step, roundingDirection: v.direction, markup: MARKUPS[v.markup], measureCode: 796, priceMode: v.priceMode, vat: vat() }
+  }
+
+  /** Ставка НДС счёта — тем же путём, что страница (useInvoiceFill → vatForInvoice). */
+  function vatRateOf(invoice: InvoiceInfo, settings: AppSettings): number | null {
+    const choice = vatForInvoice(settings.vat, invoice.myCompanyId)
+    if (!choice.ok) throw new Error(choice.problem)
+    return choice.rate
+  }
+
+  /** Налоговые поля позиций и суммы счёта — то, чего нет в разборе приложения (он их не читает). */
+  async function taxOf(invoiceId: number): Promise<{ rows: Array<Record<string, unknown>>, opportunity: number, taxValue: number }> {
+    const list = await portal.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', { filter: { '=ownerType': 'SI', '=ownerId': invoiceId }, order: { id: 'asc' } })
+    const item = await portal.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: 31, id: invoiceId })
+    return { rows: list.productRows ?? [], opportunity: Number(item.item?.opportunity), taxValue: Number(item.item?.taxValue) }
   }
 
   beforeAll(async () => {
@@ -102,7 +123,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     const conversion: CurrencyConversion | null = conv.conversion
     expect(conversion === null).toBe(invoice.currencyId === fx!.baseCurrency)
     const tasks = tasksBySource.get(v.src.source)!
-    const built = buildRows({ mode: v.mode, tasks, entries, rates: ratesFor(fx!.userId), settings, conversion })
+    const built = buildRows({ mode: v.mode, tasks, entries, rates: ratesFor(fx!.userId), settings, conversion, vatRate: vatRateOf(invoice, settings) })
     const factor = conversion?.factor ?? 1
 
     // Каждая строка — по независимой формуле.
@@ -115,9 +136,11 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const percent = expectedMarkup(v.markup, task)
       expect(row).toMatchObject({ seconds, rateDate: date, baseRate: base, markupPercent: percent })
       expect(row.roundedSeconds).toBe(expectedSeconds(seconds, v.step, v.direction))
-      expect(row.quantity).toBe(Math.round(row.roundedSeconds / 3600 * 10_000) / 10_000)
-      expect(row.price).toBe(Math.round(base * factor * (100 + percent)) / 100)
-      expect(row.sum).toBe(Math.round(row.price * row.quantity * 100) / 100)
+      expect(row.hours).toBe(Math.round(row.roundedSeconds / 3600 * 10_000) / 10_000)
+      expect(row.hourPrice).toBe(Math.round(base * factor * (100 + percent)) / 100)
+      expect(row.sum).toBe(roundMoney(row.hourPrice * row.hours))
+      expect([row.price, row.quantity]).toEqual(v.priceMode === 'sum' ? [row.sum, 1] : [row.hourPrice, row.hours])
+      expect(row.taxRate).toBe(VAT_RATE)
     }
 
     // Строки, ошибки и предупреждения — по таблице засева. К ближайшему часу обнуляются: в типе 1 —
@@ -136,8 +159,17 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
   })
 
   it('источник «сделка» у счёта без сделки — остановка до чтения задач', () => {
-    expect(invoiceProblems(invoices.get('noDeal')!, { ...defaultSettings(), currency: fx!.baseCurrency }, 'deal'))
+    expect(invoiceProblems(invoices.get('noDeal')!, { ...defaultSettings(), currency: fx!.baseCurrency, vat: vat() }, 'deal'))
       .toEqual(['Счёт не связан со сделкой — выберите задачи, привязанные к самому счёту'])
+  })
+
+  it('НДС: реквизиты счёта читаются из crm.item.get; счёт без реквизитов — остановка', async () => {
+    expect(invoices.get('usd')!.myCompanyId).toBe(fx!.myCompanyId)
+    // У счёта листания реквизитов нет — портал отдаёт mycompanyId = 0.
+    const bare = (await readInvoice(portal, fx!.invoices.paging)).invoice
+    expect(bare.myCompanyId).toBeNull()
+    expect(invoiceProblems(bare, { ...defaultSettings(), currency: fx!.baseCurrency, vat: vat() }, 'invoice'))
+      .toEqual(['В счёте не выбраны «Реквизиты вашей компании» — выберите их в карточке счёта: по ним берётся ставка НДС'])
   })
 
   it('валюта без курса в портале — остановка с понятной причиной', () => {
@@ -147,32 +179,40 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
   })
 
   it('нет ставки на дату — ошибка по каждой задаче, строк нет', () => {
-    const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: [], settings: { ...defaultSettings(), currency: fx!.baseCurrency } })
+    const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: [], settings: { ...defaultSettings(), currency: fx!.baseCurrency }, vatRate: null })
     expect(built.rows).toEqual([])
     expect(built.errors).toHaveLength(3)
     for (const e of built.errors) expect(e.message).toContain('нет ставки')
   })
 
   describe('запись в счёт (последовательно)', () => {
-    const variant = VARIANTS.find(v => v.src.invoice === 'usd' && v.mode === 'task' && v.step === 30 && v.markup === 'tags')!
+    const variant = VARIANTS.find(v => v.src.invoice === 'usd' && v.mode === 'task' && v.step === 30 && v.markup === 'tags' && v.priceMode === 'hour')!
+    /** Строки «Заменить» — чтобы после «Добавить» сверить итог всего счёта. */
+    let replaced: ReturnType<typeof buildRows>['rows'] = []
 
-    it('«Заменить»: позиции = строки предпросмотра, сумму счёта портал считает так же', async () => {
+    it('«Заменить»: позиции = строки предпросмотра с НДС сверху, сумму и налог портал считает так же', async () => {
       const settings = settingsFor(variant)
       const conv = currencyConversion(settings.currency, invoices.get('usd')!.currencyId, currencies)
-      const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: conv.ok ? conv.conversion : null })
+      const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: conv.ok ? conv.conversion : null, vatRate: VAT_RATE })
       const { method, params } = replaceRowsCall(fx!.invoices.usd, toProductRows(built.rows, settings))
       await portal.call(method, params)
       const after = await readInvoice(portal, fx!.invoices.usd)
-      expect(after.rows.map(r => [r.productName, r.price, r.quantity])).toEqual(built.rows.map(r => [r.name, r.price, r.quantity]))
-      expect(after.invoice.opportunity).toBeCloseTo(rowsTotal(built.rows), 2)
+      // В поле price портал хранит цену С налогом — ровно ту, что ушла.
+      expect(after.rows.map(r => [r.productName, r.price, r.quantity])).toEqual(built.rows.map(r => [r.name, grossPrice(r.price, VAT_RATE), r.quantity]))
+      const tax = await taxOf(fx!.invoices.usd)
+      // Цену без НДС портал выделил сам — это цена строки предпросмотра.
+      expect(tax.rows.map(r => [Number(r.priceExclusive), Number(r.taxRate), r.taxIncluded])).toEqual(built.rows.map(r => [r.price, VAT_RATE, 'N']))
+      const totals = rowsTotals(built.rows)
+      expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
       expect(describeWrite({ mode: 'replace', planned: built.rows.length, before: 0, after: after.rows.length, error: null }).kind).toBe('done')
+      replaced = built.rows
     })
 
-    it('«Добавить»: строки после существующих, сортировка продолжается', async () => {
-      const settings = { ...settingsFor(variant), rounding: 0 as const }
+    it('«Добавить» в режиме «сумма × 1»: строки после существующих, количество 1, итог счёта сходится', async () => {
+      const settings = { ...settingsFor(variant), rounding: 0 as const, priceMode: 'sum' as const }
       const before = await readInvoice(portal, fx!.invoices.usd)
       const conv = currencyConversion(settings.currency, before.invoice.currencyId, currencies)
-      const built = buildRows({ mode: 'time', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: conv.ok ? conv.conversion : null })
+      const built = buildRows({ mode: 'time', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: conv.ok ? conv.conversion : null, vatRate: VAT_RATE })
       const sortStart = before.rows.reduce((m, r) => Math.max(m, r.sort), 0)
       const calls = toProductRows(built.rows, settings, sortStart).map((f): [string, Record<string, unknown>] => {
         const { method, params } = addRowCall(fx!.invoices.usd, f)
@@ -183,6 +223,10 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const after = await readInvoice(portal, fx!.invoices.usd)
       expect(after.rows).toHaveLength(before.rows.length + built.rows.length)
       expect(Math.min(...after.rows.slice(before.rows.length).map(r => r.sort))).toBeGreaterThan(sortStart)
+      expect(after.rows.slice(before.rows.length).map(r => [r.price, r.quantity])).toEqual(built.rows.map(r => [grossPrice(r.sum, VAT_RATE), 1]))
+      const tax = await taxOf(fx!.invoices.usd)
+      const totals = rowsTotals([...replaced, ...built.rows])
+      expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
       expect(describeWrite({ mode: 'append', planned: built.rows.length, before: before.rows.length, after: after.rows.length, error: null }).kind).toBe('done')
     })
 

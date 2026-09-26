@@ -2,7 +2,15 @@
 // что прогоны не мешают друг другу и старые данные не влияют на расчёт. Ничего не удаляется
 // (решение владельца: тестовые данные остаются для ручного просмотра).
 
+import { parseMyCompanies } from '#shared/domain/vat'
+import { myCompaniesCall } from '~/utils/invoiceRequests'
 import type { Portal } from './portal'
+
+/**
+ * «Реквизиты вашей компании» смока — одни на все прогоны: список реквизитов в портале видят люди,
+ * и сотня «моих компаний» от прогонов его бы засорила. Ищется по названию, нет — создаётся.
+ */
+export const SMOKE_MY_COMPANY = 'IFT smoke: реквизиты вашей компании'
 
 /** Дата записи «задним числом» — до смены ставки 01.09 (сценарий «ставка менялась»). */
 export const PAST_DATE = '2026-08-20T10:00:00+03:00'
@@ -20,6 +28,8 @@ export interface SmokeFixture {
   /** Сотрудник вебхука — ответственный за задачи и автор записей времени. */
   userId: number
   dealId: number
+  /** «Реквизиты вашей компании» счетов usd, base и noDeal; у paging их сняли — счёт без реквизитов. */
+  myCompanyId: number
   invoices: {
     /** Счёт в USD из сделки — пересчёт из валюты ставок. */
     usd: number
@@ -65,6 +75,12 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
   return id
 }
 
+async function smokeMyCompany(portal: Portal): Promise<number> {
+  const { method, params } = myCompaniesCall(0)
+  const found = parseMyCompanies(await portal.call(method, params)).find(c => c.title === SMOKE_MY_COMPANY)
+  return found?.id ?? addItem(portal, 4, { title: SMOKE_MY_COMPANY, isMyCompany: 'Y' })
+}
+
 /** Создаёт данные прогона. Порядок вызовов — последовательный: портал выравнивает лимиты сам. */
 export async function seed(portal: Portal): Promise<SmokeFixture> {
   // До секунды: два прогона в одну минуту в портале должны различаться на глаз.
@@ -79,12 +95,16 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
   if (!foreignCurrency) throw new Error('в портале нет второй валюты — пересчёт не проверить')
 
   const dealId = await addItem(portal, 2, { title: `${runTag}: сделка`, currencyId: baseCurrency })
+  const myCompanyId = await smokeMyCompany(portal)
   const invoices = {
-    usd: await addItem(portal, 31, { title: `${runTag}: счёт ${foreignCurrency}`, parentId2: dealId, currencyId: foreignCurrency }),
-    base: await addItem(portal, 31, { title: `${runTag}: счёт ${baseCurrency}`, parentId2: dealId, currencyId: baseCurrency }),
-    noDeal: await addItem(portal, 31, { title: `${runTag}: счёт без сделки`, currencyId: baseCurrency }),
+    usd: await addItem(portal, 31, { title: `${runTag}: счёт ${foreignCurrency}`, parentId2: dealId, currencyId: foreignCurrency, mycompanyId: myCompanyId }),
+    base: await addItem(portal, 31, { title: `${runTag}: счёт ${baseCurrency}`, parentId2: dealId, currencyId: baseCurrency, mycompanyId: myCompanyId }),
+    noDeal: await addItem(portal, 31, { title: `${runTag}: счёт без сделки`, currencyId: baseCurrency, mycompanyId: myCompanyId }),
     paging: await addItem(portal, 31, { title: `${runTag}: листание позиций`, currencyId: baseCurrency })
   }
+  // Новый счёт портал сам получает «моей компанией» по умолчанию, даже с `mycompanyId: 0` в
+  // crm.item.add (замер 2026-09-26); снять реквизиты можно только crm.item.update.
+  await portal.call('crm.item.update', { entityTypeId: 31, id: invoices.paging, fields: { mycompanyId: 0 } })
   const base = { RESPONSIBLE_ID: userId }
   const tasks = {
     design: await addTask(portal, { ...base, TITLE: `${runTag}: дизайн лендинга`, DESCRIPTION: 'Макет в Figma, адаптив', UF_CRM_TASK: [`D_${dealId}`], TAGS: ['Дизайн', 'Срочно'] }),
@@ -122,5 +142,5 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
     ownerId: invoices.paging,
     productRows: Array.from({ length: 55 }, (_, i) => ({ productName: `${runTag}: строка ${i + 1}`, price: 1, quantity: 1, sort: (i + 1) * 10 }))
   })
-  return { runTag, userId, dealId, invoices, tasks, entries, baseCurrency }
+  return { runTag, userId, dealId, myCompanyId, invoices, tasks, entries, baseCurrency }
 }

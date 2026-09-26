@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyNames, buildRows, clampName, MAX_ROW_NAME, rowsTotal, toProductRows, type FillInput } from '#shared/domain/fill'
+import { applyNames, buildRows, clampName, MAX_ROW_NAME, rowsTotals, toProductRows, type FillInput } from '#shared/domain/fill'
 import { defaultSettings, type AppSettings } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 
@@ -35,6 +35,7 @@ function input(patch: Partial<FillInput> = {}): FillInput {
       { userId: 9, rate: 80, from: '2026-01-01' }
     ],
     settings: settings(),
+    vatRate: null,
     ...patch
   }
 }
@@ -174,7 +175,7 @@ describe('тип 2 — записи времени как строки', () => {
       ['e101', 'Вёрстка шапки', 1, 100, 100],
       ['e102', 'Правки по макету', 0.5, 80, 40]
     ])
-    expect(rowsTotal(rows)).toBe(140)
+    expect(rowsTotals(rows)).toEqual({ net: 140, vat: 0, total: 140 })
   })
 
   it('запись без описания — ошибка: строку нечем назвать', () => {
@@ -261,5 +262,69 @@ describe('toProductRows — поля crm.item.productrow.*', () => {
       { productName: 'Сверстать лендинг', price: 100, quantity: 1.5, measureCode: 356, sort: 40 }
     ])
     expect(toProductRows(rows, settings())[0]).not.toHaveProperty('measureCode')
+  })
+})
+
+describe('как строка ложится в счёт (priceMode)', () => {
+  it('«цена часа» — цена часа и часы; сумма — их произведение', () => {
+    const { rows } = buildRows(input())
+    expect(rows[0]).toMatchObject({ hours: 1.5, hourPrice: 200, price: 200, quantity: 1.5, sum: 300 })
+  })
+
+  it('«сумма в цене» — цена = цена часа × часы, количество 1; часы и цена часа остаются для предпросмотра', () => {
+    const { rows } = buildRows(input({ settings: settings({ priceMode: 'sum' }) }))
+    expect(rows[0]).toMatchObject({ hours: 1.5, hourPrice: 200, price: 300, quantity: 1, sum: 300 })
+    const time = buildRows(input({ mode: 'time', settings: settings({ priceMode: 'sum' }) })).rows
+    expect(time.map(r => [r.key, r.price, r.quantity])).toEqual([['e101', 100, 1], ['e102', 40, 1]])
+  })
+
+  it('сумма в цене округляется до копеек как у портала: 10,19 × 5,5 = 56,05, а не 56,04', () => {
+    // 10,19 × 5,5 в double — 56,044999…: Math.round(x * 100) дал бы 56,04 (roundMoney, vat.ts).
+    const odd = buildRows(input({
+      mode: 'time',
+      entries: [{ ...entries[0]!, seconds: 5.5 * 3600 }],
+      rates: [{ userId: 7, rate: 10.19, from: '2026-01-01' }],
+      settings: settings({ priceMode: 'sum' })
+    })).rows
+    expect(odd[0]).toMatchObject({ hourPrice: 10.19, price: 56.05, quantity: 1, sum: 56.05 })
+  })
+
+  it('режим не меняет итог счёта', () => {
+    const hour = rowsTotals(buildRows(input({ mode: 'time', vatRate: 20 })).rows)
+    const sum = rowsTotals(buildRows(input({ mode: 'time', vatRate: 20, settings: settings({ priceMode: 'sum' }) })).rows)
+    expect(sum).toEqual(hour)
+    expect(hour).toEqual({ net: 140, vat: 28, total: 168 })
+  })
+})
+
+describe('НДС в строках', () => {
+  it('строки несут ставку счёта; цена в строке — без НДС', () => {
+    const { rows } = buildRows(input({ vatRate: 20 }))
+    expect(rows[0]).toMatchObject({ price: 200, taxRate: 20, sum: 300 })
+    expect(buildRows(input()).rows[0]?.taxRate).toBeNull()
+  })
+
+  it('toProductRows: цена С налогом, ставка и «налог не включён» — портал сам выделит цену без НДС', () => {
+    const { rows } = buildRows(input({ vatRate: 20, rates: [{ userId: 7, rate: 100.03, from: '2026-01-01' }] }))
+    expect(toProductRows(rows, settings())).toEqual([
+      { productName: 'Сверстать лендинг', price: 120.036, quantity: 1.5, taxRate: 20, taxIncluded: 'N', sort: 10 }
+    ])
+  })
+
+  it('0% — ставка пишется (это не «Без НДС»), цена как есть', () => {
+    const { rows } = buildRows(input({ vatRate: 0 }))
+    expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 200, taxRate: 0, taxIncluded: 'N' })
+  })
+
+  it('«Без НДС» — налоговых полей в строке нет', () => {
+    const payload = toProductRows(buildRows(input()).rows, settings())[0]!
+    expect(payload).not.toHaveProperty('taxRate')
+    expect(payload).not.toHaveProperty('taxIncluded')
+  })
+
+  it('«сумма в цене» с НДС: в строку — сумма с налогом и 1', () => {
+    const { rows } = buildRows(input({ vatRate: 20, settings: settings({ priceMode: 'sum' }) }))
+    expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 360, quantity: 1, taxRate: 20 })
+    expect(rowsTotals(rows)).toEqual({ net: 300, vat: 60, total: 360 })
   })
 })
