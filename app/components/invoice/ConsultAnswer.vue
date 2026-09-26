@@ -23,7 +23,7 @@ const tag = (span: AnswerSpan) => (span.bold ? 'strong' : span.italic ? 'em' : '
   >
     <template #header>
       <div class="flex items-center gap-2">
-        <CopilotIcon class="size-6 shrink-0 text-(--ui-color-copilot-primary)" />
+        <CopilotIcon class="size-6 shrink-0 text-(--ui-color-design-outline-copilot-content-icon)" />
         <h3 class="font-semibold min-w-0 truncate">
           {{ title }}
         </h3>

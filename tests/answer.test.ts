@@ -16,6 +16,8 @@ describe('inlineSpans — начертание в строке', () => {
     expect(inlineSpans('ставка*2 и объём*3')).toEqual([t('ставка*2 и объём*3')])
     expect(inlineSpans('5*3 = 15, 2*4 = 8')).toEqual([t('5*3 = 15, 2*4 = 8')])
     expect(inlineSpans('2 * 3 = 6')).toEqual([t('2 * 3 = 6')])
+    expect(inlineSpans('distance = a*b*c meters')).toEqual([t('distance = a*b*c meters')])
+    expect(inlineSpans('E=mc*2, and F=m*a')).toEqual([t('E=mc*2, and F=m*a')])
   })
 
   it('с пробелами у звёздочек — не выделение (как markdown); разметка — только текст', () => {
