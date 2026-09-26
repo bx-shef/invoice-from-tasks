@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { crmBindingCodes, listRows, parseTask, parseTaskTags, parseTimeEntry, tasksBoundTo } from '#shared/domain/tasks'
-import { parseInvoice, invoiceProblems } from '#shared/domain/invoice'
+import { checkInvoice, invoiceChangedSince, parseInvoice, invoiceProblems } from '#shared/domain/invoice'
 import { defaultSettings } from '#shared/domain/settings'
 
 describe('разбор задач', () => {
@@ -82,15 +82,49 @@ describe('разбор записей времени', () => {
 
 describe('счёт', () => {
   it('читает crm.item.get и связь со сделкой', () => {
-    const inv = parseInvoice({ item: { id: 8, title: 'Счёт №8', currencyId: 'rub', parentId2: '5', opportunity: '1000' } })
-    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, opportunity: 1000 })
+    const inv = parseInvoice({ item: { id: 8, title: 'Счёт №8', currencyId: 'rub', parentId2: '5', mycompanyId: '20', opportunity: '1000' } })
+    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, myCompanyId: 20, opportunity: 1000 })
+    // Реквизиты не выбраны — портал отдаёт 0 (замер 2026-09-26).
+    expect(parseInvoice({ item: { id: 8, mycompanyId: 0 } })?.myCompanyId).toBeNull()
+    expect(parseInvoice({ item: { id: 8 } })?.myCompanyId).toBeNull()
   })
 
   it('нет сделки или валюты ставок — останавливаемся до чтения задач; другая валюта счёта — не стоп', () => {
-    const inv = parseInvoice({ item: { id: 8, currencyId: 'USD', parentId2: 0 } })!
-    expect(invoiceProblems(inv, { ...defaultSettings(), currency: 'RUB' }, 'deal'))
+    const inv = parseInvoice({ item: { id: 8, currencyId: 'USD', parentId2: 0, mycompanyId: 20 } })!
+    const vat = [{ companyId: 20, title: 'ООО Альфа', rate: 20 }]
+    expect(invoiceProblems(inv, { ...defaultSettings(), currency: 'RUB', vat }, 'deal'))
       .toEqual(['Счёт не связан со сделкой — выберите задачи, привязанные к самому счёту'])
-    expect(invoiceProblems(inv, { ...defaultSettings(), currency: 'RUB' }, 'invoice')).toEqual([])
-    expect(invoiceProblems(inv, defaultSettings(), 'invoice')).toEqual(['В настройках приложения не выбрана валюта ставок'])
+    expect(invoiceProblems(inv, { ...defaultSettings(), currency: 'RUB', vat }, 'invoice')).toEqual([])
+    expect(invoiceProblems(inv, { ...defaultSettings(), vat }, 'invoice')).toEqual(['В настройках приложения не выбрана валюта ставок'])
+  })
+
+  it('НДС: нет реквизитов в счёте или ставки для них — стоп до чтения задач, все причины сразу', () => {
+    const noCompany = parseInvoice({ item: { id: 8, parentId2: 0, mycompanyId: 0 } })!
+    const problems = invoiceProblems(noCompany, { ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 20, title: 'А', rate: 20 }] }, 'deal')
+    expect(problems).toHaveLength(2)
+    expect(problems[1]).toContain('не выбраны «Реквизиты вашей компании»')
+    const unknown = parseInvoice({ item: { id: 8, mycompanyId: 21 } })!
+    expect(invoiceProblems(unknown, { ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 20, title: 'А', rate: 20 }] }, 'invoice'))
+      .toEqual(['Для «Реквизитов вашей компании» #21 в настройках приложения не задан НДС — администратор задаёт его в «Настройки → НДС»'])
+    expect(invoiceProblems(unknown, { ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 21, title: '', rate: null }] }, 'invoice')).toEqual([])
+  })
+})
+
+describe('счёт: одна проверка и сверка перед записью', () => {
+  const base = parseInvoice({ item: { id: 8, currencyId: 'BYN', parentId2: 5, mycompanyId: 20 } })!
+
+  it('checkInvoice отдаёт причины и ставку одним разбором — они не расходятся', () => {
+    const vat = [{ companyId: 20, title: 'А', rate: 20 }]
+    expect(checkInvoice(base, { ...defaultSettings(), currency: 'BYN', vat }, 'deal')).toEqual({ problems: [], vat: { ok: true, rate: 20, company: 'А' } })
+    const bad = checkInvoice(base, { ...defaultSettings(), currency: 'BYN' }, 'deal')
+    expect(bad.vat.ok).toBe(false)
+    expect(bad.problems).toEqual([!bad.vat.ok && bad.vat.problem])
+  })
+
+  it('invoiceChangedSince: реквизиты, валюта, сделка — повод собрать заново; прочее — нет', () => {
+    expect(invoiceChangedSince(base, { ...base, title: 'Новое название', opportunity: 999 })).toBeNull()
+    expect(invoiceChangedSince(base, { ...base, myCompanyId: 22 })).toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании» — соберите строки заново')
+    expect(invoiceChangedSince(base, { ...base, myCompanyId: null, currencyId: 'USD', dealId: null }))
+      .toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании», валюта, сделка — соберите строки заново')
   })
 })

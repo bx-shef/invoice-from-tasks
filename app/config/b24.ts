@@ -26,7 +26,7 @@ export const EVENTS_HANDLER_PATH = '/api/b24/events'
 /**
  * Настройки SDK для всего фрейма (`initializeB24Frame`, useB24.ts): без автоматических повторов
  * при сетевой ошибке, таймауте и ответе 5xx. Приложение пишет в портал то, что повторять нельзя:
- * `crm.item.productrow.add`, `crm.activity.todo.add`, `placement.bind` — повтор даёт дубли, а
+ * `crm.item.productrow.add`, `crm.activity.configurable.add`, `placement.bind` — повтор даёт дубли, а
  * запрос, выполненный порталом с опоздавшим ответом, SDK по умолчанию отправил бы ещё раз
  * (`retryOnNetworkError`, до 3 попыток — код b24jssdk 2.2.0; находка /code-review).
  * Отказы по лимитам портала (429, QUERY_LIMIT_EXCEEDED) SDK по-прежнему пережидает и повторяет:

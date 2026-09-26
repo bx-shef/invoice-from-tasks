@@ -27,10 +27,10 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 
 | Где | Что |
 |---|---|
-| `shared/domain/` | **чистые правила**: `time` (округление), `rates` (ставки по датам), `markup` (наценки по тегам), `currency` (пересчёт по курсу портала), `fill` (сборка строк, тип 1/2), `tasks` (разбор задач и времени, привязка к CRM), `invoice`, `settings` (формат настроек), `storageBudget` (место в app.option), `prompts` (BitrixGPT), `activity` (дело консультации) |
+| `shared/domain/` | **чистые правила**: `time` (округление), `rates` (ставки по датам), `markup` (наценки по тегам), `currency` (пересчёт по курсу портала), `vat` (НДС по «Реквизитам вашей компании»), `money` (копейки как у портала), `fill` (сборка строк, тип 1/2, цена часа или сумма × 1), `tasks` (разбор задач и времени, привязка к CRM), `invoice`, `settings` (формат настроек), `storageBudget` (место в app.option), `prompts` (BitrixGPT), `answer` (разбор ответа модели — общий для ленты и окна), `activity` (запись консультации в ленте) |
 | `app/pages/` | `index` (публичная), `install` (установка), `app` (главная в портале), `settings`, `invoice` (встройка в карточку счёта) |
-| `app/composables/` | `useB24` (фрейм и REST v2/v3), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog` (единицы измерения), `useUsers`, `useStorageProbe` |
-| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере), `measures` (единицы измерения, ОКЕИ), `invoiceRequests` (параметры REST-запросов сценария счёта) |
+| `app/composables/` | `useB24` (фрейм и REST v2/v3), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog` (единицы измерения, ставки НДС), `useMyCompanies` (реквизиты вашей компании), `useUsers`, `useStorageProbe` |
+| `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере), `measures` (единицы измерения, ОКЕИ), `vatSettings` (выбор НДС в настройках), `invoiceRequests` (параметры REST-запросов сценария счёта) |
 | `app/config/b24.ts` | права, встройка, события, настройки SDK (без автоповторов записи) — одно место |
 | `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` (флаги настроек и коммит сборки) |
 | `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
@@ -50,8 +50,8 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
   владельца — в `docs/REST_METHODS.md` («Версия REST»: теги задач из v2-списка, #13). Параметры
   запросов сценария счёта — только в `app/utils/invoiceRequests.ts` (их же шлёт смок).
   Уже пойманные расхождения — в `docs/REST_METHODS.md` (фильтр задач объектом, право `task`,
-  позиционные параметры `task.elapseditem.getlist`, `DESCRIPTION_TYPE` дела, сервер авторизации
-  `oauth.bitrix24.tech`, `keepAuthFresh` нет в SDK 2.2.0).
+  позиционные параметры `task.elapseditem.getlist`, дело консультации — только из приложения, сервер авторизации
+  `oauth.bitrix24.tech`, `keepAuthFresh` нет в SDK 2.2.0, `price` строки — с налогом).
 - **Добавил REST-метод — строка в `docs/REST_METHODS.md`.** Иначе краснеет `tests/repoGuards.test.ts`.
 - **Чистые функции отдельно**, с тестами; REST и запись — тонким слоем поверх. Серверные модули
   с автоимпортами Nitro (`useStorage`, `createError`) — только в обработчиках, `server/middleware/`

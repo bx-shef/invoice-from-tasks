@@ -84,7 +84,7 @@ function removeConsult(id: string) {
         Консультации
       </h3>
       <p class="text-sm opacity-70">
-        Промпт запускается из карточки счёта над данными счёта и задач; ответ BitrixGPT сохраняется делом в счёте.
+        Промпт запускается из карточки счёта над данными счёта и задач; ответ BitrixGPT сохраняется записью в ленте счёта.
       </p>
       <div
         v-for="p in settings.consultPrompts"

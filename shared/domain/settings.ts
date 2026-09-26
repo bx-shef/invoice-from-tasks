@@ -5,6 +5,7 @@
 
 import { isRoundingDirection, isRoundingStep, type RoundingDirection, type RoundingStep } from './time'
 import { cleanTag, MAX_TAG_LENGTH, normalizePercent, normalizeTag, type MarkupSettings, type TagMarkupRule } from './markup'
+import { MAX_COMPANY_TITLE, normalizeVatRate, type CompanyVat } from './vat'
 
 /** Ключ общих настроек в app.option. Суффикс версии — на случай несовместимой смены формата. */
 export const SETTINGS_KEY = 'ift_settings_v1'
@@ -13,6 +14,14 @@ export const RATES_KEY = 'ift_rates_v1'
 
 /** Откуда брать название строки: как есть из задачи или через BitrixGPT. */
 export type NamingMode = 'plain' | 'ai'
+
+/**
+ * Как строка ложится в счёт (решение владельца, 2026-09-26):
+ * • `hour` — цена = цена часа, количество = часы;
+ * • `sum` — цена = цена часа × часы, количество = 1.
+ * Сумму строки в обоих случаях считает портал.
+ */
+export type PriceMode = 'hour' | 'sum'
 
 /** Пользовательский промпт консультации: запускается из карточки счёта, ответ уходит в дело. */
 export interface ConsultPrompt {
@@ -36,6 +45,12 @@ export interface AppSettings {
   markup: MarkupSettings
   /** Код единицы измерения строк (`measureCode`); `null` — не передаём, портал берёт свою. */
   measureCode: number | null
+  priceMode: PriceMode
+  /**
+   * НДС по «Реквизитам вашей компании» (vat.ts): цена строки — без НДС, налог сверху. Счёт, чьих
+   * реквизитов здесь нет, не заполняется.
+   */
+  vat: CompanyVat[]
   naming: NamingMode
   /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
@@ -54,7 +69,8 @@ export const LIMITS = {
   markupRules: 200,
   prompt: 4000,
   consultPrompts: 20,
-  consultTitle: 100
+  consultTitle: 100,
+  vatCompanies: 50
 } as const
 
 export function defaultSettings(): AppSettings {
@@ -65,6 +81,8 @@ export function defaultSettings(): AppSettings {
     rateEditors: [],
     markup: { defaultPercent: 0, tags: [] },
     measureCode: null,
+    priceMode: 'hour',
+    vat: [],
     naming: 'plain',
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
@@ -106,6 +124,22 @@ function parseTagRules(value: unknown): TagMarkupRule[] {
     if (!key || tag.length > MAX_TAG_LENGTH || percent === null || seen.has(key)) continue
     seen.add(key)
     out.push({ tag, percent })
+  }
+  return out
+}
+
+/** НДС по компаниям: одна запись на компанию (повтор отбрасывается), ставка — только валидная. */
+function parseCompanyVat(value: unknown): CompanyVat[] {
+  if (!Array.isArray(value)) return []
+  const out: CompanyVat[] = []
+  const seen = new Set<number>()
+  for (const item of value.slice(0, LIMITS.vatCompanies)) {
+    const o = asObject(item)
+    const companyId = positiveInt(o.companyId)
+    const rate = normalizeVatRate(o.rate)
+    if (companyId === null || rate === undefined || seen.has(companyId)) continue
+    seen.add(companyId)
+    out.push({ companyId, title: text(o.title, MAX_COMPANY_TITLE).trim(), rate })
   }
   return out
 }
@@ -158,6 +192,8 @@ export function parseSettings(raw: unknown): AppSettings {
       tags: parseTagRules(markup.tags)
     },
     measureCode: positiveInt(o.measureCode),
+    priceMode: o.priceMode === 'sum' ? 'sum' : 'hour',
+    vat: parseCompanyVat(o.vat),
     naming: o.naming === 'ai' ? 'ai' : 'plain',
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
@@ -177,9 +213,13 @@ export function canEditRates(settings: AppSettings, userId: number, isAdmin: boo
   return isAdmin || settings.rateEditors.includes(userId)
 }
 
-/** Готовы ли настройки к заполнению счетов: без валюты ставок сверить счёт не с чем. */
+/**
+ * Готовы ли настройки к заполнению счетов: без валюты ставок сверить счёт не с чем, без НДС хотя бы
+ * одних реквизитов ни один счёт не заполнится (vatForInvoice). Сохранять настройки это не мешает.
+ */
 export function settingsProblems(settings: AppSettings): string[] {
   const problems: string[] = []
   if (!settings.currency) problems.push('Не выбрана валюта ставок')
+  if (!settings.vat.length) problems.push('Не задан НДС ни для одних «Реквизитов вашей компании»')
   return problems
 }

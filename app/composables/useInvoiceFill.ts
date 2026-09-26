@@ -3,10 +3,10 @@
 // ПРАВАМИ СОТРУДНИКА через фрейм: видит только свои задачи, пишет только в доступный ему счёт.
 // Методы и их поля — docs/REST_METHODS.md; методы задач, которые есть в REST v3, — через v3.
 
-import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
+import { buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, buildRows, rowsTotal, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
-import { invoiceProblems, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
+import { applyNames, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
   crmBindingCodes,
@@ -18,6 +18,7 @@ import {
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
+import { vatTotals, type VatRate } from '#shared/domain/vat'
 import { B24CallError, type BatchCall } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
 import {
@@ -58,6 +59,10 @@ export function useInvoiceFill() {
   const problems = ref<string[]>([])
   /** Пересчёт в валюту счёта последней сборки: его предупреждение показываем и после записи. */
   const conversion = ref<CurrencyConversion | null>(null)
+  /** НДС последней сборки: ставка и чьи это реквизиты — для предпросмотра. */
+  const vat = ref<{ rate: VatRate, company: string } | null>(null)
+  /** Счёт, по которому собраны строки: перед записью сверяемся, не поменяли ли его в карточке. */
+  const collectedFrom = ref<InvoiceInfo | null>(null)
   const step = ref<Step>('idle')
   const error = ref('')
   /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
@@ -66,7 +71,8 @@ export function useInvoiceFill() {
   const writing = ref<WriteMode | null>(null)
 
   const canWrite = computed(() => step.value === 'preview' && !!result.value && result.value.errors.length === 0 && result.value.rows.length > 0)
-  const total = computed(() => rowsTotal(result.value?.rows ?? []))
+  /** Итоги предпросмотра — как их посчитает портал после записи (vatTotals). */
+  const totals = computed(() => vatTotals(result.value?.rows ?? []))
 
   /**
    * Все позиции счёта, постранично (paging.ts, покрыт тестом): у счёта их может быть больше
@@ -118,6 +124,7 @@ export function useInvoiceFill() {
     problems.value = []
     notice.value = ''
     conversion.value = null
+    vat.value = null
     step.value = 'idle'
   }
 
@@ -190,14 +197,26 @@ export function useInvoiceFill() {
   }
 
   async function collect(source: TaskSource, mode: FillMode): Promise<void> {
-    const inv = invoice.value
-    if (!inv) return
+    const opened = invoice.value
+    if (!opened) return
     step.value = 'collecting'
     error.value = ''
     notice.value = ''
     result.value = null
     conversion.value = null
-    problems.value = invoiceProblems(inv, settings.value, source)
+    vat.value = null
+    // Счёт перечитываем: окно могло быть открыто давно, а реквизиты (ставка НДС), валюту или сделку
+    // за это время поменяли в карточке — строки и запись должны идти по счёту как он есть сейчас.
+    try {
+      await readInvoice(opened.id)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      step.value = 'idle'
+      return
+    }
+    const inv = invoice.value ?? opened
+    const check = checkInvoice(inv, settings.value, source)
+    problems.value = check.problems
     if (!problems.value.length) {
       try {
         conversion.value = await conversionFor(inv)
@@ -205,10 +224,14 @@ export function useInvoiceFill() {
         problems.value = [e instanceof Error ? e.message : String(e)]
       }
     }
-    if (problems.value.length) {
+    // Нет ставки НДС — это уже причина в problems; проверка `ok` здесь только сужает тип.
+    const vatChoice = check.vat
+    if (problems.value.length || !vatChoice.ok) {
       step.value = 'idle'
       return
     }
+    vat.value = { rate: vatChoice.rate, company: vatChoice.company }
+    collectedFrom.value = inv
     try {
       tasks.value = await fetchTasks(source, inv)
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
@@ -226,6 +249,7 @@ export function useInvoiceFill() {
         rates: rates.value,
         settings: settings.value,
         conversion: conversion.value,
+        vatRate: vatChoice.rate,
         userNames
       })
 
@@ -278,6 +302,22 @@ export function useInvoiceFill() {
     writing.value = mode
     error.value = ''
     notice.value = ''
+    // Перечитываем счёт перед записью: реквизиты (ставка НДС), валюту или сделку могли сменить в
+    // карточке, пока смотрели предпросмотр, — тогда строки не те, и писать их нельзя.
+    let stale: string | null
+    try {
+      await readInvoice(inv.id)
+      stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
+    } catch (e) {
+      stale = e instanceof Error ? e.message : String(e)
+    }
+    if (stale) {
+      writing.value = null
+      error.value = stale
+      result.value = null
+      step.value = 'idle'
+      return
+    }
     const draft = result.value.rows
     const before = existing.value.length
     const planned = draft.length
@@ -311,8 +351,12 @@ export function useInvoiceFill() {
     step.value = 'done'
   }
 
-  /** Консультация: ответ BitrixGPT по промпту из настроек → дело в счёте. */
-  async function consult(promptId: string): Promise<{ title: string, text: string }> {
+  /**
+   * Консультация: ответ BitrixGPT по промпту из настроек → закрытое дело в счёте (activity.ts).
+   * Запись в ленту не удалась — ответ всё равно возвращаем (он уже получен и оплачен лимитом),
+   * с причиной в `notSaved`: сотрудник увидит ответ и узнает, что в ленте его нет.
+   */
+  async function consult(promptId: string): Promise<{ title: string, text: string, notSaved?: string }> {
     const inv = invoice.value
     if (!inv) throw new Error('Счёт не загружен')
     // Урезаем до того, что сервер отдаст модели: большой счёт иначе упёрся бы в предел тела запроса.
@@ -322,15 +366,16 @@ export function useInvoiceFill() {
       tasks: tasks.value.map(t => ({ id: t.id, title: t.title, description: t.description.slice(0, 1000), hours: Math.round(t.timeSpentInLogs / 36) / 100 }))
     })
     const answer = await post<{ title: string, text: string }>('/api/ai/consult', { promptId, context })
-    const res = await b24.call<{ id?: unknown } | number>('crm.activity.todo.add', buildConsultActivity({
-      invoiceId: inv.id, promptTitle: answer.title, answer: answer.text, responsibleId: userId.value, nowMs: Date.now()
-    }))
-    const activityId = typeof res === 'number' ? res : Number((res as { id?: unknown })?.id)
-    if (activityId > 0) {
-      await b24.call('crm.activity.update', { id: activityId, fields: { DESCRIPTION_TYPE: DESCRIPTION_TYPE_BB } }).catch(() => undefined)
+    // Одна закрытая запись в ленте в виде ответа ИИ (activity.ts). Только из фрейма: вебхук этот
+    // метод не принимает, и дело пишется правами сотрудника.
+    const activity = buildConsultActivity({ invoiceId: inv.id, promptTitle: answer.title, answer: answer.text, responsibleId: userId.value })
+    try {
+      await b24.call('crm.activity.configurable.add', { ...activity })
+    } catch (e) {
+      return { ...answer, notSaved: e instanceof Error ? e.message : String(e) }
     }
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, step, error, notice, writing, canWrite, total, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, write, consult }
 }

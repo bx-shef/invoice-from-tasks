@@ -1,13 +1,20 @@
 <script setup lang="ts">
 // Предпросмотр строк счёта и проблем. Ничего не пишет — только показывает, что будет записано.
 import type { DraftRow, FillIssue } from '#shared/domain/fill'
+import type { PriceMode } from '#shared/domain/settings'
 import { formatDuration, formatRuDate } from '#shared/domain/time'
+import { netDrift, vatLabel, type VatRate, type VatTotals } from '#shared/domain/vat'
 
 const props = defineProps<{
   rows: DraftRow[]
   errors: FillIssue[]
   warnings: FillIssue[]
-  total: number
+  /** Итоги как их посчитает портал: без НДС, НДС, всего (vatTotals). */
+  totals: VatTotals
+  /** НДС счёта и чьи это «Реквизиты вашей компании». */
+  vat: { rate: VatRate, company: string } | null
+  /** Как строки лягут в счёт: цена часа и часы или сумма и 1. */
+  priceMode: PriceMode
   /** Валюта счёта — в ней цены и суммы. */
   currency: string
   /** Валюта ставок; отличается от валюты счёта — колонка «Ставка» подписана ею (цены пересчитаны). */
@@ -20,6 +27,11 @@ const props = defineProps<{
 const money = (v: number) => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const hours = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 4 })
 const markupLabel = (row: DraftRow) => row.markupSource === 'tag' ? `#${row.markupTag ?? ''}` : 'на всё'
+const placement = computed(() => props.priceMode === 'sum'
+  ? 'в счёт: цена — сумма строки, количество — 1'
+  : 'в счёт: цена — цена часа, количество — часы')
+const drift = computed(() => netDrift(props.rows.map(r => r.sum), props.totals))
+const vatText = computed(() => props.vat ? `${vatLabel(props.vat.rate)} — реквизиты «${props.vat.company}»` : '')
 
 function taskHref(taskId: number): string {
   return `${props.origin}/company/personal/user/0/tasks/task/view/${taskId}/`
@@ -83,6 +95,12 @@ function taskHref(taskId: number): string {
       v-if="rows.length"
       class="overflow-x-auto"
     >
+      <p
+        class="text-xs opacity-70 mb-2"
+        data-testid="fill-placement"
+      >
+        Цены — без НДС, налог сверху; {{ placement }}
+      </p>
       <table
         class="w-full text-sm"
         data-testid="fill-preview"
@@ -107,10 +125,10 @@ function taskHref(taskId: number): string {
               Наценка
             </th>
             <th class="py-2 pr-3 font-medium text-right">
-              Цена
+              Цена часа
             </th>
             <th class="py-2 font-medium text-right">
-              Сумма
+              Сумма без НДС
             </th>
           </tr>
         </thead>
@@ -136,7 +154,7 @@ function taskHref(taskId: number): string {
               class="py-2 pr-3 text-right whitespace-nowrap"
               :title="`Списано ${formatDuration(row.seconds)}, к оплате ${formatDuration(row.roundedSeconds)}`"
             >
-              {{ hours(row.quantity) }}
+              {{ hours(row.hours) }}
             </td>
             <td
               class="py-2 pr-3 text-right whitespace-nowrap"
@@ -148,7 +166,7 @@ function taskHref(taskId: number): string {
               {{ row.markupPercent }}% <span class="opacity-60">({{ markupLabel(row) }})</span>
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ money(row.price) }}
+              {{ money(row.hourPrice) }}
             </td>
             <td class="py-2 text-right whitespace-nowrap">
               {{ money(row.sum) }}
@@ -156,7 +174,36 @@ function taskHref(taskId: number): string {
           </tr>
         </tbody>
         <tfoot>
-          <tr class="border-t border-(--ui-color-divider-less) font-medium">
+          <tr class="border-t border-(--ui-color-divider-less)">
+            <td
+              colspan="6"
+              class="py-2 pr-3 text-right"
+            >
+              Без НДС
+            </td>
+            <td
+              class="py-2 text-right whitespace-nowrap"
+              data-testid="fill-net"
+            >
+              {{ money(totals.net) }}
+            </td>
+          </tr>
+          <tr>
+            <td
+              colspan="6"
+              class="py-1 pr-3 text-right"
+              data-testid="fill-vat-label"
+            >
+              {{ vatText }}
+            </td>
+            <td
+              class="py-1 text-right whitespace-nowrap"
+              data-testid="fill-vat"
+            >
+              {{ money(totals.vat) }}
+            </td>
+          </tr>
+          <tr class="font-medium">
             <td
               colspan="6"
               class="py-2 pr-3 text-right"
@@ -167,11 +214,19 @@ function taskHref(taskId: number): string {
               class="py-2 text-right whitespace-nowrap"
               data-testid="fill-total"
             >
-              {{ money(total) }} {{ currency }}
+              {{ money(totals.total) }} {{ currency }}
             </td>
           </tr>
         </tfoot>
       </table>
+      <p
+        v-if="drift"
+        class="text-xs opacity-70 mt-1 text-right"
+        data-testid="fill-drift"
+      >
+        Сумма строк без НДС — {{ money(totals.net + drift) }}: портал считает налог по каждой строке, а итог — одной
+        суммой, поэтому «Без НДС» отличается на {{ money(Math.abs(drift)) }}. В счёте будут цифры как здесь внизу.
+      </p>
     </div>
   </div>
 </template>

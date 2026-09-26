@@ -72,3 +72,13 @@ describe('normalizePercent', () => {
     expect(normalizePercent(10_001)).toBeNull()
   })
 })
+
+describe('applyMarkup — копейки как у портала (money.ts)', () => {
+  it('половина копейки после наценки — вверх, даже когда двоичная дробь чуть меньше', () => {
+    // 2,01 + 150% = 5,025 → 5,03. Прежнее Math.round(2,01 × 250) / 100 давало 5,02: 502,4999… в double.
+    expect(Math.round(2.01 * 250) / 100).toBe(5.02)
+    expect(applyMarkup(2.01, 150)).toBe(5.03)
+    expect(applyMarkup(0.7, 65)).toBe(1.16)
+    expect(applyMarkup(1.14, 75)).toBe(2)
+  })
+})

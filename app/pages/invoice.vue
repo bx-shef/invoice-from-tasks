@@ -17,7 +17,7 @@ const source = ref<TaskSource>('deal')
 const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
-const consultAnswer = ref<{ title: string, text: string } | null>(null)
+const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | null>(null)
 
 const sourceItems = [
   { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
@@ -72,7 +72,8 @@ async function consult(promptId: string) {
   consultAnswer.value = null
   try {
     consultAnswer.value = await fill.consult(promptId)
-    toast.add({ title: 'Ответ сохранён делом в счёте', color: 'air-primary-success' })
+    if (consultAnswer.value.notSaved) toast.add({ title: 'Ответ получен, но не сохранился в ленте счёта', description: consultAnswer.value.notSaved, color: 'air-primary-warning' })
+    else toast.add({ title: 'Ответ сохранён в ленте счёта', color: 'air-primary-success' })
   } catch (e) {
     toast.add({ title: 'Консультация не удалась', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
@@ -146,7 +147,7 @@ async function consult(promptId: string) {
               />
               <span class="text-sm opacity-70">
                 Названия: {{ app.settings.value.naming === 'ai' ? 'BitrixGPT' : 'как есть из задач' }} · округление:
-                {{ roundingText }}
+                {{ roundingText }} · в счёт: {{ app.settings.value.priceMode === 'sum' ? 'сумма строки × 1' : 'цена часа × часы' }}
               </span>
             </div>
           </template>
@@ -165,7 +166,9 @@ async function consult(promptId: string) {
           :rows="result.rows"
           :errors="result.errors"
           :warnings="result.warnings"
-          :total="fill.total.value"
+          :totals="fill.totals.value"
+          :vat="fill.vat.value"
+          :price-mode="result.priceMode"
           :currency="fill.invoice.value?.currencyId ?? ''"
           :rate-currency="app.settings.value.currency"
           :origin="origin"
@@ -220,7 +223,7 @@ async function consult(promptId: string) {
             </h2>
           </template>
           <p class="text-sm opacity-70 mb-3">
-            Промпт получает данные счёта{{ fill.tasks.value.length ? ' и найденных задач' : '' }}; ответ сохранится делом в счёте.
+            Промпт получает данные счёта{{ fill.tasks.value.length ? ' и найденных задач' : '' }}; ответ сохранится в ленте счёта.
           </p>
           <div class="flex flex-wrap gap-2">
             <B24Button
@@ -233,17 +236,13 @@ async function consult(promptId: string) {
               @click="consult(p.id)"
             />
           </div>
-          <div
+          <InvoiceConsultAnswer
             v-if="consultAnswer"
-            class="mt-4 space-y-1"
-          >
-            <h3 class="font-medium">
-              {{ consultAnswer.title }}
-            </h3>
-            <p class="whitespace-pre-line text-sm">
-              {{ consultAnswer.text }}
-            </p>
-          </div>
+            :title="consultAnswer.title"
+            :text="consultAnswer.text"
+            :not-saved="consultAnswer.notSaved"
+            class="mt-4"
+          />
         </B24Card>
       </template>
     </div>
