@@ -41,6 +41,12 @@ describe('parseAnswer — ответ на блоки', () => {
     expect(blocks[0]!.kind === 'ol' && blocks[0]!.items.map(x => x.sub.length)).toEqual([1, 1, 0])
   })
 
+  it('семь решёток — не заголовок; маркер без пробела — не пункт («-5°C»); смена вида списка — два списка', () => {
+    expect(parseAnswer('####### x')).toEqual([{ kind: 'p', lines: [[t('####### x')]] }])
+    expect(parseAnswer('-5°C ночью')).toEqual([{ kind: 'p', lines: [[t('-5°C ночью')]] }])
+    expect(parseAnswer('- a\n1. b').map(x => x.kind)).toEqual(['ul', 'ol'])
+  })
+
   it('«Итоги по C#» — «#» на конце остаётся; закрывающие «##» через пробел убираются', () => {
     expect(parseAnswer('## Итоги по C#')).toEqual([{ kind: 'h', spans: [t('Итоги по C#')] }])
     expect(parseAnswer('### Итог ###')).toEqual([{ kind: 'h', spans: [t('Итог')] }])

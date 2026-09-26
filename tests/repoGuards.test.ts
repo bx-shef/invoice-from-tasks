@@ -125,9 +125,10 @@ describe('шаблоны Vue', () => {
 
   // То же, но и в быстром `pnpm test`, а не только в typecheck: каждый компонент в <template> страниц и
   // компонентов — тот, что Nuxt зарегистрировал (.nuxt/components.d.ts пишет nuxt prepare при установке
-  // зависимостей), встроенный в Vue или импортированный в самом файле (`import CopilotIcon from …` —
-  // иконки b24icons). Компонент — тег с большой буквы или с дефисом (fill-preview → FillPreview);
-  // обычные теги HTML дефиса не содержат.
+  // зависимостей), встроенный в Vue или импортированный в самом файле как компонент: иконка
+  // `@bitrix24/b24icons-vue/…` или файл `.vue` (любой другой импорт с большой буквы — не компонент, и
+  // опечатка в теге не должна проходить). Компонент — тег с большой буквы или с дефисом
+  // (fill-preview → FillPreview); обычные теги HTML дефиса не содержат.
   it('каждый компонент в шаблонах зарегистрирован Nuxt под этим именем', () => {
     const dts = join(ROOT, '.nuxt/components.d.ts')
     expect(existsSync(dts), 'нет .nuxt/components.d.ts — запустите pnpm install (nuxt prepare)').toBe(true)
@@ -140,8 +141,8 @@ describe('шаблоны Vue', () => {
     for (const file of sources(join(ROOT, 'app')).filter(f => f.endsWith('.vue'))) {
       const text = readFileSync(file, 'utf8')
       const template = text.slice(text.indexOf('<template>'), text.lastIndexOf('</template>'))
-      // Импорт по умолчанию в <script> файла: `import CopilotIcon from '…'`.
-      const imported = new Set([...text.matchAll(/^import\s+([A-Z]\w*)\s+from\s/gm)].map(m => m[1]))
+      // Импорт компонента по умолчанию в <script> файла: иконка b24icons или .vue.
+      const imported = new Set([...text.matchAll(/^import\s+([A-Z]\w*)\s+from\s+['"]((?:@bitrix24\/b24icons-vue\/[^'"]+)|[^'"]+\.vue)['"]/gm)].map(m => m[1]))
       for (const m of template.matchAll(/<([A-Z][A-Za-z0-9]*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s/>]/g)) {
         const name = pascal(m[1]!)
         if (!registered.has(name) && !imported.has(name)) unknown.push(`${relative(ROOT, file)}: <${m[1]}>`)
