@@ -11,18 +11,19 @@
 import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
 import { currencyConversion, parseCurrencies, type CurrencyConversion, type PortalCurrency } from '#shared/domain/currency'
-import { buildRows, rowsTotals, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
+import { buildRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, type InvoiceInfo } from '#shared/domain/invoice'
 import { normalizeTag, type MarkupSettings } from '#shared/domain/markup'
 import type { RateEntry } from '#shared/domain/rates'
 import { defaultSettings, type AppSettings, type PriceMode } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import type { RoundingDirection, RoundingStep } from '#shared/domain/time'
-import { grossPrice, roundMoney, vatForInvoice, type CompanyVat } from '#shared/domain/vat'
+import { roundMoney } from '#shared/domain/money'
+import { grossPrice, vatForInvoice, vatTotals, type CompanyVat } from '#shared/domain/vat'
 import { addRowCall, replaceRowsCall } from '~/utils/invoiceRequests'
 import { describeWrite } from '~/utils/writeOutcome'
 import { connectPortal, type Portal } from './lib/portal'
-import { fetchEntries, fetchTasks, readInvoice } from './lib/flow'
+import { fetchEntries, fetchTasks, readInvoice, readInvoiceRaw } from './lib/flow'
 
 const env = inject('smokeEnv')
 const fx = inject('fixture')
@@ -91,9 +92,10 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
 
   /** Налоговые поля позиций и суммы счёта — то, чего нет в разборе приложения (он их не читает). */
   async function taxOf(invoiceId: number): Promise<{ rows: Array<Record<string, unknown>>, opportunity: number, taxValue: number }> {
-    const list = await portal.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', { filter: { '=ownerType': 'SI', '=ownerId': invoiceId }, order: { id: 'asc' } })
-    const item = await portal.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: 31, id: invoiceId })
-    return { rows: list.productRows ?? [], opportunity: Number(item.item?.opportunity), taxValue: Number(item.item?.taxValue) }
+    // Те же запросы и листание, что у страницы (readInvoiceRaw → invoiceRequests.ts).
+    const { item, rows } = await readInvoiceRaw(portal, invoiceId)
+    const o = (item as { item?: Record<string, unknown> })?.item ?? {}
+    return { rows, opportunity: Number(o.opportunity), taxValue: Number(o.taxValue) }
   }
 
   beforeAll(async () => {
@@ -137,7 +139,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       expect(row).toMatchObject({ seconds, rateDate: date, baseRate: base, markupPercent: percent })
       expect(row.roundedSeconds).toBe(expectedSeconds(seconds, v.step, v.direction))
       expect(row.hours).toBe(Math.round(row.roundedSeconds / 3600 * 10_000) / 10_000)
-      expect(row.hourPrice).toBe(Math.round(base * factor * (100 + percent)) / 100)
+      expect(row.hourPrice).toBe(roundMoney(base * factor * (100 + percent) / 100))
       expect(row.sum).toBe(roundMoney(row.hourPrice * row.hours))
       expect([row.price, row.quantity]).toEqual(v.priceMode === 'sum' ? [row.sum, 1] : [row.hourPrice, row.hours])
       expect(row.taxRate).toBe(VAT_RATE)
@@ -202,7 +204,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const tax = await taxOf(fx!.invoices.usd)
       // Цену без НДС портал выделил сам — это цена строки предпросмотра.
       expect(tax.rows.map(r => [Number(r.priceExclusive), Number(r.taxRate), r.taxIncluded])).toEqual(built.rows.map(r => [r.price, VAT_RATE, 'N']))
-      const totals = rowsTotals(built.rows)
+      const totals = vatTotals(built.rows)
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
       expect(describeWrite({ mode: 'replace', planned: built.rows.length, before: 0, after: after.rows.length, error: null }).kind).toBe('done')
       replaced = built.rows
@@ -225,7 +227,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       expect(Math.min(...after.rows.slice(before.rows.length).map(r => r.sort))).toBeGreaterThan(sortStart)
       expect(after.rows.slice(before.rows.length).map(r => [r.price, r.quantity])).toEqual(built.rows.map(r => [grossPrice(r.sum, VAT_RATE), 1]))
       const tax = await taxOf(fx!.invoices.usd)
-      const totals = rowsTotals([...replaced, ...built.rows])
+      const totals = vatTotals([...replaced, ...built.rows])
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
       expect(describeWrite({ mode: 'append', planned: built.rows.length, before: before.rows.length, after: after.rows.length, error: null }).kind).toBe('done')
     })

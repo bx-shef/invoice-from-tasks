@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { crmBindingCodes, listRows, parseTask, parseTaskTags, parseTimeEntry, tasksBoundTo } from '#shared/domain/tasks'
-import { parseInvoice, invoiceProblems } from '#shared/domain/invoice'
+import { checkInvoice, invoiceChangedSince, parseInvoice, invoiceProblems } from '#shared/domain/invoice'
 import { defaultSettings } from '#shared/domain/settings'
 
 describe('разбор задач', () => {
@@ -107,5 +107,24 @@ describe('счёт', () => {
     expect(invoiceProblems(unknown, { ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 20, title: 'А', rate: 20 }] }, 'invoice'))
       .toEqual(['Для «Реквизитов вашей компании» #21 в настройках приложения не задан НДС — администратор задаёт его в «Настройки → НДС»'])
     expect(invoiceProblems(unknown, { ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 21, title: '', rate: null }] }, 'invoice')).toEqual([])
+  })
+})
+
+describe('счёт: одна проверка и сверка перед записью', () => {
+  const base = parseInvoice({ item: { id: 8, currencyId: 'BYN', parentId2: 5, mycompanyId: 20 } })!
+
+  it('checkInvoice отдаёт причины и ставку одним разбором — они не расходятся', () => {
+    const vat = [{ companyId: 20, title: 'А', rate: 20 }]
+    expect(checkInvoice(base, { ...defaultSettings(), currency: 'BYN', vat }, 'deal')).toEqual({ problems: [], vat: { ok: true, rate: 20, company: 'А' } })
+    const bad = checkInvoice(base, { ...defaultSettings(), currency: 'BYN' }, 'deal')
+    expect(bad.vat.ok).toBe(false)
+    expect(bad.problems).toEqual([!bad.vat.ok && bad.vat.problem])
+  })
+
+  it('invoiceChangedSince: реквизиты, валюта, сделка — повод собрать заново; прочее — нет', () => {
+    expect(invoiceChangedSince(base, { ...base, title: 'Новое название', opportunity: 999 })).toBeNull()
+    expect(invoiceChangedSince(base, { ...base, myCompanyId: 22 })).toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании» — соберите строки заново')
+    expect(invoiceChangedSince(base, { ...base, myCompanyId: null, currencyId: 'USD', dealId: null }))
+      .toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании», валюта, сделка — соберите строки заново')
   })
 })

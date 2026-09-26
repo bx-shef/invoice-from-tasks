@@ -7,6 +7,8 @@
 // только для чтения — портал выделяет её сам: price / (1 + ставка). Поэтому «цена без НДС» уходит
 // как price = цена × (1 + ставка), taxRate = ставка, taxIncluded = N.
 
+import { roundMoney } from './money'
+
 /** Ставка НДС в процентах; `null` — «Без НДС» (налоговые поля в строку не пишутся). */
 export type VatRate = number | null
 
@@ -40,6 +42,10 @@ export function vatLabel(rate: VatRate): string {
   return rate === null ? 'Без НДС' : `НДС ${String(rate).replace('.', ',')}%`
 }
 
+/**
+ * Ставка счёта: `ok` — ставка (или «Без НДС») и название реквизитов для предпросмотра; иначе —
+ * причина остановки для красного блока.
+ */
 export type VatChoice
   = | { ok: true, rate: VatRate, company: string }
     | { ok: false, problem: string }
@@ -61,14 +67,6 @@ export function vatForInvoice(companies: readonly CompanyVat[], myCompanyId: num
 }
 
 /**
- * Округление до копеек как у портала: 135,795 → 135,80. `Math.round(x * 100)` дал бы 135,79 —
- * 135,795 × 100 в двоичной дроби равно 13579,4999…; портал (PHP `round`) такого сдвига не делает.
- */
-export function roundMoney(value: number): number {
-  return Math.round(Number((value * 100).toPrecision(15))) / 100
-}
-
-/**
  * Значение поля `price` строки: цена С налогом. Не округляется до копеек — портал хранит её как
  * есть и выделяет цену без НДС точно (замер: 120,036 → 100,03); округлённая 120,04 дала бы
  * 100,0333… и расхождение на копейку в сумме строки.
@@ -81,14 +79,16 @@ export function grossPrice(net: number, rate: VatRate): number {
 export interface VatTotals {
   /** Сумма без НДС. */
   net: number
+  /** Налог: по каждой строке до копеек, затем сумма — как `taxValue` счёта у портала. */
   vat: number
   /** Итог счёта — то, что портал запишет в сумму счёта (`opportunity`). */
   total: number
 }
 
 /**
- * Итоги как у портала (замер 2026-09-26, счёт из семи строк с разными ставками: сумма и налог
- * совпали до копейки): итог — сумма «цена с НДС × количество» по всем строкам, округлённая один
+ * Итоги как у портала (замер 2026-09-26: счёт из девяти строк с разными ставками, количествами и
+ * копейками и восемь строк на границе половины копейки — сумма и налог совпали до копейки,
+ * tests/vat.test.ts): итог — сумма «цена с НДС × количество» по всем строкам, округлённая один
  * раз; НДС — по строкам, каждая округлена до копеек; без НДС — разница.
  */
 export function vatTotals(lines: ReadonlyArray<{ price: number, quantity: number, taxRate: VatRate }>): VatTotals {
@@ -97,15 +97,27 @@ export function vatTotals(lines: ReadonlyArray<{ price: number, quantity: number
   for (const line of lines) {
     const lineGross = grossPrice(line.price, line.taxRate) * line.quantity
     gross += lineGross
-    vat += roundMoney(lineGross - line.price * line.quantity)
+    // Налог строки — от цены без НДС: разность «с НДС − без НДС» в double теряет половину копейки
+    // (2,75 × 1,5 при 20%: 0,82499… вместо 0,825), а портал на этой строке дал 0,83 (замер).
+    if (line.taxRate !== null) vat += roundMoney(line.price * line.quantity * line.taxRate / 100)
   }
   const total = roundMoney(gross)
   const tax = roundMoney(vat)
   return { net: roundMoney(total - tax), vat: tax, total }
 }
 
+/**
+ * На сколько сумма строк без НДС (каждая округлена до копеек) расходится с «Без НДС» портала
+ * (итог минус налог по строкам). Копейки неизбежны: портал округляет налог по строкам, а итог —
+ * одной суммой; предпросмотр показывает цифры портала и объясняет разницу, а не прячет её.
+ */
+export function netDrift(rowSums: readonly number[], totals: VatTotals): number {
+  return roundMoney(rowSums.reduce((sum, v) => sum + v, 0) - totals.net)
+}
+
 /** Ставка НДС портала для выбора в настройках. */
 export interface PortalVat {
+  /** Название ставки в портале («НДС 20%»); пустое — подпись по ставке. */
   name: string
   rate: VatRate
 }
@@ -131,7 +143,9 @@ export function parseVatRates(result: unknown): PortalVat[] {
 
 /** «Моя компания» CRM: `crm.item.list` с `entityTypeId = 4` и `isMyCompany = Y`. */
 export interface MyCompany {
+  /** ID компании CRM — то же, что `mycompanyId` счёта. */
   id: number
+  /** Название как в портале, до {@link MAX_COMPANY_TITLE} символов; может быть пустым. */
   title: string
 }
 

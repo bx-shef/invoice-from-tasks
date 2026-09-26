@@ -19,26 +19,35 @@ const loadError = ref('')
 /** Справка портала: где заводятся «Реквизиты вашей компании» (ссылка из документации счетов). */
 const HELP_URL = 'https://helpdesk.bitrix24.ru/open/15987420/'
 
+/** Список «моих компаний» прочитан: только тогда запись настроек без компании в портале — «нет в портале». */
+const companiesKnown = ref(false)
+
 onMounted(async () => {
+  // Ставки и реквизиты — независимо: сбой одного не прячет другое. Без ставок портала вкладка
+  // работает на «Без НДС» и сохранённых ставках.
+  const vats = catalog.vatRates().then((list) => {
+    portalVats.value = list
+  }, () => undefined)
   try {
-    const [list, vats] = await Promise.all([
-      myCompanies.list(),
-      // Без ставок портала вкладка всё равно работает: «Без НДС» и сохранённые ставки остаются.
-      catalog.vatRates().catch(() => [] as PortalVat[])
-    ])
+    const list = await myCompanies.list()
     companies.value = list
-    portalVats.value = vats
+    companiesKnown.value = true
     const fresh = refreshVatTitles(settings.value.vat, list)
     if (fresh.some((v, i) => v !== settings.value.vat[i])) settings.value.vat = fresh
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
+    await vats
     loading.value = false
   }
 })
 
 const options = computed(() => vatOptions(portalVats.value, settings.value.vat))
-const rows = computed(() => vatRows(companies.value, settings.value.vat))
+// Пока список не прочитан (или не прочитался), сохранённые записи показываем как есть — без
+// пометки «нет в портале»: иначе администратор удалил бы рабочие ставки из-за сбоя сети.
+const rows = computed(() => companiesKnown.value
+  ? vatRows(companies.value, settings.value.vat)
+  : vatRows(settings.value.vat.map(s => ({ id: s.companyId, title: s.title })), settings.value.vat))
 const full = computed(() => settings.value.vat.length >= LIMITS.vatCompanies)
 
 function choose(company: MyCompany, value: unknown) {
@@ -61,7 +70,7 @@ function choose(company: MyCompany, value: unknown) {
       :description="loadError"
     />
     <B24Alert
-      v-else-if="!loading && !companies.length"
+      v-else-if="!loading && companiesKnown && !companies.length"
       color="air-primary-warning"
       title="В портале нет «Реквизитов вашей компании»"
       data-testid="vat-no-companies"

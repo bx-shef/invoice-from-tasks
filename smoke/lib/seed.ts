@@ -2,8 +2,7 @@
 // что прогоны не мешают друг другу и старые данные не влияют на расчёт. Ничего не удаляется
 // (решение владельца: тестовые данные остаются для ручного просмотра).
 
-import { parseMyCompanies } from '#shared/domain/vat'
-import { myCompaniesCall } from '~/utils/invoiceRequests'
+import { listMyCompanies } from './flow'
 import type { Portal } from './portal'
 
 /**
@@ -76,8 +75,8 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
 }
 
 async function smokeMyCompany(portal: Portal): Promise<number> {
-  const { method, params } = myCompaniesCall(0)
-  const found = parseMyCompanies(await portal.call(method, params)).find(c => c.title === SMOKE_MY_COMPANY)
+  // Весь список, а не первая страница: иначе на портале с 50+ реквизитами каждый прогон создавал бы новые.
+  const found = (await listMyCompanies(portal)).find(c => c.title === SMOKE_MY_COMPANY)
   return found?.id ?? addItem(portal, 4, { title: SMOKE_MY_COMPANY, isMyCompany: 'Y' })
 }
 

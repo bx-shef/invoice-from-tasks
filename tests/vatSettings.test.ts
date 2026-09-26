@@ -16,6 +16,12 @@ describe('vatOptions — варианты ставки', () => {
     ])
   })
 
+  it('«Без НДС» есть всегда — даже когда у портала единственная ставка (как на тестовом портале)', () => {
+    const values = vatOptions([{ name: 'НДС 20%', rate: 20 }], []).map(o => o.value)
+    expect(values).toContain(VAT_NONE)
+    expect(vatOptions([], []).map(o => o.value)).toEqual([VAT_UNSET, VAT_NONE])
+  })
+
   it('сохранённая ставка, которой больше нет в портале, остаётся в списке с пометкой', () => {
     const options = vatOptions([{ name: 'НДС 20%', rate: 20 }], [{ companyId: 20, title: 'А', rate: 10 }])
     expect(options.at(-1)).toEqual({ label: 'НДС 10% (нет в ставках портала)', value: '10' })

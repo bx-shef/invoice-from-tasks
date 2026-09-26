@@ -5,8 +5,8 @@
 
 import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, buildRows, rowsTotals, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
-import { invoiceProblems, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
+import { applyNames, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
   crmBindingCodes,
@@ -18,7 +18,7 @@ import {
   type TaskInfo,
   type TimeEntry
 } from '#shared/domain/tasks'
-import { vatForInvoice, type VatRate } from '#shared/domain/vat'
+import { vatTotals, type VatRate } from '#shared/domain/vat'
 import { B24CallError, type BatchCall } from '~/utils/b24Batch'
 import { chunk, mapLimit } from '~/utils/concurrency'
 import {
@@ -61,6 +61,8 @@ export function useInvoiceFill() {
   const conversion = ref<CurrencyConversion | null>(null)
   /** НДС последней сборки: ставка и чьи это реквизиты — для предпросмотра. */
   const vat = ref<{ rate: VatRate, company: string } | null>(null)
+  /** Счёт, по которому собраны строки: перед записью сверяемся, не поменяли ли его в карточке. */
+  const collectedFrom = ref<InvoiceInfo | null>(null)
   const step = ref<Step>('idle')
   const error = ref('')
   /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
@@ -69,7 +71,8 @@ export function useInvoiceFill() {
   const writing = ref<WriteMode | null>(null)
 
   const canWrite = computed(() => step.value === 'preview' && !!result.value && result.value.errors.length === 0 && result.value.rows.length > 0)
-  const totals = computed(() => rowsTotals(result.value?.rows ?? []))
+  /** Итоги предпросмотра — как их посчитает портал после записи (vatTotals). */
+  const totals = computed(() => vatTotals(result.value?.rows ?? []))
 
   /**
    * Все позиции счёта, постранично (paging.ts, покрыт тестом): у счёта их может быть больше
@@ -194,15 +197,26 @@ export function useInvoiceFill() {
   }
 
   async function collect(source: TaskSource, mode: FillMode): Promise<void> {
-    const inv = invoice.value
-    if (!inv) return
+    const opened = invoice.value
+    if (!opened) return
     step.value = 'collecting'
     error.value = ''
     notice.value = ''
     result.value = null
     conversion.value = null
     vat.value = null
-    problems.value = invoiceProblems(inv, settings.value, source)
+    // Счёт перечитываем: окно могло быть открыто давно, а реквизиты (ставка НДС), валюту или сделку
+    // за это время поменяли в карточке — строки и запись должны идти по счёту как он есть сейчас.
+    try {
+      await readInvoice(opened.id)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      step.value = 'idle'
+      return
+    }
+    const inv = invoice.value ?? opened
+    const check = checkInvoice(inv, settings.value, source)
+    problems.value = check.problems
     if (!problems.value.length) {
       try {
         conversion.value = await conversionFor(inv)
@@ -210,13 +224,14 @@ export function useInvoiceFill() {
         problems.value = [e instanceof Error ? e.message : String(e)]
       }
     }
-    // Ставка НДС — по реквизитам счёта; её отсутствие invoiceProblems уже превратил в остановку.
-    const vatChoice = vatForInvoice(settings.value.vat, inv.myCompanyId)
+    // Нет ставки НДС — это уже причина в problems; проверка `ok` здесь только сужает тип.
+    const vatChoice = check.vat
     if (problems.value.length || !vatChoice.ok) {
       step.value = 'idle'
       return
     }
     vat.value = { rate: vatChoice.rate, company: vatChoice.company }
+    collectedFrom.value = inv
     try {
       tasks.value = await fetchTasks(source, inv)
       const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
@@ -287,6 +302,22 @@ export function useInvoiceFill() {
     writing.value = mode
     error.value = ''
     notice.value = ''
+    // Перечитываем счёт перед записью: реквизиты (ставка НДС), валюту или сделку могли сменить в
+    // карточке, пока смотрели предпросмотр, — тогда строки не те, и писать их нельзя.
+    let stale: string | null
+    try {
+      await readInvoice(inv.id)
+      stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
+    } catch (e) {
+      stale = e instanceof Error ? e.message : String(e)
+    }
+    if (stale) {
+      writing.value = null
+      error.value = stale
+      result.value = null
+      step.value = 'idle'
+      return
+    }
     const draft = result.value.rows
     const before = existing.value.length
     const planned = draft.length

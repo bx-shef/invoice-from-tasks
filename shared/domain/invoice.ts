@@ -2,7 +2,7 @@
 
 import type { AppSettings } from './settings'
 import type { TaskSource } from './fill'
-import { vatForInvoice } from './vat'
+import { vatForInvoice, type VatChoice } from './vat'
 
 export interface InvoiceInfo {
   id: number
@@ -37,13 +37,14 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
 }
 
 /**
- * Что мешает заполнить счёт ещё до чтения задач. Пусто — можно продолжать.
+ * Что мешает заполнить счёт ещё до чтения задач (пусто — можно продолжать) и ставка НДС счёта —
+ * одним разбором, чтобы остановка и ставка не разошлись.
  *
  * Валюта счёта, отличная от валюты ставок, — НЕ помеха (#3): цены пересчитываются по курсу
  * портала (currency.ts), а если курса нет — остановка там же. Нет «Реквизитов вашей компании» или
  * ставки НДС для них — помеха (vat.ts): без неё не посчитать налог.
  */
-export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, source: TaskSource): string[] {
+export function checkInvoice(invoice: InvoiceInfo, settings: AppSettings, source: TaskSource): { problems: string[], vat: VatChoice } {
   const problems: string[] = []
   if (!settings.currency) problems.push('В настройках приложения не выбрана валюта ставок')
   if (source === 'deal' && invoice.dealId === null) {
@@ -51,7 +52,26 @@ export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, sou
   }
   const vat = vatForInvoice(settings.vat, invoice.myCompanyId)
   if (!vat.ok) problems.push(vat.problem)
-  return problems
+  return { problems, vat }
+}
+
+/** Только причины остановки — {@link checkInvoice} без выбранной ставки. */
+export function invoiceProblems(invoice: InvoiceInfo, settings: AppSettings, source: TaskSource): string[] {
+  return checkInvoice(invoice, settings, source).problems
+}
+
+/**
+ * Изменился ли счёт между сбором строк и записью так, что строки к нему больше не подходят:
+ * «Реквизиты вашей компании» (ставка НДС), валюта (пересчёт цен) или сделка (источник задач).
+ * Счёт в карточке открыт рядом с окном приложения — его могли поменять, пока смотрели предпросмотр.
+ * `null` — можно писать.
+ */
+export function invoiceChangedSince(collected: InvoiceInfo, now: InvoiceInfo): string | null {
+  const changed: string[] = []
+  if (collected.myCompanyId !== now.myCompanyId) changed.push('«Реквизиты вашей компании»')
+  if (collected.currencyId !== now.currencyId) changed.push('валюта')
+  if (collected.dealId !== now.dealId) changed.push('сделка')
+  return changed.length ? `После сбора строк в счёте изменились: ${changed.join(', ')} — соберите строки заново` : null
 }
 
 /** Существующая позиция счёта — нужна для режима «добавить» (сортировка) и контекста консультации. */

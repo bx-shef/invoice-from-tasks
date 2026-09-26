@@ -3,7 +3,7 @@
 import type { DraftRow, FillIssue } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import { formatDuration, formatRuDate } from '#shared/domain/time'
-import { vatLabel, type VatRate, type VatTotals } from '#shared/domain/vat'
+import { netDrift, vatLabel, type VatRate, type VatTotals } from '#shared/domain/vat'
 
 const props = defineProps<{
   rows: DraftRow[]
@@ -30,6 +30,7 @@ const markupLabel = (row: DraftRow) => row.markupSource === 'tag' ? `#${row.mark
 const placement = computed(() => props.priceMode === 'sum'
   ? 'в счёт: цена — сумма строки, количество — 1'
   : 'в счёт: цена — цена часа, количество — часы')
+const drift = computed(() => netDrift(props.rows.map(r => r.sum), props.totals))
 const vatText = computed(() => props.vat ? `${vatLabel(props.vat.rate)} — реквизиты «${props.vat.company}»` : '')
 
 function taskHref(taskId: number): string {
@@ -218,6 +219,14 @@ function taskHref(taskId: number): string {
           </tr>
         </tfoot>
       </table>
+      <p
+        v-if="drift"
+        class="text-xs opacity-70 mt-1 text-right"
+        data-testid="fill-drift"
+      >
+        Сумма строк без НДС — {{ money(totals.net + drift) }}: портал считает налог по каждой строке, а итог — одной
+        суммой, поэтому «Без НДС» отличается на {{ money(Math.abs(drift)) }}. В счёте будут цифры как здесь внизу.
+      </p>
     </div>
   </div>
 </template>

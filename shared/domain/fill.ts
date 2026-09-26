@@ -18,10 +18,11 @@
 import type { CurrencyConversion } from './currency'
 import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
 import { findRate, type RateEntry } from './rates'
-import type { AppSettings } from './settings'
+import type { AppSettings, PriceMode } from './settings'
 import type { TaskInfo, TimeEntry } from './tasks'
 import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
-import { grossPrice, roundMoney, vatTotals, type VatRate, type VatTotals } from './vat'
+import { roundMoney } from './money'
+import { grossPrice, type VatRate } from './vat'
 
 /** Тип заполнения: 1 — задача как учётная единица, 2 — записи затраченного времени. */
 export type FillMode = 'task' | 'time'
@@ -88,6 +89,8 @@ export interface FillIssue {
 
 export interface FillResult {
   rows: DraftRow[]
+  /** Режим, которым собраны строки, — подпись предпросмотра берёт его, а не текущие настройки. */
+  priceMode: PriceMode
   errors: FillIssue[]
   /** Не мешают записи, но о них стоит знать (пересчёт валюты, смена ставки, пропуски). */
   warnings: FillIssue[]
@@ -260,7 +263,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
  * Собирает строки счёта. Если `errors` не пуст — писать в счёт нельзя, даже частично.
  */
 export function buildRows(input: FillInput): FillResult {
-  const result: FillResult = { rows: [], errors: [], warnings: [] }
+  const result: FillResult = { rows: [], priceMode: input.settings.priceMode, errors: [], warnings: [] }
   if (input.tasks.length === 0) {
     result.errors.push({ taskId: 0, message: 'не найдено ни одной задачи' })
     return result
@@ -287,11 +290,6 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
     return { ...row, name }
   })
   return { rows: out, errors }
-}
-
-/** Итоги для предпросмотра — как их посчитает портал после записи (vatTotals). */
-export function rowsTotals(rows: DraftRow[]): VatTotals {
-  return vatTotals(rows)
 }
 
 /**

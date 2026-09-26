@@ -5,11 +5,12 @@ import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { parseCurrencies } from '#shared/domain/currency'
 import { normalizeTag } from '#shared/domain/markup'
 import { listRows, parseTask, parseTaskTags } from '#shared/domain/tasks'
-import { parseMyCompanies, parseVatRates } from '#shared/domain/vat'
-import { myCompaniesCall, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
+import { parseVatRates } from '#shared/domain/vat'
+import { COMPANY_ENTITY_TYPE_ID, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
+import { collectOffsetPages } from '~/utils/paging'
 import { parseMeasures } from '~/utils/measures'
 import { connectPortal, type Portal } from './lib/portal'
-import { fetchEntries, readInvoice } from './lib/flow'
+import { fetchEntries, listMyCompanies, readInvoice } from './lib/flow'
 
 const env = inject('smokeEnv')
 const fx = inject('fixture')
@@ -48,12 +49,15 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
   })
 
   it('crm.item.list isMyCompany = Y: реквизиты засева находятся, чужие компании — нет', async () => {
-    const { method, params } = myCompaniesCall(0)
-    const res = await portal.call<{ items?: Array<Record<string, unknown>> }>(method, params)
-    expect(parseMyCompanies(res).map(c => c.id)).toContain(fx!.myCompanyId)
-    const all = await portal.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', { entityTypeId: 4, select: ['id', 'isMyCompany'] })
-    const notMine = (all.items ?? []).filter(c => c.isMyCompany !== 'Y').map(c => Number(c.id))
-    for (const id of notMine) expect(parseMyCompanies(res).map(c => c.id)).not.toContain(id)
+    const mine = new Set((await listMyCompanies(portal)).map(c => c.id))
+    expect(mine.has(fx!.myCompanyId)).toBe(true)
+    // Все компании портала, постранично: фильтр не должен пропустить ни одну «не мою».
+    const all = await collectOffsetPages(async start => (await portal.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
+      entityTypeId: COMPANY_ENTITY_TYPE_ID, select: ['id', 'isMyCompany'], order: { id: 'asc' }, start
+    }))?.items ?? [], 50, 5000, 'слишком много компаний')
+    const notMine = all.filter(c => c.isMyCompany !== 'Y').map(c => Number(c.id))
+    expect(notMine.length).toBeGreaterThan(0)
+    for (const id of notMine) expect(mine.has(id)).toBe(false)
   })
 
   it('tasks.task.list: фильтр объектом, теги в том же списке (select TAGS)', async () => {

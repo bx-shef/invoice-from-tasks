@@ -167,7 +167,7 @@ async function consult(promptId: string) {
           :warnings="result.warnings"
           :totals="fill.totals.value"
           :vat="fill.vat.value"
-          :price-mode="app.settings.value.priceMode"
+          :price-mode="result.priceMode"
           :currency="fill.invoice.value?.currencyId ?? ''"
           :rate-currency="app.settings.value.currency"
           :origin="origin"

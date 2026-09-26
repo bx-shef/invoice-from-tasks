@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { applyNames, buildRows, clampName, MAX_ROW_NAME, rowsTotals, toProductRows, type FillInput } from '#shared/domain/fill'
+import { applyNames, buildRows, clampName, MAX_ROW_NAME, toProductRows, type FillInput } from '#shared/domain/fill'
 import { defaultSettings, type AppSettings } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
+import { vatTotals } from '#shared/domain/vat'
 
 function settings(patch: Partial<AppSettings> = {}): AppSettings {
   return { ...defaultSettings(), currency: 'RUB', ...patch }
@@ -175,7 +176,7 @@ describe('тип 2 — записи времени как строки', () => {
       ['e101', 'Вёрстка шапки', 1, 100, 100],
       ['e102', 'Правки по макету', 0.5, 80, 40]
     ])
-    expect(rowsTotals(rows)).toEqual({ net: 140, vat: 0, total: 140 })
+    expect(vatTotals(rows)).toEqual({ net: 140, vat: 0, total: 140 })
   })
 
   it('запись без описания — ошибка: строку нечем назвать', () => {
@@ -272,8 +273,11 @@ describe('как строка ложится в счёт (priceMode)', () => {
   })
 
   it('«сумма в цене» — цена = цена часа × часы, количество 1; часы и цена часа остаются для предпросмотра', () => {
-    const { rows } = buildRows(input({ settings: settings({ priceMode: 'sum' }) }))
-    expect(rows[0]).toMatchObject({ hours: 1.5, hourPrice: 200, price: 300, quantity: 1, sum: 300 })
+    const built = buildRows(input({ settings: settings({ priceMode: 'sum' }) }))
+    expect(built.rows[0]).toMatchObject({ hours: 1.5, hourPrice: 200, price: 300, quantity: 1, sum: 300 })
+    // Режим сборки едет вместе со строками — подпись предпросмотра не зависит от перечитанных настроек.
+    expect(built.priceMode).toBe('sum')
+    expect(buildRows(input()).priceMode).toBe('hour')
     const time = buildRows(input({ mode: 'time', settings: settings({ priceMode: 'sum' }) })).rows
     expect(time.map(r => [r.key, r.price, r.quantity])).toEqual([['e101', 100, 1], ['e102', 40, 1]])
   })
@@ -290,8 +294,8 @@ describe('как строка ложится в счёт (priceMode)', () => {
   })
 
   it('режим не меняет итог счёта', () => {
-    const hour = rowsTotals(buildRows(input({ mode: 'time', vatRate: 20 })).rows)
-    const sum = rowsTotals(buildRows(input({ mode: 'time', vatRate: 20, settings: settings({ priceMode: 'sum' }) })).rows)
+    const hour = vatTotals(buildRows(input({ mode: 'time', vatRate: 20 })).rows)
+    const sum = vatTotals(buildRows(input({ mode: 'time', vatRate: 20, settings: settings({ priceMode: 'sum' }) })).rows)
     expect(sum).toEqual(hour)
     expect(hour).toEqual({ net: 140, vat: 28, total: 168 })
   })
@@ -311,6 +315,16 @@ describe('НДС в строках', () => {
     ])
   })
 
+  it('валюта счёта другая и НДС: сначала пересчёт и наценка (цена без НДС), налог — поверх пересчитанной цены', () => {
+    const toUsd = { from: 'RUB', to: 'USD', factor: 1 / 80, notice: 'Цены пересчитаны — проверьте курс' }
+    const { rows } = buildRows(input({ vatRate: 20, conversion: toUsd, settings: settings({ markup: { defaultPercent: 10, tags: [] } }) }))
+    // 200 ₽ / 80 = 2,5 $; + 10% = 2,75 $ без НДС; в строку — 3,3 $ с налогом.
+    expect(rows[0]).toMatchObject({ hourPrice: 2.75, price: 2.75, taxRate: 20 })
+    expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 3.3, quantity: 1.5, taxRate: 20 })
+    // Налог 2,75 × 1,5 × 20% = 0,825 → 0,83, как портал на этой же строке (замер, tests/vat.test.ts).
+    expect(vatTotals(rows)).toEqual({ net: 4.12, vat: 0.83, total: 4.95 })
+  })
+
   it('0% — ставка пишется (это не «Без НДС»), цена как есть', () => {
     const { rows } = buildRows(input({ vatRate: 0 }))
     expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 200, taxRate: 0, taxIncluded: 'N' })
@@ -325,6 +339,6 @@ describe('НДС в строках', () => {
   it('«сумма в цене» с НДС: в строку — сумма с налогом и 1', () => {
     const { rows } = buildRows(input({ vatRate: 20, settings: settings({ priceMode: 'sum' }) }))
     expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 360, quantity: 1, taxRate: 20 })
-    expect(rowsTotals(rows)).toEqual({ net: 300, vat: 60, total: 360 })
+    expect(vatTotals(rows)).toEqual({ net: 300, vat: 60, total: 360 })
   })
 })

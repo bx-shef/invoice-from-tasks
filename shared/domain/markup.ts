@@ -2,6 +2,8 @@
 // Правила «тег → наценка» идут списком; срабатывает ПЕРВОЕ правило, чей тег есть у задачи.
 // Не сработало ни одно — наценка «на всё». Правила — docs/PROCESSING.md, «Наценка».
 
+import { roundMoney } from './money'
+
 /** Правило наценки: тег задачи и процент. Порядок правил в списке — их приоритет. */
 export interface TagMarkupRule {
   /** Тег для показа — как ввёл человек, без `#` в начале ({@link cleanTag}); сравнение — через {@link normalizeTag}. */
@@ -73,7 +75,7 @@ export function resolveMarkup(settings: MarkupSettings, taskTags: readonly strin
   return { percent: settings.defaultPercent, source: 'default' }
 }
 
-/** Цена с наценкой, до копеек. */
+/** Цена с наценкой, до копеек — тем же округлением, что суммы и налог (money.ts). */
 export function applyMarkup(price: number, percent: number): number {
-  return Math.round(price * (100 + percent)) / 100
+  return roundMoney(price * (100 + percent) / 100)
 }

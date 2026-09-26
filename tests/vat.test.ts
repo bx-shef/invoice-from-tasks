@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   grossPrice,
+  netDrift,
   normalizeVatRate,
   parseMyCompanies,
   parseVatRates,
-  roundMoney,
   vatForInvoice,
   vatLabel,
   vatTotals,
   type CompanyVat
 } from '#shared/domain/vat'
+import { roundMoney } from '#shared/domain/money'
 
 describe('normalizeVatRate — ставка из хранилища или формы', () => {
   it('число от 0 до 100 до сотых; null — «Без НДС»', () => {
@@ -73,6 +74,9 @@ describe('roundMoney — копейки как у портала', () => {
     expect(roundMoney(1954.806)).toBe(1954.81)
     expect(roundMoney(2.2217778)).toBe(2.22)
     expect(roundMoney(0)).toBe(0)
+    // Поправка на двоичную дробь не превращает настоящее «меньше половины» в половину.
+    expect(roundMoney(0.004999999999)).toBe(0)
+    expect(roundMoney(0.0049999)).toBe(0)
   })
 })
 
@@ -83,6 +87,9 @@ describe('grossPrice — поле price строки (цена С налогом
     expect(grossPrice(100.03, 20)).toBe(120.036)
     expect(grossPrice(123.45, 10)).toBe(135.795)
     expect(grossPrice(0.01, 20)).toBe(0.012)
+    // Ставка с сотыми (16,67%) — все шесть знаков: 100,03 × 1,1667 = 116,705001; с четырьмя было бы
+    // 116,705, и портал выделил бы цену без НДС 100,0299… вместо 100,03.
+    expect(grossPrice(100.03, 16.67)).toBe(116.705001)
   })
 
   it('«Без НДС» и 0% — цена как есть', () => {
@@ -107,6 +114,24 @@ describe('vatTotals — итоги как у портала', () => {
       { price: 50, quantity: 2, taxRate: 20 }
     ]
     expect(vatTotals(lines)).toEqual({ net: 1655.13, vat: 263.04, total: 1918.17 })
+  })
+
+  it('netDrift: строки без НДС (каждая до копеек) против «Без НДС» портала — те же 9 строк дают 2 копейки', () => {
+    // Суммы строк предпросмотра: 255 + 678,98 + 100,03 + 170 × 3 + 0,03 + 11,11 + 100 = 1655,15.
+    const sums = [255, 678.98, 100.03, 170, 170, 170, 0.03, 11.11, 100]
+    expect(netDrift(sums, { net: 1655.13, vat: 263.04, total: 1918.17 })).toBe(0.02)
+    expect(netDrift([140], { net: 140, vat: 28, total: 168 })).toBe(0)
+  })
+
+  it('граница половины копейки — как у портала (замер 2026-09-26, по одной строке в счёте #56)', () => {
+    // [цена без НДС, часы, итог счёта, налог] — ответ портала на каждую строку при 20%.
+    const measured: Array<[number, number, number, number]> = [
+      [2.75, 1.5, 4.95, 0.83], [10.73, 2.5, 32.19, 5.37], [14.23, 2.5, 42.69, 7.12], [19.55, 1.5, 35.19, 5.87],
+      [27.46, 1.25, 41.19, 6.87], [123.45, 5.5, 814.77, 135.8], [3.3, 0.5, 1.98, 0.33], [0.05, 0.1, 0.01, 0]
+    ]
+    for (const [price, quantity, total, vat] of measured) {
+      expect(vatTotals([{ price, quantity, taxRate: 20 }])).toMatchObject({ total, vat })
+    }
   })
 
   it('без НДС: налог 0, итог — одно округление суммы строк', () => {

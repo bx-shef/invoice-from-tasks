@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   addRowCall,
+  COMPANY_ENTITY_TYPE_ID,
+  MY_COMPANIES_PAGE,
+  myCompaniesCall,
+  vatListCall,
   elapsedListCall,
   ELAPSED_PAGE,
   invoiceGetCall,
@@ -15,6 +19,20 @@ import {
 // Формы запросов подтверждены на тестовом портале (замер 2026-09-24, docs/REST_METHODS.md):
 // поломка формы — это молча пустой результат или 400, поэтому формы закреплены тестом.
 describe('параметры запросов сценария счёта', () => {
+  it('«Реквизиты вашей компании»: компании (тип 4) с isMyCompany = Y, id и название, листание по 50', () => {
+    // Замер 2026-09-26: фильтр отбирает только «мои компании»; ответ { items: [{ id, title }] }.
+    expect(myCompaniesCall(100)).toEqual({
+      method: 'crm.item.list',
+      params: { entityTypeId: 4, filter: { isMyCompany: 'Y' }, select: ['id', 'title'], order: { id: 'asc' }, start: 100 }
+    })
+    expect(COMPANY_ENTITY_TYPE_ID).toBe(4)
+    expect(MY_COMPANIES_PAGE).toBe(50)
+  })
+
+  it('ставки НДС портала: catalog.vat.list без фильтра — неактивные отбирает разбор', () => {
+    expect(vatListCall()).toEqual({ method: 'catalog.vat.list', params: {} })
+  })
+
   it('задачи: фильтр ОБЪЕКТОМ по UF_CRM_TASK и теги в том же списке', () => {
     expect(taskListCall('D_4')).toEqual({ method: 'tasks.task.list', params: { filter: { UF_CRM_TASK: 'D_4' }, select: TASK_SELECT } })
     expect(TASK_SELECT).toContain('TAGS')
