@@ -3,7 +3,7 @@
 // ПРАВАМИ СОТРУДНИКА через фрейм: видит только свои задачи, пишет только в доступный ему счёт.
 // Методы и их поля — docs/REST_METHODS.md; методы задач, которые есть в REST v3, — через v3.
 
-import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
+import { buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
 import { applyNames, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
@@ -351,7 +351,7 @@ export function useInvoiceFill() {
     step.value = 'done'
   }
 
-  /** Консультация: ответ BitrixGPT по промпту из настроек → дело в счёте. */
+  /** Консультация: ответ BitrixGPT по промпту из настроек → закрытое дело в счёте (activity.ts). */
   async function consult(promptId: string): Promise<{ title: string, text: string }> {
     const inv = invoice.value
     if (!inv) throw new Error('Счёт не загружен')
@@ -362,13 +362,10 @@ export function useInvoiceFill() {
       tasks: tasks.value.map(t => ({ id: t.id, title: t.title, description: t.description.slice(0, 1000), hours: Math.round(t.timeSpentInLogs / 36) / 100 }))
     })
     const answer = await post<{ title: string, text: string }>('/api/ai/consult', { promptId, context })
-    const res = await b24.call<{ id?: unknown } | number>('crm.activity.todo.add', buildConsultActivity({
-      invoiceId: inv.id, promptTitle: answer.title, answer: answer.text, responsibleId: userId.value, nowMs: Date.now()
-    }))
-    const activityId = typeof res === 'number' ? res : Number((res as { id?: unknown })?.id)
-    if (activityId > 0) {
-      await b24.call('crm.activity.update', { id: activityId, fields: { DESCRIPTION_TYPE: DESCRIPTION_TYPE_BB } }).catch(() => undefined)
-    }
+    // Одна закрытая запись в ленте в виде ответа ИИ (activity.ts). Только из фрейма: вебхук этот
+    // метод не принимает, и дело пишется правами сотрудника.
+    const activity = buildConsultActivity({ invoiceId: inv.id, promptTitle: answer.title, answer: answer.text, responsibleId: userId.value })
+    await b24.call('crm.activity.configurable.add', { ...activity })
     return answer
   }
 

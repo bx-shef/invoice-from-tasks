@@ -1,6 +1,6 @@
 // Сценарий счёта на живом портале: чтение теми же запросами, что страница, расчёт чистыми
 // функциями приложения во всех сочетаниях настроек, запись «заменить»/«добавить», пакет с
-// ошибкой посередине, дело консультации.
+// ошибкой посередине, дело консультации (только отказ вебхуку — создаёт его страница).
 //
 // Что ожидается независимо от кода — таблицами по засеву: какие задачи и записи попадут, дата и
 // ставка каждой строки, наценка по первому совпадению, число строк, ошибки и предупреждения. Так
@@ -9,7 +9,7 @@
 // юнит-тесты с мутациями (tests/time.test.ts, tests/markup.test.ts, tests/fill.test.ts), а не смок.
 
 import { beforeAll, describe, expect, inject, it } from 'vitest'
-import { buildConsultActivity, DESCRIPTION_TYPE_BB } from '#shared/domain/activity'
+import { AI_ICON, AI_LOGO, buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, parseCurrencies, type CurrencyConversion, type PortalCurrency } from '#shared/domain/currency'
 import { buildRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, type InvoiceInfo } from '#shared/domain/invoice'
@@ -249,17 +249,20 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       expect(verdict.message).toContain('добавлено 1 из 3')
     })
 
-    it('дело консультации: создаётся в счёте, разметка обезврежена, DESCRIPTION_TYPE = 3', async () => {
-      const res = await portal.call<{ id?: unknown } | number>('crm.activity.todo.add', buildConsultActivity({
-        invoiceId: fx!.invoices.usd, promptTitle: `Смок [b]${fx!.runTag}[/b]`, answer: 'Строка 1\nСтрока 2 <b>html</b>', responsibleId: fx!.userId, nowMs: Date.now()
-      }))
-      const id = typeof res === 'number' ? res : Number(res?.id)
-      expect(id).toBeGreaterThan(0)
-      await portal.call('crm.activity.update', { id, fields: { DESCRIPTION_TYPE: DESCRIPTION_TYPE_BB } })
-      const activity = await portal.call<Record<string, unknown>>('crm.activity.get', { id })
-      expect(activity).toMatchObject({ OWNER_TYPE_ID: '31', OWNER_ID: String(fx!.invoices.usd), DESCRIPTION_TYPE: '3' })
-      expect(String(activity.SUBJECT)).not.toContain('[b]')
-      expect(String(activity.DESCRIPTION)).not.toContain('<b>')
+    it('дело консультации: вебхук его не создаёт (ERROR_WRONG_CONTEXT) — только страница во фрейме', async () => {
+      // crm.activity.configurable.add работает лишь в контексте приложения (документация) — смок
+      // на вебхуке может только подтвердить отказ. Вид записи закрепляют юнит-тесты layout
+      // (tests/activity.test.ts), живую запись — владелец из приложения.
+      const activity = buildConsultActivity({ invoiceId: fx!.invoices.usd, promptTitle: `Смок ${fx!.runTag}`, answer: '**Итог**\n- пункт', responsibleId: fx!.userId })
+      // SDK отдаёт текст ошибки без кода: «Вызов метода возможен только в контексте rest приложения» (замер).
+      await expect(portal.call('crm.activity.configurable.add', { ...activity })).rejects.toThrow(/ERROR_WRONG_CONTEXT|только в контексте rest приложения/)
+    })
+
+    it('иконка и логотип записи консультации есть в портале (коды записей ИИ ядра)', async () => {
+      const icons = JSON.stringify(await portal.call('crm.timeline.icon.list', {}))
+      const logos = JSON.stringify(await portal.call('crm.timeline.logo.list', {}))
+      expect(icons).toContain(`"${AI_ICON}"`)
+      expect(logos).toContain(`"${AI_LOGO}"`)
     })
   })
 })

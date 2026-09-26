@@ -1,7 +1,7 @@
 // POST /api/ai/consult — запуск промпта консультации из настроек над данными счёта.
 // Разбор запроса и выбор промпта — `parseConsultRequest`, `findConsultPrompt`
 // (server/utils/aiRequests.ts, покрыты тестами): текст берётся из настроек портала по id. Ответ возвращается странице, а та кладёт его делом в счёт (правами
-// сотрудника — crm.activity.todo.add во фрейме).
+// сотрудника — crm.activity.configurable.add во фрейме, shared/domain/activity.ts).
 
 import { buildConsultMessages } from '#shared/domain/prompts'
 import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'

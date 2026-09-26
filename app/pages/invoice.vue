@@ -72,7 +72,7 @@ async function consult(promptId: string) {
   consultAnswer.value = null
   try {
     consultAnswer.value = await fill.consult(promptId)
-    toast.add({ title: 'Ответ сохранён делом в счёте', color: 'air-primary-success' })
+    toast.add({ title: 'Ответ сохранён в ленте счёта', color: 'air-primary-success' })
   } catch (e) {
     toast.add({ title: 'Консультация не удалась', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
@@ -222,7 +222,7 @@ async function consult(promptId: string) {
             </h2>
           </template>
           <p class="text-sm opacity-70 mb-3">
-            Промпт получает данные счёта{{ fill.tasks.value.length ? ' и найденных задач' : '' }}; ответ сохранится делом в счёте.
+            Промпт получает данные счёта{{ fill.tasks.value.length ? ' и найденных задач' : '' }}; ответ сохранится в ленте счёта.
           </p>
           <div class="flex flex-wrap gap-2">
             <B24Button
@@ -235,17 +235,12 @@ async function consult(promptId: string) {
               @click="consult(p.id)"
             />
           </div>
-          <div
+          <InvoiceConsultAnswer
             v-if="consultAnswer"
-            class="mt-4 space-y-1"
-          >
-            <h3 class="font-medium">
-              {{ consultAnswer.title }}
-            </h3>
-            <p class="whitespace-pre-line text-sm">
-              {{ consultAnswer.text }}
-            </p>
-          </div>
+            :title="consultAnswer.title"
+            :text="consultAnswer.text"
+            class="mt-4"
+          />
         </B24Card>
       </template>
     </div>
