@@ -19,4 +19,8 @@ COPY --from=build /app/.output ./.output
 RUN mkdir -p /app/.data && chown node:node /app/.data
 USER node
 EXPOSE 3000
+# Коммит сборки для GET /api/health (`commit`). Задаёт джоба deploy в CI; в локальной сборке
+# пусто — health вернёт null. Стоит последним: меняется на каждом коммите и не сбивает кэш слоёв.
+ARG COMMIT_SHA=""
+ENV COMMIT_SHA=$COMMIT_SHA
 CMD ["node", ".output/server/index.mjs"]

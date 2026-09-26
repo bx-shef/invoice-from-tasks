@@ -2,7 +2,7 @@
 // ciWorkflowGuard.test.ts) и дополнены сверкой реестра REST-методов, которую там оставили в TODO.
 
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -93,8 +93,56 @@ describe('выкат (docs/DEPLOY.md): main → GHCR → Watchtower → nginx-pr
     expect(COMPOSE).toMatch(/^ {6}NUXT_PUBLIC_SITE_URL: https:\/\/\$\{DOMAIN\}$/m)
     expect(COMPOSE).toMatch(/^ {6}TRUST_PROXY: "1"$/m)
     expect(COMPOSE).toMatch(/^ {6}- "com\.centurylinklabs\.watchtower\.enable=true"$/m)
+    // Без этого — 502 на POST-запросах портала после паузы (keepalive nginx-proxy против Node, 2026-09-25).
+    expect(COMPOSE).toMatch(/^ {6}- "com\.github\.nginx-proxy\.nginx-proxy\.keepalive=disabled"$/m)
     expect(COMPOSE).toMatch(/^networks:\n {2}proxy-net:\n {4}external: true$/m)
     expect(COMPOSE).toMatch(/^ {6}B24_TOKEN_ENC_KEY: \$\{B24_TOKEN_ENC_KEY:\?/m)
+  })
+
+  it('образ знает свой коммит: deploy передаёт его, Dockerfile кладёт в окружение, health читает', () => {
+    expect(DEPLOY).toMatch(/^ {10}build-args: COMMIT_SHA=\$\{\{ github\.sha \}\}$/m)
+    const dockerfile = readFileSync(join(ROOT, 'Dockerfile'), 'utf8')
+    const runner = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '))
+    expect(runner).toMatch(/^ARG COMMIT_SHA=""\nENV COMMIT_SHA=\$COMMIT_SHA$/m)
+    expect(readFileSync(join(ROOT, 'server/api/health.get.ts'), 'utf8')).toMatch(/buildCommit\(process\.env\.COMMIT_SHA\)/)
+  })
+
+  it('скрипты и стили уходят сжатыми: перед Nitro нет своего nginx, а общий nginx-proxy не сжимает', () => {
+    expect(readFileSync(join(ROOT, 'nuxt.config.ts'), 'utf8')).toMatch(/^ {4}compressPublicAssets: true,$/m)
+  })
+})
+
+describe('шаблоны Vue', () => {
+  // Nuxt называет компоненты из подкаталогов с приставкой каталога (components/invoice/FillPreview.vue →
+  // InvoiceFillPreview). Незнакомый тег Vue рисует пустым элементом без ошибки — так предпросмотр
+  // счёта не показывался вовсе (живой прогон 2026-09-25).
+  it('незнакомый компонент в шаблоне — ошибка typecheck', () => {
+    // tsconfig.json — JSONC: убираем комментарии-строки и смотрим настройку там, где её читает vue-tsc.
+    const text = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '')
+    const config = JSON.parse(text) as { vueCompilerOptions?: { checkUnknownComponents?: unknown } }
+    expect(config.vueCompilerOptions?.checkUnknownComponents).toBe(true)
+  })
+
+  // То же, но и в быстром `pnpm test`, а не только в typecheck: каждый компонент в <template> страниц и
+  // компонентов — тот, что Nuxt зарегистрировал (.nuxt/components.d.ts пишет nuxt prepare при установке
+  // зависимостей), или встроенный в Vue. Компонент — тег с большой буквы или с дефисом (fill-preview →
+  // FillPreview); обычные теги HTML дефиса не содержат.
+  it('каждый компонент в шаблонах зарегистрирован Nuxt под этим именем', () => {
+    const dts = join(ROOT, '.nuxt/components.d.ts')
+    expect(existsSync(dts), 'нет .nuxt/components.d.ts — запустите pnpm install (nuxt prepare)').toBe(true)
+    const registered = new Set([...readFileSync(dts, 'utf8').matchAll(/^export const (\w+):/gm)].map(m => m[1]))
+    for (const builtin of ['Component', 'KeepAlive', 'Suspense', 'Teleport', 'Transition', 'TransitionGroup']) registered.add(builtin)
+    expect(registered.has('InvoiceFillPreview')).toBe(true)
+    const pascal = (tag: string) => tag.includes('-') ? tag.split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('') : tag
+    const unknown: string[] = []
+    for (const file of sources(join(ROOT, 'app')).filter(f => f.endsWith('.vue'))) {
+      const text = readFileSync(file, 'utf8')
+      const template = text.slice(text.indexOf('<template>'), text.lastIndexOf('</template>'))
+      for (const m of template.matchAll(/<([A-Z][A-Za-z0-9]*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s/>]/g)) {
+        if (!registered.has(pascal(m[1]!))) unknown.push(`${relative(ROOT, file)}: <${m[1]}>`)
+      }
+    }
+    expect(unknown).toEqual([])
   })
 })
 

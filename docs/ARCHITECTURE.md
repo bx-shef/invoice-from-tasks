@@ -1,6 +1,6 @@
 # Архитектура
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Как устроено приложение и почему так. Правила расчёта — `docs/PROCESSING.md`, настройки —
 `docs/SETTINGS.md`, вызовы REST — `docs/REST_METHODS.md`.
@@ -16,13 +16,24 @@ Nuxt 4 (SPA, `ssr: false`) + `@bitrix24/b24ui-nuxt` (интерфейс) + `@bit
 сборке: сервер отвечает `200` и на `GET`, и на `POST` к страницам — Битрикс24 открывает
 обработчики POST-запросом, и отдельный трюк nginx (`error_page 405 =200`) не нужен.
 
+Что nginx эталона делал попутно, у нас делает Nitro или общий прокси (сверено 2026-09-25):
+- кэш скриптов и стилей `/_nuxt` на год (`immutable`) — Nitro по умолчанию;
+- сжатие — `nitro.compressPublicAssets`: `.gz` и `.br` при сборке, самый большой скрипт — 234 КБ →
+  62 КБ; общий nginx-proxy сам не сжимает;
+- соединения к Node без keepalive — метка `keepalive=disabled` в `docker-compose.prod.yml`: nginx
+  эталона держал соединение дольше прокси, а без него прокси ловил закрытые Node соединения —
+  `502` на POST из портала;
+- таймаут долгих ответов — `make proxy-timeout` для нашего домена;
+- лимиты запросов — в самом приложении (`server/utils/requestLimits.ts`, `rateLimit.ts`).
+
 **SPA, а не SSR.** Все рабочие страницы живут во фрейме портала, SEO им не нужно; SPA
 избавляет от гидрации с редиректами. Настройки окружения (`NUXT_PUBLIC_SITE_URL`) подхватываются
 при запуске — проверено на сборке, пересборка образа под другой адрес не нужна.
 
 **Выкат — как в client-bank.** `main` → образ в GHCR → Watchtower на сервере → общий nginx-proxy с
-TLS Let's Encrypt, адрес `https://invoice-from-tasks.bx-shef.by` (`docs/DEPLOY.md`). Образ один,
-build-args нет.
+TLS Let's Encrypt, адрес `https://invoice-from-tasks.bx-shef.by` (`docs/DEPLOY.md`). Образ один
+на любой сервер; единственный build-arg — коммит сборки для `GET /api/health`. Проверка сервера
+одной командой — `make doctor`.
 
 ## Страницы (`app/pages/`)
 

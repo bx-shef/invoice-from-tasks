@@ -70,6 +70,11 @@ services:
     labels:
       # Подхватит общий Watchtower хоста (запущен с --label-enable).
       - "com.centurylinklabs.watchtower.enable=true"
+      # nginx-proxy по умолчанию держит соединения с приложением открытыми (keepalive, до 60 с), а Node
+      # закрывает простаивающие через 5 с. Запрос в закрытое соединение — 502, и POST nginx не
+      # повторяет, а Битрикс24 открывает страницы приложения именно POST-ом (замер 2026-09-25: 502 на
+      # /app сразу после установки). Без keepalive каждый запрос идёт новым соединением — гонки нет.
+      - "com.github.nginx-proxy.nginx-proxy.keepalive=disabled"
 
 volumes:
   portals:

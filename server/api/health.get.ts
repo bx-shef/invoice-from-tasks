@@ -1,9 +1,12 @@
 // GET /api/health — жив ли сервер и сконфигурирован ли он. Без секретов: только флаги «задано / нет».
 
+import { buildCommit } from '../utils/buildInfo'
 import { forwardedStatus } from '../utils/requestLimits'
 
 export default defineEventHandler(event => ({
   ok: true,
+  // Коммит запущенного образа, 7 знаков — как в теге `sha-…` для отката (null — локальная сборка).
+  commit: buildCommit(process.env.COMMIT_SHA),
   config: {
     siteUrl: Boolean(useRuntimeConfig().public.siteUrl),
     oauth: Boolean(process.env.B24_CLIENT_ID && process.env.B24_CLIENT_SECRET),

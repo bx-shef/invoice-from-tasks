@@ -160,7 +160,7 @@ async function consult(promptId: string) {
           data-testid="fill-problems"
         />
 
-        <FillPreview
+        <InvoiceFillPreview
           v-if="result"
           :rows="result.rows"
           :errors="result.errors"

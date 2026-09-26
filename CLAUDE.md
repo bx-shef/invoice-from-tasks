@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Last reviewed: 2026-09-25
+> Last reviewed: 2026-09-26
 
 Приложение Битрикс24 «Счёт из задач»: заполняет товарную часть нового счёта (CRM, тип 31) по
 задачам — из связанной сделки или привязанным к счёту — и затраченному в них времени. Ставки
@@ -32,11 +32,11 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 | `app/composables/` | `useB24` (фрейм и REST v2/v3), `useApi` (наш /api с фрейм-токеном), `useAppSettings`, `useInvoiceFill` (сценарий счёта), `useCatalog` (единицы измерения), `useUsers`, `useStorageProbe` |
 | `app/utils/` | `install` (шаги установки), `placement` (ID счёта из встройки), `storageProbe` (замер места), `frameToken`, `concurrency` (параллельные чтения с ограничением), `paging` (сбор страниц), `b24Batch` (ошибки REST, разбор пакета), `writeOutcome` (итог записи в счёт), `serverHealth` (что не настроено на сервере), `measures` (единицы измерения, ОКЕИ), `invoiceRequests` (параметры REST-запросов сценария счёта) |
 | `app/config/b24.ts` | права, встройка, события, настройки SDK (без автоповторов записи) — одно место |
-| `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` |
+| `server/api/` | тонкие обёртки: `b24/events` (установка/удаление), `settings`, `rates`, `ai/names`, `ai/consult`, `health` (флаги настроек и коммит сборки) |
 | `server/middleware/` | `securityHeaders` (CSP для фрейма), `requestLimits` (размер тела) |
-| `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |
+| `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `buildInfo` (коммит сборки для health), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (BitrixGPT, лимиты) |
 | `tests/` | юнит-тесты (vitest, node); `tests/server/` — серверные модули; `repoGuards` — гарды репо |
-| `docker-compose.prod.yml`, `Makefile` | выкат как в client-bank: `main` → GHCR → Watchtower → nginx-proxy, `invoice-from-tasks.bx-shef.by` — `docs/DEPLOY.md` |
+| `docker-compose.prod.yml`, `Makefile` | выкат как в client-bank: `main` → GHCR → Watchtower → nginx-proxy, `invoice-from-tasks.bx-shef.by`; проверка сервера — `make doctor` — `docs/DEPLOY.md` |
 | `smoke/` | смок на тестовом портале (`pnpm smoke`, свой vitest-конфиг, не в CI): страж портала, засев, формы REST, матрица расчёта, BitrixGPT — `docs/SMOKE.md` |
 
 Подробно: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), правила расчёта —
@@ -65,5 +65,8 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 - **Язык** — по таблице `docs/AGENT_RULES.md` §0: код по-английски; комментарии, документация,
   коммиты, PR и issues — по-русски.
 - **Штамп `> Last reviewed: YYYY-MM-DD`** под заголовком каждого `.md`.
+- **Компоненты из подкаталогов — с приставкой каталога**: `components/invoice/FillPreview.vue` —
+  тег `<InvoiceFillPreview>`. Незнакомый тег Vue рисует пустым без ошибки; ловит `pnpm typecheck`
+  (`checkUnknownComponents` в `tsconfig.json`).
 - **Тест должен краснеть при мутации кода** (`AGENT_RULES.md` §5.2); откат мутации — из копии,
   не `git checkout --`.
