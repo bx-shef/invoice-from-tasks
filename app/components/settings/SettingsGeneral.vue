@@ -3,6 +3,7 @@
 // источник названий строк, единица измерения.
 import { ROUNDING_DIRECTION_LABELS, ROUNDING_DIRECTIONS, ROUNDING_LABELS, ROUNDING_STEPS } from '#shared/domain/time'
 import type { AppSettings } from '#shared/domain/settings'
+import { measureItems, measureMissing, type MeasureOption } from '~/utils/measures'
 
 const settings = defineModel<AppSettings>({ required: true })
 
@@ -25,7 +26,10 @@ const measureHint = computed(() => settings.value.priceMode === 'sum'
   ? 'Количество в строке — 1: выберите единицу вроде «услуга» или «шт»'
   : 'Например, «час». Не выбрано — портал поставит единицу по умолчанию')
 const currencies = ref<Array<{ label: string, value: string }>>([])
-const measures = ref<Array<{ label: string, value: number }>>([])
+/** Справочник единиц; `null` — не прочитан (список покажет только сохранённый код). */
+const measureList = ref<MeasureOption[] | null>(null)
+const measures = computed(() => measureItems(measureList.value, settings.value.measureCode))
+const measureGone = computed(() => measureMissing(measureList.value, settings.value.measureCode))
 
 onMounted(async () => {
   try {
@@ -35,9 +39,9 @@ onMounted(async () => {
     currencies.value = settings.value.currency ? [{ label: settings.value.currency, value: settings.value.currency }] : []
   }
   try {
-    measures.value = (await catalog.measures()).map(m => ({ label: m.label, value: m.code }))
+    measureList.value = await catalog.measures()
   } catch {
-    measures.value = []
+    measureList.value = null
   }
 })
 
@@ -125,6 +129,14 @@ const measureModel = computed({
         data-testid="settings-measure-warning"
       >
         В режиме «Сумма строки × 1» единица «час» покажет в счёте «1 час» за всю работу
+      </p>
+      <p
+        v-if="measureGone"
+        class="mt-1 text-sm text-(--ui-color-accent-main-warning)"
+        data-testid="settings-measure-missing"
+      >
+        Единицы с этим кодом нет в справочнике портала — в строки счёта портал запишет единицу по
+        умолчанию. Выберите единицу из списка
       </p>
     </B24FormField>
   </div>

@@ -3,7 +3,7 @@
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
-import { measureSymbol } from '~/utils/measures'
+import { rowUnit, type MeasureOption } from '~/utils/measures'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -11,6 +11,7 @@ const route = useRoute()
 const app = useAppSettings()
 const users = useUsers()
 const fill = useInvoiceFill()
+const catalog = useCatalog()
 const toast = useToast()
 
 const invoiceId = ref<number | null>(null)
@@ -19,6 +20,9 @@ const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
 const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | null>(null)
+/** Справочник единиц; `null` — не прочитан (нет права чтения каталога): единица — из ОКЕИ. */
+const measures = ref<MeasureOption[] | null>(null)
+const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode))
 
 const sourceItems = [
   { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
@@ -53,7 +57,18 @@ onMounted(async () => {
   } catch {
     return
   }
-  await fill.loadInvoice(invoiceId.value)
+  // Справочник единиц — параллельно со счётом и не мешая ему: без него предпросмотр возьмёт ОКЕИ.
+  await Promise.all([
+    fill.loadInvoice(invoiceId.value),
+    catalog.measures().then(
+      (list) => {
+        measures.value = list
+      },
+      () => {
+        measures.value = null
+      }
+    )
+  ])
 })
 
 async function collect() {
@@ -171,7 +186,8 @@ async function consult(promptId: string) {
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"
-          :unit="measureSymbol(app.settings.value.measureCode)"
+          :unit="unit.symbol"
+          :unit-notice="unit.notice"
           :currency="fill.invoice.value?.currencyId ?? ''"
           :conversion="fill.conversion.value"
           :origin="origin"

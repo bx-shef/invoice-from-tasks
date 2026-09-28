@@ -33,8 +33,10 @@ const props = defineProps<{
   vat: { rate: VatRate, company: string } | null
   /** Как строки лягут в счёт: цена часа и часы или сумма и 1. */
   priceMode: PriceMode
-  /** Краткое обозначение единицы строк («ч», «шт»); пусто — портал поставит свою. */
+  /** Обозначение единицы строк, как в счёте («ч», «шт», «чел.-ч»); пусто — неизвестно. */
   unit: string
+  /** Единица из настроек не попадёт в счёт как есть (rowUnit) — первым пунктом предупреждений. */
+  unitNotice: string | null
   /** Валюта счёта — в ней цены и суммы. */
   currency: string
   /** Пересчёт цен в валюту счёта; есть — ставка в подстроке подписана «по курсу». */
@@ -83,12 +85,19 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
     </B24Alert>
 
     <B24Alert
-      v-if="warnings.length"
+      v-if="warnings.length || (unitNotice && rows.length)"
       color="air-primary-warning"
       title="Обратите внимание"
+      data-testid="fill-warnings"
     >
       <template #description>
         <ul class="list-disc pl-5">
+          <li
+            v-if="unitNotice && rows.length"
+            data-testid="fill-unit-notice"
+          >
+            {{ unitNotice }}
+          </li>
           <li
             v-for="(issue, i) in warnings"
             :key="i"

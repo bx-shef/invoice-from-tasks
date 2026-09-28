@@ -4,6 +4,7 @@ import {
   COMPANY_ENTITY_TYPE_ID,
   MY_COMPANIES_PAGE,
   myCompaniesCall,
+  measureListCall,
   vatListCall,
   elapsedListCall,
   ELAPSED_PAGE,
@@ -31,6 +32,12 @@ describe('параметры запросов сценария счёта', () =
 
   it('ставки НДС портала: catalog.vat.list без фильтра — неактивные отбирает разбор', () => {
     expect(vatListCall()).toEqual({ method: 'catalog.vat.list', params: {} })
+  })
+
+  it('единицы: catalog.measure.list с обозначением и признаком «по умолчанию» — без них предпросмотр не знает единицу строк', () => {
+    const { method, params } = measureListCall()
+    expect(method).toBe('catalog.measure.list')
+    expect(params.select).toEqual(expect.arrayContaining(['code', 'symbol', 'isDefault']))
   })
 
   it('задачи: фильтр ОБЪЕКТОМ по UF_CRM_TASK, теги и статус в том же списке', () => {

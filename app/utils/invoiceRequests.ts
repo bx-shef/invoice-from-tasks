@@ -96,6 +96,15 @@ export function vatListCall(): RestCall {
   return { method: 'catalog.vat.list', params: {} }
 }
 
+/**
+ * Справочник единиц: catalog.measure.list — для списка в настройках и для единицы строк в
+ * предпросмотре счёта (`symbol` своих единиц, `isDefault` — её портал ставит вместо кода не из
+ * справочника, замер 2026-09-28).
+ */
+export function measureListCall(): RestCall {
+  return { method: 'catalog.measure.list', params: { select: ['code', 'measureTitle', 'symbol', 'symbolIntl', 'symbolLetterIntl', 'isDefault'] } }
+}
+
 /** «Заменить»: crm.item.productrow.set — все позиции счёта заменяются набором. */
 export function replaceRowsCall(invoiceId: number, rows: ProductRowPayload[]): RestCall {
   return { method: 'crm.item.productrow.set', params: { ownerType: INVOICE_OWNER_TYPE, ownerId: invoiceId, productRows: rows } }
