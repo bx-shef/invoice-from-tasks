@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answerYes, duplicateCount, positionsChanged, rowsWord, startConfirm, writeConfirmations } from '~/utils/writeConfirm'
+import { answerYes, CONFIRM_ARM_MS, duplicateCount, positionsChanged, rowsWord, startConfirm, writeBlocker, writeConfirmations } from '~/utils/writeConfirm'
 
 const NO_UNDO = 'Отменить добавление нельзя — лишние позиции придётся удалять в карточке счёта.'
 
@@ -11,11 +11,17 @@ describe('rowsWord — «строку / строки / строк»', () => {
   })
 })
 
-describe('duplicateCount — строки, которые уже есть в счёте под тем же названием', () => {
-  it('без учёта регистра и пробелов по краям; каждая добавляемая строка считается один раз', () => {
+describe('duplicateCount — добавляемые строки, которые уже есть в счёте под тем же названием', () => {
+  it('без учёта регистра и лишних пробелов (как clampName); каждая добавляемая строка считается один раз', () => {
     expect(duplicateCount(['[102] Вёрстка', 'Дизайн '], ['[102] вёрстка', ' дизайн', 'Сервер'])).toBe(2)
+    expect(duplicateCount(['Вёрстка  шапки'], ['Вёрстка шапки'])).toBe(1)
     expect(duplicateCount([], ['Вёрстка'])).toBe(0)
     expect(duplicateCount(['Вёрстка'], ['Вёрстка шапки'])).toBe(0)
+  })
+
+  it('считаются добавляемые строки, а не позиции счёта: три записи к одной позиции — три дубля', () => {
+    expect(duplicateCount(['[10] Правки'], ['[10] Правки', '[10] Правки', '[10] Правки'])).toBe(3)
+    expect(duplicateCount(['Вёрстка', 'Вёрстка', 'Вёрстка'], ['Вёрстка'])).toBe(1)
   })
 })
 
@@ -27,11 +33,13 @@ describe('writeConfirmations — что спросить перед запись
     ])
   })
 
-  it('те же названия уже в счёте — второй вопрос называет, сколько задвоится', () => {
+  it('те же названия уже в счёте — второй вопрос называет, сколько добавляемых строк задвоится', () => {
     const [, second] = writeConfirmations('append', ['[102] Вёрстка', '[104] Сервер', 'Своя позиция'], ['[102] Вёрстка', '[104] Сервер', '[105] Звонок'])
-    expect(second!.text).toBe(`Точно добавить? В счёте уже есть 2 поз. с такими же названиями — после добавления они задвоятся. ${NO_UNDO}`)
+    expect(second!.text).toBe(`Точно добавить? 2 из добавляемых строк уже есть в счёте под теми же названиями — они задвоятся. ${NO_UNDO}`)
     // Одна совпавшая — тоже дубль.
-    expect(writeConfirmations('append', ['[102] Вёрстка'], ['[102] Вёрстка', '[104] Сервер'])[1]!.text).toContain('уже есть 1 поз.')
+    expect(writeConfirmations('append', ['[102] Вёрстка'], ['[102] Вёрстка', '[104] Сервер'])[1]!.text).toContain('Точно добавить? 1 из добавляемых')
+    // Добавляемые с повтором: считаются они, а не позиции счёта (аргументы duplicateCount не переставлены).
+    expect(writeConfirmations('append', ['[10] Правки'], ['[10] Правки', '[10] Правки'])[1]!.text).toContain('Точно добавить? 2 из добавляемых')
   })
 
   it('«Добавить» в пустой счёт — тоже дважды: так просил владелец; дублей нет — о них не пугаем', () => {
@@ -49,30 +57,60 @@ describe('writeConfirmations — что спросить перед запись
   })
 })
 
+const pos = (id: number, productName = `поз. ${id}`) => ({ id, productName })
+
 describe('шаги вопросов на странице', () => {
-  it('«Добавить»: два «да» подряд — потом запись; помнит, о скольких позициях спросили', () => {
-    const first = startConfirm('append', ['a'], ['x'])
-    expect(first).toMatchObject({ mode: 'append', step: 0, existing: 1 })
+  it('«Добавить»: два «да» подряд — потом запись; помнит, о каких позициях спросили', () => {
+    const first = startConfirm('append', [pos(7, 'a')], ['a'])
+    expect(first).toMatchObject({ mode: 'append', step: 0, existingIds: [7] })
     expect(first!.questions).toHaveLength(2)
+    // Названия позиций — в вопросы: «a» уже в счёте.
+    expect(first!.questions[1]!.text).toContain('1 из добавляемых')
     const second = answerYes(first!)
-    expect(second).toMatchObject({ step: 1, existing: 1 })
+    expect(second).toMatchObject({ step: 1, existingIds: [7] })
     expect(answerYes(second!)).toBeNull()
   })
 
   it('«Заменить» в пустой счёт — вопросов нет, пишем сразу; с позициями — одно «да»', () => {
     expect(startConfirm('replace', [], ['x'])).toBeNull()
-    const state = startConfirm('replace', ['a', 'b'], ['x'])
-    expect(state).toMatchObject({ step: 0, existing: 2 })
+    const state = startConfirm('replace', [pos(1), pos(2)], ['x'])
+    expect(state).toMatchObject({ step: 0, existingIds: [1, 2] })
     expect(answerYes(state!)).toBeNull()
+  })
+
+  it('кнопка согласия неактивна после вопроса заметную долю секунды — двойной клик не проскочит', () => {
+    expect(CONFIRM_ARM_MS).toBeGreaterThanOrEqual(500)
+    expect(CONFIRM_ARM_MS).toBeLessThanOrEqual(1000)
   })
 })
 
 describe('positionsChanged — позиции счёта изменились после вопроса', () => {
-  it('то же число — пишем; другое — стоп с объяснением', () => {
-    expect(positionsChanged(2, 2)).toBeNull()
-    // Позицию удалили — тоже изменение: вопрос называл другое число.
-    expect(positionsChanged(3, 2)).toContain('было 3 поз., стало 2')
-    expect(positionsChanged(0, 1)).toBe('Позиции счёта изменились, пока открыт предпросмотр: было 0 поз., стало 1. '
-      + 'Ничего не записано — проверьте счёт и нажмите кнопку записи ещё раз.')
+  const tail = 'Ничего не записано — проверьте счёт и нажмите кнопку записи ещё раз.'
+
+  it('тот же состав (в любом порядке) — пишем', () => {
+    expect(positionsChanged([1, 2], [2, 1])).toBeNull()
+    expect(positionsChanged([], [])).toBeNull()
+  })
+
+  it('добавили или удалили позицию — стоп с числами', () => {
+    expect(positionsChanged([], [5])).toBe(`Позиции счёта изменились, пока открыт предпросмотр (было 0 поз., стало 1). ${tail}`)
+    expect(positionsChanged([1, 2, 3], [1, 2])).toContain('было 3 поз., стало 2')
+  })
+
+  it('удалили одну и добавили другую — число то же, но стоп: «Заменить» стёрло бы новую', () => {
+    expect(positionsChanged([1, 2, 3], [1, 2, 4])).toBe(`Позиции счёта изменились, пока открыт предпросмотр (их столько же, но состав другой). ${tail}`)
+    // Повтор ID в ответе не маскирует пропавшую позицию.
+    expect(positionsChanged([1, 2], [1, 1])).not.toBeNull()
+  })
+})
+
+describe('writeBlocker — решение перед записью после перечитывания счёта', () => {
+  it('счёт изменился (реквизиты, валюта, сделка) — stale, даже если позиции те же', () => {
+    expect(writeBlocker('Реквизиты счёта изменились', [1], [1])).toEqual({ kind: 'stale', message: 'Реквизиты счёта изменились' })
+  })
+
+  it('позиции изменились — changed; всё то же — пишем', () => {
+    expect(writeBlocker(null, [1], [1, 2])).toMatchObject({ kind: 'changed' })
+    expect(writeBlocker(null, [1], [1])).toBeNull()
   })
 })

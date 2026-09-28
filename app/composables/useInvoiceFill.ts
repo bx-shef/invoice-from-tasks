@@ -36,7 +36,7 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
-import { positionsChanged } from '~/utils/writeConfirm'
+import { writeBlocker } from '~/utils/writeConfirm'
 import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
@@ -294,10 +294,11 @@ export function useInvoiceFill() {
    * Автоматических повторов SDK при сетевых сбоях нет (config/b24.ts → sdkRestrictionParams), а
    * итог определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
    * нет ли лишних строк, можно ли повторять.
-   * `askedExisting` — сколько позиций было в счёте, когда сотрудника спросили (writeConfirm.ts):
-   * изменилось — не пишем, предпросмотр остаётся, вопрос зададут заново с верным числом.
+   * `askedIds` — позиции счёта, о которых спросили (writeConfirm.ts); обязателен, чтобы новый путь
+   * записи не мог молча обойти сверку: состав изменился — не пишем, предпросмотр остаётся, вопрос
+   * зададут заново.
    */
-  async function write(replace: boolean, askedExisting?: number): Promise<void> {
+  async function write(replace: boolean, askedIds: readonly number[]): Promise<void> {
     const inv = invoice.value
     if (!inv || !canWrite.value || !result.value) return
     const mode: WriteMode = replace ? 'replace' : 'append'
@@ -314,18 +315,18 @@ export function useInvoiceFill() {
     } catch (e) {
       stale = e instanceof Error ? e.message : String(e)
     }
-    if (stale) {
+    const block = writeBlocker(stale, askedIds, existing.value.map(r => r.id))
+    if (block?.kind === 'stale') {
       writing.value = null
-      error.value = stale
+      error.value = block.message
       result.value = null
       step.value = 'idle'
       return
     }
-    const changed = askedExisting === undefined ? null : positionsChanged(askedExisting, existing.value.length)
-    if (changed) {
+    if (block) {
       // Под кнопками записи (notice), а не наверху страницы: сотрудник смотрит туда, куда нажал.
       writing.value = null
-      notice.value = changed
+      notice.value = block.message
       step.value = 'preview'
       return
     }

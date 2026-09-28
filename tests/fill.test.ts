@@ -392,6 +392,8 @@ describe('ID задачи в названии строки (настройка t
 
   it('название уже начинается с «[102]» — второй раз не добавляется; «[1020]» — не то же самое', () => {
     expect(withTaskId('[102] Сверстать лендинг', 102)).toBe('[102] Сверстать лендинг')
+    // И в этой ветке — предел длины: сырое название тоже приходит (функция экспортирована).
+    expect(withTaskId(`[102] ${'я'.repeat(MAX_ROW_NAME)}`, 102)).toHaveLength(MAX_ROW_NAME)
     expect(withTaskId('[1020] Сверстать лендинг', 102)).toBe('[102] [1020] Сверстать лендинг')
   })
 
@@ -408,6 +410,13 @@ describe('ID задачи в названии строки (настройка t
     expect(finishRows(built, names, false).rows.map(r => r.name)).toEqual(['Название 1', 'Название 2'])
     // Режим «как есть» (names = null) — только ID; ошибки сборки остаются.
     expect(finishRows(built, null, true).rows.map(r => r.name)).toEqual(['[10] Вёрстка шапки', '[10] Правки по макету'])
+  })
+
+  it('finishRows: ошибки сборки остаются — и в режиме «как есть», и когда названия всё же переданы', () => {
+    const built = { ...buildRows(input({ mode: 'time' })), errors: [{ taskId: 5, message: 'нет ставки' }] }
+    const names = Object.fromEntries(built.rows.map(r => [r.key, 'Название']))
+    expect(finishRows(built, null, true).errors).toEqual([{ taskId: 5, message: 'нет ставки' }])
+    expect(finishRows(built, names, true).errors).toEqual([{ taskId: 5, message: 'нет ставки' }])
   })
 
   it('finishRows: BitrixGPT не вернул название — ошибка строки, как у applyNames', () => {

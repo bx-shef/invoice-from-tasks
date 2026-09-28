@@ -7,7 +7,15 @@
 // confirm молча отвечает «нет» — кнопки записи перестали бы работать без единого слова (находка
 // /code-review и программиста панели).
 
+import { clampName } from '#shared/domain/fill'
 import type { WriteMode } from './writeOutcome'
+
+/**
+ * Пауза, пока кнопка согласия неактивна после каждого вопроса: двойной клик по «Да, добавить»
+ * иначе попадал бы во вторую кнопку на том же месте и отвечал «да» на вопрос, которого не
+ * прочли (находка второго круга). Системный `confirm` второй клик глотал сам.
+ */
+export const CONFIRM_ARM_MS = 700
 
 /** Вопрос перед записью: текст и надпись кнопки согласия. */
 export interface WriteQuestion {
@@ -25,11 +33,14 @@ export function rowsWord(n: number): string {
   return 'строк'
 }
 
-const nameKey = (name: string) => name.trim().toLowerCase()
+/** Название для сравнения — как его запишет приложение (`clampName`: пробелы схлопнуты), без регистра. */
+const nameKey = (name: string) => clampName(name).toLocaleLowerCase('ru')
 
 /**
- * Сколько добавляемых строк уже есть в счёте под тем же названием (без учёта регистра и пробелов
- * по краям). С «[ID]» в названии совпадение надёжное; без него — подсказка, а не доказательство.
+ * Сколько ДОБАВЛЯЕМЫХ строк совпадает по названию с позициями счёта (регистр и лишние пробелы не
+ * важны): столько строк задвоится. Считаются добавляемые, а не позиции счёта: три записи «[10]
+ * Правки» к одной такой позиции — три дубля. С «[ID]» в названии совпадение надёжное; без него —
+ * подсказка, а не доказательство.
  */
 export function duplicateCount(existingNames: readonly string[], plannedNames: readonly string[]): number {
   const have = new Set(existingNames.map(nameKey))
@@ -54,7 +65,7 @@ export function writeConfirmations(mode: WriteMode, existingNames: readonly stri
   const what = `${planned} ${rowsWord(planned)}`
   const dup = duplicateCount(existingNames, plannedNames)
   const risk = dup > 0
-    ? `В счёте уже есть ${dup} поз. с такими же названиями — после добавления они задвоятся. `
+    ? `${dup} из добавляемых строк уже есть в счёте под теми же названиями — они задвоятся. `
     : existing > 0 ? 'Если эти задачи уже добавляли в счёт, позиции задвоятся. ' : ''
   return [
     {
@@ -67,20 +78,26 @@ export function writeConfirmations(mode: WriteMode, existingNames: readonly stri
   ]
 }
 
-/** Идущие вопросы: какой задан сейчас и сколько позиций было в счёте, когда спросили. */
+/** Позиция счёта — то, что нужно вопросам: ID для сверки перед записью и название для дублей. */
+export interface ExistingPosition {
+  id: number
+  productName: string
+}
+
+/** Идущие вопросы: какой задан сейчас и какие позиции были в счёте, когда спросили. */
 export interface ConfirmState {
   mode: WriteMode
   questions: WriteQuestion[]
   /** Номер текущего вопроса, с нуля. */
   step: number
-  /** Позиций в счёте, о которых спросили: перед записью сверяется ({@link positionsChanged}). */
-  existing: number
+  /** ID позиций счёта, о которых спросили: перед записью сверяются ({@link positionsChanged}). */
+  existingIds: number[]
 }
 
 /** Начать вопросы; `null` — спрашивать нечего, можно писать сразу. */
-export function startConfirm(mode: WriteMode, existingNames: readonly string[], plannedNames: readonly string[]): ConfirmState | null {
-  const questions = writeConfirmations(mode, existingNames, plannedNames)
-  return questions.length ? { mode, questions, step: 0, existing: existingNames.length } : null
+export function startConfirm(mode: WriteMode, existing: readonly ExistingPosition[], plannedNames: readonly string[]): ConfirmState | null {
+  const questions = writeConfirmations(mode, existing.map(p => p.productName), plannedNames)
+  return questions.length ? { mode, questions, step: 0, existingIds: existing.map(p => p.id) } : null
 }
 
 /** Ответ «да»: следующий вопрос или `null` — все пройдены, пора писать. */
@@ -91,11 +108,37 @@ export function answerYes(state: ConfirmState): ConfirmState | null {
 /**
  * Позиции счёта изменились с тех пор, как о них спросили (коллега или сам сотрудник добавил товар в
  * карточке, пока открыт предпросмотр): «Заменить» молча стёрло бы новый товар, а вопрос «Добавить»
- * называл бы не то число (находка /code-review). Текст ошибки или `null` — можно писать.
+ * называл бы не то число (находка /code-review). Сверяется состав по ID, а не число: «удалили одну,
+ * добавили другую» число не меняет (находка второго круга). Текст или `null` — можно писать.
  */
-export function positionsChanged(asked: number, now: number): string | null {
-  return asked === now
-    ? null
-    : `Позиции счёта изменились, пока открыт предпросмотр: было ${asked} поз., стало ${now}. `
-      + 'Ничего не записано — проверьте счёт и нажмите кнопку записи ещё раз.'
+export function positionsChanged(askedIds: readonly number[], nowIds: readonly number[]): string | null {
+  const asked = new Set(askedIds)
+  const now = new Set(nowIds)
+  if (asked.size === now.size && [...now].every(id => asked.has(id))) return null
+  const how = askedIds.length === nowIds.length
+    ? 'их столько же, но состав другой'
+    : `было ${askedIds.length} поз., стало ${nowIds.length}`
+  return `Позиции счёта изменились, пока открыт предпросмотр (${how}). `
+    + 'Ничего не записано — проверьте счёт и нажмите кнопку записи ещё раз.'
+}
+
+/** Почему запись не пошла после перечитывания счёта. */
+export interface WriteBlock {
+  /**
+   * `stale` — счёт изменился (реквизиты, валюта, сделка) или не перечитан: строки не те, предпросмотр
+   * сбросить. `changed` — изменились позиции: строки верны, предпросмотр оставить, спросить заново.
+   */
+  kind: 'stale' | 'changed'
+  message: string
+}
+
+/**
+ * Решение перед записью — чистой функцией, чтобы его ловил тест (CLAUDE.md: решение — в чистом
+ * модуле, находка второго круга): `stale` — итог invoiceChangedSince или ошибка перечитывания,
+ * `askedIds` — позиции, о которых спросили, `nowIds` — позиции перечитанного счёта.
+ */
+export function writeBlocker(stale: string | null, askedIds: readonly number[], nowIds: readonly number[]): WriteBlock | null {
+  if (stale) return { kind: 'stale', message: stale }
+  const changed = positionsChanged(askedIds, nowIds)
+  return changed ? { kind: 'changed', message: changed } : null
 }

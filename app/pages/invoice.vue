@@ -64,6 +64,11 @@ const confirming = ref<ConfirmState | null>(null)
 watch(result, () => {
   confirming.value = null
 })
+/**
+ * Пока открыт вопрос, источник, тип и «Собрать строки» заблокированы: иначе вопрос молча исчез бы
+ * вместе со строками, о которых спрашивал (находка второго круга). Выйти — «Отмена».
+ */
+const locked = computed(() => busy.value || confirming.value !== null)
 
 onMounted(async () => {
   const frame = await b24.init()
@@ -105,22 +110,29 @@ async function collect() {
 }
 
 /** «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts). */
-function write(replace: boolean) {
+async function write(replace: boolean) {
+  // Прежнее «позиции изменились — нажмите ещё раз» к новому вопросу уже не относится.
+  fill.notice.value = ''
   const existing = fill.existing.value
-  const state = startConfirm(replace ? 'replace' : 'append', existing.map(r => r.productName), result.value?.rows.map(r => r.name) ?? [])
+  const state = startConfirm(replace ? 'replace' : 'append', existing, result.value?.rows.map(r => r.name) ?? [])
   if (state) confirming.value = state
-  else void doWrite(replace, existing.length)
+  else await doWrite(replace, existing.map(r => r.id))
 }
 
-function confirmYes() {
+async function confirmYes() {
   const state = confirming.value
   if (!state) return
   confirming.value = answerYes(state)
-  if (!confirming.value) void doWrite(state.mode === 'replace', state.existing)
+  if (!confirming.value) await doWrite(state.mode === 'replace', state.existingIds)
 }
 
-async function doWrite(replace: boolean, askedExisting: number) {
-  await fill.write(replace, askedExisting)
+function cancelConfirm() {
+  confirming.value = null
+  fill.notice.value = ''
+}
+
+async function doWrite(replace: boolean, askedIds: readonly number[]) {
+  await fill.write(replace, askedIds)
   if (fill.step.value === 'done') toast.add({ title: 'Товары счёта обновлены', description: 'Обновите карточку счёта, чтобы увидеть изменения', color: 'air-primary-success' })
 }
 
@@ -178,7 +190,7 @@ async function consult(promptId: string) {
                 v-model="source"
                 :items="sourceItems"
                 value-key="value"
-                :disabled="busy"
+                :disabled="locked"
                 data-testid="fill-source"
               />
             </B24FormField>
@@ -187,7 +199,7 @@ async function consult(promptId: string) {
                 v-model="mode"
                 :items="modeItems"
                 value-key="value"
-                :disabled="busy"
+                :disabled="locked"
                 data-testid="fill-mode"
               />
             </B24FormField>
@@ -198,7 +210,7 @@ async function consult(promptId: string) {
                 color="air-primary"
                 label="Собрать строки"
                 :loading="fill.step.value === 'collecting' || measuresLoading"
-                :disabled="busy || !fill.invoice.value || measuresLoading"
+                :disabled="locked || !fill.invoice.value || measuresLoading"
                 data-testid="fill-collect"
                 @click="collect"
               />
@@ -240,7 +252,7 @@ async function consult(promptId: string) {
           v-if="confirming && fill.canWrite.value"
           :state="confirming"
           @confirm="confirmYes"
-          @cancel="confirming = null"
+          @cancel="cancelConfirm"
         />
         <!-- Во время записи кнопки остаются на месте: иначе индикатор загрузки некому показать. -->
         <div

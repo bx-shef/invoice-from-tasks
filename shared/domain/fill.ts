@@ -362,7 +362,8 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
  */
 export function withTaskId(name: string, taskId: number): string {
   const prefix = `[${taskId}]`
-  return name.startsWith(prefix) ? name : clampName(`${prefix} ${name}`)
+  // Обрезка — в обеих ветках: функция экспортирована, и сырое название длиннее предела тоже придёт.
+  return clampName(name.startsWith(prefix) ? name : `${prefix} ${name}`)
 }
 
 /**
@@ -377,12 +378,13 @@ export function applyTaskIds(rows: DraftRow[], enabled: boolean): DraftRow[] {
  * Последний шаг сборки — одна функция для страницы, смока и будущих путей записи («Создать счёт»):
  * сначала названия от BitrixGPT (`names`; `null` — режим «как есть»), потом ID задачи по
  * настройке. Порядок важен: названия от BitrixGPT заменяют название целиком, и ID, добавленный
- * раньше, пропал бы (находка /code-review). Ошибки названий заменяют ошибки сборки: названия
- * запрашиваются, только когда ошибок сборки нет.
+ * раньше, пропал бы (находка /code-review). Ошибки названий добавляются к ошибкам сборки, а не
+ * заменяют их: вызывающий, запросивший названия при ошибках сборки, не получит «ошибок нет» и не
+ * запишет счёт с недостающими данными (находка второго круга).
  */
 export function finishRows(built: FillResult, names: Record<string, string> | null, taskIdInName: boolean): FillResult {
-  const named = names ? applyNames(built.rows, names) : { rows: built.rows, errors: built.errors }
-  return { ...built, rows: applyTaskIds(named.rows, taskIdInName), errors: named.errors }
+  const named = names ? applyNames(built.rows, names) : { rows: built.rows, errors: [] }
+  return { ...built, rows: applyTaskIds(named.rows, taskIdInName), errors: [...built.errors, ...named.errors] }
 }
 
 /**
