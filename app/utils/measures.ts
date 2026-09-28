@@ -189,7 +189,8 @@ export function isHourName(text: string): boolean {
   return words.some((word, i) => {
     if (HOUR_WORDS.has(word)) return words[i - 1] !== 'в' && words[i - 1] !== 'per'
     const parts = word.split(/[-.]+/).filter(Boolean)
-    return parts.length > 1 && HOUR_WORDS.has(parts.at(-1)!) && parts.slice(0, -1).every(p => HOUR_PREFIXES.has(p))
+    // Одиночное слово уже разобрано выше: здесь — составные «человеко-час», «чел.-ч».
+    return HOUR_WORDS.has(parts.at(-1) ?? '') && parts.slice(0, -1).every(p => HOUR_PREFIXES.has(p))
   })
 }
 
