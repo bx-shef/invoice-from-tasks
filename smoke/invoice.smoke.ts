@@ -167,7 +167,6 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
     // Незакрытые задачи — отдельным списком, завершённая («сервер») в нём не значится; строки есть.
     expect(built.openTasks.map(t => t.taskId).sort()).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
-    expect(built.openTasks.map(t => t.status)).not.toContain('завершена')
   })
 
   it('источник «сделка» у счёта без сделки — остановка до чтения задач', () => {
@@ -257,12 +256,12 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
         const amounts = lineAmounts(rows[i]!)
         expect([tax.opportunity, tax.taxValue], `${rows[i]!.price} × ${rows[i]!.quantity}`).toEqual([amounts.total, amounts.vat])
       }
-      // Все строки одним счётом: налог счёта — ровно сумма столбца «Сумма налога», итог — vatTotals.
+      // Все строки одним счётом: итог и налог — vatTotals (налог — сумма столбца «Сумма налога»).
       const { method, params } = replaceRowsCall(fx!.invoices.base, toProductRows(rows, settings))
       await portal.call(method, params)
       const tax = await taxOf(fx!.invoices.base)
-      expect(tax.taxValue).toBe(roundMoney(rows.reduce((sum, r) => sum + lineAmounts(r).vat, 0)))
-      expect(tax.opportunity).toBe(vatTotals(rows).total)
+      const totals = vatTotals(rows)
+      expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
     })
 
     it('«Добавить» с ошибкой посередине: портал останавливается, итог — «добавлено 1 из 3»', async () => {

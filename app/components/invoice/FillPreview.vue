@@ -1,12 +1,23 @@
 <script setup lang="ts">
 // Предпросмотр строк счёта и проблем. Ничего не пишет — только показывает, что будет записано.
 // Столбцы — как в товарной части счёта портала, расчёт строки — подстрокой под названием
-// (просьба владельца 2026-09-28). Что стоит в каждом столбце и все подписи — app/utils/fillPreview.ts
-// (с тестами); здесь только разметка.
+// (просьба владельца 2026-09-28). Столбцы, ячейки, итоги и подписи — app/utils/fillPreview.ts
+// (с тестами); шаблон только обходит их массивы — переставить здесь столбец нечем.
+import type { CurrencyConversion } from '#shared/domain/currency'
 import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import type { VatRate, VatTotals } from '#shared/domain/vat'
-import { driftNote, formatMoney, issueText, openTaskText, placementNote, previewLine, vatCaption } from '~/utils/fillPreview'
+import {
+  driftNote,
+  issueText,
+  OPEN_TASKS_TITLE,
+  openTaskText,
+  placementNote,
+  PREVIEW_COLUMNS,
+  previewLine,
+  previewTotals,
+  taskHref
+} from '~/utils/fillPreview'
 
 const props = defineProps<{
   rows: DraftRow[]
@@ -24,24 +35,21 @@ const props = defineProps<{
   unit: string
   /** Валюта счёта — в ней цены и суммы. */
   currency: string
-  /** Валюта ставок; отличается от валюты счёта — ставка в подстроке подписана ею и «по курсу». */
-  rateCurrency: string
+  /** Пересчёт цен в валюту счёта; есть — ставка в подстроке подписана «по курсу». */
+  conversion: CurrencyConversion | null
   /** Адрес портала для ссылок на задачи (`https://portal.bitrix24.ru`). */
   origin: string
   userLabel: (id: number) => string
 }>()
 
-const lines = computed(() => props.rows.map(row => previewLine(row, {
-  currency: props.currency,
-  rateCurrency: props.rateCurrency,
+const lines = computed(() => props.rows.map(row => previewLine(row, props.unit, {
+  convertedFrom: props.conversion?.from ?? null,
   userLabel: props.userLabel
 })))
+const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
-const drift = computed(() => driftNote(lines.value, props.totals))
-
-function taskHref(taskId: number): string {
-  return `${props.origin}/company/personal/user/0/tasks/task/view/${taskId}/`
-}
+const drift = computed(() => driftNote(props.rows, props.totals))
+const href = (taskId: number) => taskHref(props.origin, taskId)
 </script>
 
 <template>
@@ -60,7 +68,7 @@ function taskHref(taskId: number): string {
           >
             <a
               v-if="issue.taskId"
-              :href="taskHref(issue.taskId)"
+              :href="href(issue.taskId)"
               target="_blank"
               rel="noopener"
               class="underline"
@@ -83,7 +91,7 @@ function taskHref(taskId: number): string {
           >
             <a
               v-if="issue.taskId"
-              :href="taskHref(issue.taskId)"
+              :href="href(issue.taskId)"
               target="_blank"
               rel="noopener"
               class="underline"
@@ -96,7 +104,7 @@ function taskHref(taskId: number): string {
     <B24Alert
       v-if="openTasks.length"
       color="air-primary-warning"
-      title="Не все задачи закрыты — время в них ещё может добавиться; записать счёт можно"
+      :title="OPEN_TASKS_TITLE"
       data-testid="fill-open-tasks"
     >
       <template #description>
@@ -105,7 +113,7 @@ function taskHref(taskId: number): string {
           :key="task.taskId"
           class="mr-1"
         ><a
-          :href="taskHref(task.taskId)"
+          :href="href(task.taskId)"
           target="_blank"
           rel="noopener"
           class="underline"
@@ -132,23 +140,13 @@ function taskHref(taskId: number): string {
             <th class="py-2 pr-3 font-medium">
               Название строки
             </th>
-            <th class="py-2 pr-3 font-medium text-right">
-              Цена
-            </th>
-            <th class="py-2 pr-3 font-medium text-right">
-              Количество
-            </th>
-            <th class="py-2 pr-3 font-medium text-right">
-              Налог
-            </th>
-            <th class="py-2 pr-3 font-medium text-center">
-              Включён
-            </th>
-            <th class="py-2 pr-3 font-medium text-right">
-              Сумма налога
-            </th>
-            <th class="py-2 font-medium text-right">
-              Сумма
+            <th
+              v-for="(column, c) in PREVIEW_COLUMNS"
+              :key="column.title"
+              class="py-2 font-medium whitespace-nowrap"
+              :class="[column.align === 'center' ? 'text-center' : 'text-right', c < PREVIEW_COLUMNS.length - 1 ? 'pr-3' : '']"
+            >
+              {{ column.title }}
             </th>
           </tr>
         </thead>
@@ -164,78 +162,42 @@ function taskHref(taskId: number): string {
               <span class="block text-xs opacity-60">
                 <span :title="line.rateTitle">{{ line.basis }}</span> ·
                 <a
-                  :href="taskHref(line.row.taskId)"
+                  :href="href(line.row.taskId)"
                   target="_blank"
                   rel="noopener"
                   class="underline"
                 >задача #{{ line.row.taskId }}</a>
               </span>
             </td>
-            <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ line.price }}
-            </td>
-            <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ line.quantity }}<span
-                v-if="unit"
-                class="opacity-60 ml-1"
-              >{{ unit }}</span>
-            </td>
-            <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ line.tax }}
-            </td>
-            <td class="py-2 pr-3 text-center">
-              {{ line.included }}
-            </td>
-            <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ line.vat }}
-            </td>
-            <td class="py-2 text-right whitespace-nowrap">
-              {{ line.total }}
+            <td
+              v-for="(cell, c) in line.cells"
+              :key="c"
+              class="py-2 whitespace-nowrap"
+              :class="[PREVIEW_COLUMNS[c]?.align === 'center' ? 'text-center' : 'text-right', c < line.cells.length - 1 ? 'pr-3' : '']"
+            >
+              {{ cell }}
             </td>
           </tr>
         </tbody>
         <tfoot>
-          <tr class="border-t border-(--ui-color-divider-less)">
+          <tr
+            v-for="(item, i) in footer"
+            :key="item.testId"
+            :class="[{ 'text-base font-semibold': item.strong }, { 'border-t border-(--ui-color-divider-less)': i === 0 }]"
+          >
             <td
-              colspan="6"
-              class="pt-3 pb-1 pr-3 text-right"
-            >
-              Сумма без налога:
-            </td>
-            <td
-              class="pt-3 pb-1 text-right whitespace-nowrap"
-              data-testid="fill-net"
-            >
-              {{ formatMoney(totals.net) }}
-            </td>
-          </tr>
-          <tr>
-            <td
-              colspan="6"
+              :colspan="PREVIEW_COLUMNS.length"
               class="py-1 pr-3 text-right"
-              data-testid="fill-vat-label"
+              :class="{ 'pt-3': i === 0, 'py-2': item.strong }"
             >
-              {{ vatCaption(vat) }}
+              {{ item.label }}
             </td>
             <td
               class="py-1 text-right whitespace-nowrap"
-              data-testid="fill-vat"
+              :class="{ 'pt-3': i === 0, 'py-2': item.strong }"
+              :data-testid="item.testId"
             >
-              {{ formatMoney(totals.vat) }}
-            </td>
-          </tr>
-          <tr class="text-base font-semibold">
-            <td
-              colspan="6"
-              class="py-2 pr-3 text-right"
-            >
-              Общая сумма:
-            </td>
-            <td
-              class="py-2 text-right whitespace-nowrap"
-              data-testid="fill-total"
-            >
-              {{ formatMoney(totals.total) }} {{ currency }}
+              {{ item.value }}
             </td>
           </tr>
         </tfoot>

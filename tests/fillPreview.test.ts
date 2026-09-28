@@ -4,17 +4,22 @@ import { vatTotals } from '#shared/domain/vat'
 import {
   driftNote,
   formatMoney,
+  formatNumber,
   hoursText,
   issueText,
+  OPEN_TASKS_TITLE,
   openTaskText,
   placementNote,
+  PREVIEW_COLUMNS,
   previewLine,
+  previewTotals,
   rateBasis,
+  taskHref,
   vatCaption,
   type PreviewContext
 } from '~/utils/fillPreview'
 
-// Портал и Node пишут тысячи через неразрывный пробел: «1 122,00».
+// Карточка счёта пишет тысячи через неразрывный пробел: «1 122,00».
 const nb = (text: string) => text.replace(/ /g, ' ')
 
 /** Строка t2 счёта t12 (живая проверка владельца 2026-09-28): 5 ч 01 мин → 5,5 ч по 170 при 20%. */
@@ -37,40 +42,89 @@ const row: DraftRow = {
   taxRate: 20
 }
 
-const ctx: PreviewContext = { currency: 'BYN', rateCurrency: 'BYN', userLabel: id => (id === 1 ? 'Игорь Шевчик' : `#${id}`) }
+const ctx: PreviewContext = { convertedFrom: null, userLabel: id => (id === 1 ? 'Игорь Шевчик' : `#${id}`) }
 
-describe('previewLine — столбцы как в товарной части счёта', () => {
-  it('t2 из счёта t12: цена, количество, налог, включён, сумма налога, сумма — как у портала', () => {
-    const line = previewLine(row, ctx)
-    expect([line.price, line.quantity, line.tax, line.included, line.vat, line.total])
-      .toEqual(['170,00', '5,5', '20%', 'нет', '187,00', nb('1 122,00')])
-    expect(line.totalValue).toBe(1122)
+describe('столбцы — как в товарной части счёта', () => {
+  it('порядок и выравнивание столбцов справа от названия строки', () => {
+    expect(PREVIEW_COLUMNS.map(c => c.title)).toEqual(['Цена', 'Количество', 'Налог', 'Включён', 'Сумма налога', 'Сумма'])
+    expect(PREVIEW_COLUMNS.map(c => c.align)).toEqual(['right', 'right', 'right', 'center', 'right', 'right'])
+  })
+
+  it('t2 из счёта t12: ячейки по порядку столбцов — цифры как у портала', () => {
+    const line = previewLine(row, 'ч', ctx)
+    expect(line.cells).toEqual(['170,00', nb('5,5 ч'), '20%', 'нет', '187,00', nb('1 122,00')])
+    expect(line.cells).toHaveLength(PREVIEW_COLUMNS.length)
+  })
+
+  it('единица не задана — количество без неё', () => {
+    expect(previewLine(row, '', ctx).cells[1]).toBe('5,5')
   })
 
   it('режим «сумма × 1»: цена — сумма строки, количество 1; суммы те же', () => {
-    const line = previewLine({ ...row, price: 935, quantity: 1 }, ctx)
-    expect([line.price, line.quantity, line.vat, line.total]).toEqual(['935,00', '1', '187,00', nb('1 122,00')])
+    expect(previewLine({ ...row, price: 935, quantity: 1 }, 'шт', ctx).cells)
+      .toEqual(['935,00', nb('1 шт'), '20%', 'нет', '187,00', nb('1 122,00')])
   })
 
   it('граница копейки: налог и сумма строки — округлены каждая отдельно (2,75 × 1,5 → 0,83 и 4,95)', () => {
-    const line = previewLine({ ...row, price: 2.75, quantity: 1.5 }, ctx)
-    expect([line.vat, line.total]).toEqual(['0,83', '4,95'])
+    expect(previewLine({ ...row, price: 2.75, quantity: 1.5 }, '', ctx).cells.slice(4)).toEqual(['0,83', '4,95'])
   })
 
   it('«Без НДС»: налог «Без НДС», «Включён» — прочерк, сумма = цена × количество', () => {
-    const line = previewLine({ ...row, taxRate: null }, ctx)
-    expect([line.tax, line.included, line.vat, line.total]).toEqual(['Без НДС', '—', '0,00', '935,00'])
+    expect(previewLine({ ...row, taxRate: null }, '', ctx).cells.slice(2)).toEqual(['Без НДС', '—', '0,00', '935,00'])
   })
 
   it('НДС 0% — это ставка, а не «Без НДС»', () => {
-    expect(previewLine({ ...row, taxRate: 0 }, ctx)).toMatchObject({ tax: '0%', included: 'нет', total: '935,00' })
+    expect(previewLine({ ...row, taxRate: 0 }, '', ctx).cells.slice(2)).toEqual(['0%', 'нет', '0,00', '935,00'])
   })
 
   it('подстроки: кто, часы × цена часа = сумма без налога; откуда цена часа; дата ставки', () => {
-    const line = previewLine(row, ctx)
+    const line = previewLine(row, 'ч', ctx)
     expect(line.calc).toBe('Игорь Шевчик · 5,5 ч (списано 5 ч 01 мин) × 170,00 = 935,00')
     expect(line.basis).toBe('ставка 170,00 + наценка 0% (на всё)')
     expect(line.rateTitle).toBe('Ставка на 28.09.2026')
+  })
+})
+
+describe('итоги под таблицей', () => {
+  it('без налога, налог с реквизитами, общая сумма с валютой — в этом порядке', () => {
+    expect(previewTotals({ net: 1105, vat: 221, total: 1326 }, { rate: 20, company: 'ООО Альфа' }, 'BYN')).toEqual([
+      { label: 'Сумма без налога:', value: nb('1 105,00'), testId: 'fill-net', strong: false },
+      { label: 'Сумма налога (НДС 20% — реквизиты «ООО Альфа»):', value: '221,00', testId: 'fill-vat', strong: false },
+      { label: 'Общая сумма:', value: `${nb('1 326,00')} BYN`, testId: 'fill-total', strong: true }
+    ])
+  })
+
+  it('валюты у счёта нет — сумма без хвостового пробела', () => {
+    expect(previewTotals({ net: 1, vat: 0, total: 1 }, null, '')[2]!.value).toBe('1,00')
+  })
+
+  it('подпись налога: ставка и реквизиты; без НДС счёта — просто «Сумма налога:»', () => {
+    expect(vatCaption({ rate: null, company: 'ИП Бета' })).toBe('Сумма налога (Без НДС — реквизиты «ИП Бета»):')
+    expect(vatCaption(null)).toBe('Сумма налога:')
+  })
+})
+
+describe('числа — без toLocaleString, одинаково в любой среде', () => {
+  it('деньги: разряды через неразрывный пробел, копейки через запятую', () => {
+    expect(formatMoney(1326)).toBe(nb('1 326,00'))
+    expect(formatMoney(1_234_567.8)).toBe(nb('1 234 567,80'))
+    expect(formatMoney(0.83)).toBe('0,83')
+    expect(formatMoney(135.795)).toBe('135,80')
+  })
+
+  it('−0 и копеечный минус — «0,00», а не «-0,00»; настоящий минус остаётся', () => {
+    expect(formatMoney(-0)).toBe('0,00')
+    expect(formatMoney(-0.001)).toBe('0,00')
+    expect(formatMoney(-12.5)).toBe('-12,50')
+  })
+
+  it('количество и проценты: до четырёх знаков, без хвостовых нулей', () => {
+    expect(formatNumber(5.5)).toBe('5,5')
+    expect(formatNumber(1)).toBe('1')
+    expect(formatNumber(0.3333)).toBe('0,3333')
+    expect(formatNumber(0.33333)).toBe('0,3333')
+    expect(formatNumber(12_500)).toBe(nb('12 500'))
+    expect(formatNumber(-0)).toBe('0')
   })
 })
 
@@ -80,64 +134,64 @@ describe('подстроки расчёта', () => {
     expect(hoursText(row)).toBe('5,5 ч (списано 5 ч 01 мин)')
   })
 
-  it('наценка по тегу — с тегом; валюта ставок другая — «по курсу», иначе цена часа выглядит ошибкой', () => {
-    const tagged: DraftRow = { ...row, baseRate: 100, markupPercent: 70, markupSource: 'tag', markupTag: 'дизайн', hourPrice: 2.02 }
-    expect(rateBasis(tagged, { ...ctx, currency: 'USD', rateCurrency: 'RUB' })).toBe('ставка 100,00 RUB по курсу + наценка 70% (#дизайн)')
-    expect(rateBasis(tagged, ctx)).toBe('ставка 100,00 + наценка 70% (#дизайн)')
+  it('наценка по тегу — с тегом, дробная — с запятой; цены пересчитаны — «по курсу»', () => {
+    const tagged: DraftRow = { ...row, baseRate: 100, markupPercent: 12.5, markupSource: 'tag', markupTag: 'дизайн', hourPrice: 1.36 }
+    expect(rateBasis(tagged, { ...ctx, convertedFrom: 'RUB' })).toBe('ставка 100,00 RUB по курсу + наценка 12,5% (#дизайн)')
+    expect(rateBasis(tagged, ctx)).toBe('ставка 100,00 + наценка 12,5% (#дизайн)')
   })
 })
 
-describe('подписи таблицы', () => {
-  it('как строка ляжет в счёт — по режиму; «Без НДС» — без слов про налог сверху', () => {
+describe('placementNote — как строка ляжет в счёт', () => {
+  it('по режиму; «Без НДС» — без слов про налог сверху; 0% — ставка', () => {
     expect(placementNote('hour', 20)).toBe('Цена — без НДС, налог сверху (в цену не включён); в счёт: цена — цена часа, количество — часы')
     expect(placementNote('sum', 20)).toBe('Цена — без НДС, налог сверху (в цену не включён); в счёт: цена — сумма строки, количество — 1')
     expect(placementNote('hour', null)).toBe('Без НДС — налога в строках нет; в счёт: цена — цена часа, количество — часы')
     expect(placementNote('hour', 0)).toContain('налог сверху')
   })
+})
 
-  it('подпись налога: ставка и реквизиты; без НДС счёта — просто «Сумма налога:»', () => {
-    expect(vatCaption({ rate: 20, company: 'ООО Альфа' })).toBe('Сумма налога (НДС 20% — реквизиты «ООО Альфа»):')
-    expect(vatCaption({ rate: null, company: 'ИП Бета' })).toBe('Сумма налога (Без НДС — реквизиты «ИП Бета»):')
-    expect(vatCaption(null)).toBe('Сумма налога:')
+describe('driftNote — когда видимые числа строк не складываются в итоги', () => {
+  const withRows = (specs: Array<[number, number, number | null]>) =>
+    specs.map(([price, quantity, taxRate], i) => ({ ...row, key: `t${i}`, price, quantity, taxRate, sum: Math.round(price * quantity * 100) / 100 }))
+
+  it('всё сходится — пояснения нет (t12: 204 + 1122 = 1326, 170 + 935 = 1105)', () => {
+    const rows = withRows([[170, 1, 20], [170, 5.5, 20]])
+    expect(driftNote(rows, vatTotals(rows))).toBeNull()
   })
 
-  it('деньги — как в карточке счёта', () => {
-    expect(formatMoney(1326)).toBe(nb('1 326,00'))
-    expect(formatMoney(0.83)).toBe('0,83')
+  it('столбец «Сумма»: три строки по 0,01 при 20% — в строках 0,01 × 3, итог 0,04; подстроки — тоже', () => {
+    // Налог строк 0,002 → 0: без налога внизу 0,04 − 0 = 0,04, а в подстроках 0,01 × 3.
+    const rows = withRows([[0.01, 1, 20], [0.01, 1, 20], [0.01, 1, 20]])
+    expect(driftNote(rows, vatTotals(rows))).toBe('Каждая строка округлена до копеек, а «Общую сумму» портал округляет '
+      + 'один раз — поэтому столбец «Сумма» расходится с ней на 0,01. «Сумма без налога» — это «Общая сумма» минус '
+      + '«Сумма налога», а налог округлён по строкам — поэтому суммы в подстроках расчёта расходятся с ней на 0,01. '
+      + 'В счёте будут итоги как здесь.')
+  })
+
+  it('подстроки: одна строка 2,75 × 1,5 при 20% — «= 4,13», а «Сумма без налога» 4,95 − 0,83 = 4,12', () => {
+    const rows = withRows([[2.75, 1.5, 20]])
+    expect(vatTotals(rows).net).toBe(4.12)
+    expect(driftNote(rows, vatTotals(rows))).toBe('«Сумма без налога» — это «Общая сумма» минус «Сумма налога», а налог '
+      + 'округлён по строкам — поэтому суммы в подстроках расчёта расходятся с ней на 0,01. В счёте будут итоги как здесь.')
   })
 })
 
-describe('driftNote — пояснение, когда столбец «Сумма» расходится с «Общей суммой»', () => {
-  it('сходится — пояснения нет (t12: 204 + 1122 = 1326)', () => {
-    const rows = [{ ...row, price: 170, quantity: 1 }, row]
-    const lines = rows.map(r => previewLine(r, ctx))
-    expect(driftNote(lines, vatTotals(rows))).toBeNull()
-  })
-
-  it('три строки по 0,01 при 20%: в строках 0,01 × 3, итог 0,04 — пояснение с размером расхождения', () => {
-    const rows = Array.from({ length: 3 }, (_, i) => ({ ...row, key: `t${i}`, price: 0.01, quantity: 1 }))
-    const note = driftNote(rows.map(r => previewLine(r, ctx)), vatTotals(rows))
-    expect(note).toBe('Каждая строка округлена до копеек, а «Общую сумму» портал округляет один раз — поэтому '
-      + 'столбец «Сумма» расходится с ней на 0,01. В счёте будет «Общая сумма» как здесь.')
-  })
-
-  it('суммы без налога (подстроки) с итогом не сверяются: о столбце, которого нет, не говорим', () => {
-    // Те же 8 строк, что в замере 2026-09-28: без налога по строкам 3002,77, у портала 3002,74 — а
-    // «Сумма» сходится, поэтому пояснения нет.
-    const measured: Array<[number, number, number | null]> = [[170, 1, 20], [170, 5.5, 20], [935, 1, 20], [2.75, 1.5, 20], [123.45, 5.5, 20], [170, 1.25, null], [33.33, 0.3333, 20], [10.19, 5.5, 20]]
-    const rows = measured.map(([price, quantity, taxRate], i) => ({ ...row, key: `t${i}`, price, quantity, taxRate }))
-    expect(driftNote(rows.map(r => previewLine(r, ctx)), vatTotals(rows))).toBeNull()
-  })
-})
-
-describe('тексты проблем и незакрытых задач', () => {
-  it('после ссылки «Задача #N» — двоеточие без пробела перед ним; без задачи — только текст', () => {
-    expect(issueText({ taskId: 102, message: 'в задаче нет затраченного времени' })).toBe(': в задаче нет затраченного времени')
-    expect(issueText({ taskId: 0, message: 'не найдено ни одной задачи' })).toBe('не найдено ни одной задачи')
+describe('незакрытые задачи, проблемы, ссылки', () => {
+  it('заголовок блока не обещает запись: блок виден и когда записать нельзя', () => {
+    expect(OPEN_TASKS_TITLE).toBe('Не все задачи закрыты — время в них ещё может добавиться')
   })
 
   it('незакрытые задачи — через запятую, у последней запятой нет', () => {
     expect(openTaskText({ taskId: 102, status: 'ждёт выполнения' }, false)).toBe(' — ждёт выполнения,')
     expect(openTaskText({ taskId: 104, status: 'выполняется' }, true)).toBe(' — выполняется')
+  })
+
+  it('после ссылки «Задача #N» — двоеточие без пробела перед ним; без задачи — только текст', () => {
+    expect(issueText({ taskId: 102, message: 'в задаче нет затраченного времени' })).toBe(': в задаче нет затраченного времени')
+    expect(issueText({ taskId: 0, message: 'не найдено ни одной задачи' })).toBe('не найдено ни одной задачи')
+  })
+
+  it('ссылка на задачу — адрес портала и путь задачи', () => {
+    expect(taskHref('https://portal.bitrix24.by', 104)).toBe('https://portal.bitrix24.by/company/personal/user/0/tasks/task/view/104/')
   })
 })

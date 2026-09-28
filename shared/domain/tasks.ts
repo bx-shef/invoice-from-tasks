@@ -213,7 +213,7 @@ export function tasksBoundTo(rows: Row[], codes: string[]): TaskInfo[] {
   return [...byId.values()].sort((a, b) => a.id - b.id)
 }
 
-/** Адрес задачи в портале для ссылок в ошибках и предпросмотре. */
-export function taskUrl(domain: string, taskId: number): string {
-  return `https://${domain}/company/personal/user/0/tasks/task/view/${taskId}/`
+/** Путь задачи в портале для ссылок в ошибках и предпросмотре (адрес — origin портала + путь). */
+export function taskPath(taskId: number): string {
+  return `/company/personal/user/0/tasks/task/view/${taskId}/`
 }

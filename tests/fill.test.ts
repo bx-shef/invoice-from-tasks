@@ -267,8 +267,11 @@ describe('незакрытые задачи — отдельный список,
   })
 
   it('в общий список предупреждений не попадают: их бывает много, а предупреждения о суммах важнее', () => {
-    const res = buildRows(input({ tasks: [{ ...task, status: 3 }] }))
-    expect(res.warnings.some(w => w.message.includes('выполняется'))).toBe(false)
+    for (const mode of ['task', 'time'] as const) {
+      const open = buildRows(input({ mode, tasks: [{ ...task, status: 3 }] }))
+      const closed = buildRows(input({ mode, tasks: [{ ...task, status: 5 }] }))
+      expect(open.warnings).toEqual(closed.warnings)
+    }
   })
 
   it('задача с ошибкой тоже в списке — человек увидит всё сразу', () => {

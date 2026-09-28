@@ -61,6 +61,9 @@ describe('разбор задач', () => {
     expect(parseTask({ id: '1', title: 'X', status: 'completed' })?.status).toBeNull()
     expect(parseTask({ id: '1', title: 'X', status: '2.5' })?.status).toBeNull()
     expect(parseTask({ id: '1', title: 'X', status: {} })?.status).toBeNull()
+    // Не строка и не число — не статус: иначе ['5'] стало бы «завершена» и предупреждение пропало.
+    expect(parseTask({ id: '1', title: 'X', status: ['5'] })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: true })?.status).toBeNull()
     // Ноль и отрицательные — код как есть (портал их в `status` не шлёт: «просрочена» −1 — в
     // `subStatus`, замер 2026-09-28), чтобы не потерять предупреждение.
     expect(parseTask({ id: '1', title: 'X', status: '-1' })?.status).toBe(-1)

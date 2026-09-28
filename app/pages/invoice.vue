@@ -173,7 +173,7 @@ async function consult(promptId: string) {
           :price-mode="result.priceMode"
           :unit="measureSymbol(app.settings.value.measureCode)"
           :currency="fill.invoice.value?.currencyId ?? ''"
-          :rate-currency="app.settings.value.currency"
+          :conversion="fill.conversion.value"
           :origin="origin"
           :user-label="users.label"
         />
