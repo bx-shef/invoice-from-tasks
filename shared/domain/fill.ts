@@ -19,7 +19,7 @@ import type { CurrencyConversion } from './currency'
 import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
 import { findRate, type RateEntry } from './rates'
 import type { AppSettings, PriceMode } from './settings'
-import type { TaskInfo, TimeEntry } from './tasks'
+import { openTaskStatus, type TaskInfo, type TimeEntry } from './tasks'
 import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
 import { roundMoney } from './money'
 import { grossPrice, type VatRate } from './vat'
@@ -87,6 +87,13 @@ export interface FillIssue {
   message: string
 }
 
+/** Незакрытая задача: не мешает записи, но время в ней ещё может добавиться. */
+export interface OpenTask {
+  taskId: number
+  /** Название статуса, как в карточке задачи («выполняется»). */
+  status: string
+}
+
 export interface FillResult {
   rows: DraftRow[]
   /** Режим, которым собраны строки, — подпись предпросмотра берёт его, а не текущие настройки. */
@@ -94,6 +101,11 @@ export interface FillResult {
   errors: FillIssue[]
   /** Не мешают записи, но о них стоит знать (пересчёт валюты, смена ставки, пропуски). */
   warnings: FillIssue[]
+  /**
+   * Незакрытые задачи — отдельно от предупреждений: их бывает много (сделка из 30 задач в
+   * работе), и строкой на задачу они похоронили бы предупреждения, меняющие суммы.
+   */
+  openTasks: OpenTask[]
 }
 
 function userLabel(input: FillInput, userId: number): string {
@@ -263,13 +275,18 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
  * Собирает строки счёта. Если `errors` не пуст — писать в счёт нельзя, даже частично.
  */
 export function buildRows(input: FillInput): FillResult {
-  const result: FillResult = { rows: [], priceMode: input.settings.priceMode, errors: [], warnings: [] }
+  const result: FillResult = { rows: [], priceMode: input.settings.priceMode, errors: [], warnings: [], openTasks: [] }
   if (input.tasks.length === 0) {
     result.errors.push({ taskId: 0, message: 'не найдено ни одной задачи' })
     return result
   }
   if (input.mode === 'task') buildTaskRows(input, result)
   else buildTimeRows(input, result)
+  // Незакрытые задачи — предупреждение, не стоп: счёт бывает и до закрытия задачи.
+  for (const task of input.tasks) {
+    const status = openTaskStatus(task.status)
+    if (status) result.openTasks.push({ taskId: task.id, status })
+  }
   // Пересчёт валюты — первым предупреждением: он касается каждой цены в счёте.
   if (input.conversion && result.rows.length) result.warnings.unshift({ taskId: 0, message: input.conversion.notice })
   return result

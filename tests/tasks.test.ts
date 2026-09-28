@@ -1,12 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { crmBindingCodes, listRows, parseTask, parseTaskTags, parseTimeEntry, tasksBoundTo } from '#shared/domain/tasks'
+import { crmBindingCodes, listRows, openTaskStatus, parseTask, parseTaskTags, parseTimeEntry, TASK_COMPLETED, tasksBoundTo } from '#shared/domain/tasks'
 import { checkInvoice, invoiceChangedSince, parseInvoice, invoiceProblems } from '#shared/domain/invoice'
 import { defaultSettings } from '#shared/domain/settings'
+
+describe('openTaskStatus — незакрытая задача', () => {
+  it('завершена или статус неизвестен — молчим', () => {
+    expect(TASK_COMPLETED).toBe(5)
+    expect(openTaskStatus(5)).toBeNull()
+    expect(openTaskStatus(null)).toBeNull()
+  })
+
+  it('остальные статусы — название статуса, как в карточке задачи (замер: 2, 3, 6)', () => {
+    expect(openTaskStatus(2)).toBe('ждёт выполнения')
+    expect(openTaskStatus(3)).toBe('выполняется')
+    expect(openTaskStatus(6)).toBe('отложена')
+    expect(openTaskStatus(4)).toBe('ждёт контроля')
+  })
+
+  it('незнакомый код, ноль и отрицательный — тоже «не закрыта», с кодом: закрыта только 5', () => {
+    expect(openTaskStatus(42)).toBe('статус 42')
+    expect(openTaskStatus(0)).toBe('статус 0')
+    expect(openTaskStatus(-1)).toBe('статус -1')
+  })
+})
 
 describe('разбор задач', () => {
   it('читает camelCase-ответ tasks.task.list, где числа пришли строками', () => {
     const t = parseTask({ id: '15', title: ' Задача ', responsibleId: '7', ufCrmTask: ['D_5', 'C_2'], timeSpentInLogs: '3600' })
-    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [] })
+    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [], status: null })
   })
 
   it('понимает и UPPER_CASE-ключи', () => {
@@ -28,12 +49,43 @@ describe('разбор задач', () => {
 
   it('живой ответ v2 tasks.task.list (замер): числа строками, timeSpentInLogs при нуле — null', () => {
     const row = { id: '10', title: 'IFT: чужая задача', description: 'Описание', responsibleId: '1', ufCrmTask: ['D_999999'], timeSpentInLogs: null, group: [] }
-    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [] })
+    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [], status: null })
+  })
+
+  it('статус v2 приходит строкой (замер 2026-09-28: «2» у новой задачи, «5» у завершённой) — числом', () => {
+    expect(parseTask({ id: '104', title: 'X', status: '2' })?.status).toBe(2)
+    expect(parseTask({ ID: '134', TITLE: 'X', STATUS: '5' })?.status).toBe(TASK_COMPLETED)
+    // Пусто и мусор — «не пришёл», а не «0»: иначе пустая строка дала бы ложное «не закрыта».
+    expect(parseTask({ id: '1', title: 'X', status: '' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: '  ' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: 'completed' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: '2.5' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: {} })?.status).toBeNull()
+    // Не строка и не число — не статус: иначе ['5'] стало бы «завершена» и предупреждение пропало.
+    expect(parseTask({ id: '1', title: 'X', status: ['5'] })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: true })?.status).toBeNull()
+    // Number() понял бы их как 5 — «завершена», и незакрытая задача пропала бы из предупреждения.
+    for (const junk of ['0x5', '5e0', '0b101', '+5', '5.0', ' ']) {
+      expect(parseTask({ id: '1', title: 'X', status: junk })?.status, junk).toBeNull()
+    }
+    expect(parseTask({ id: '1', title: 'X', status: ' 3 ' })?.status).toBe(3)
+    expect(parseTask({ id: '1', title: 'X', status: 2.5 })?.status).toBeNull()
+    // Ноль и отрицательные — код как есть (портал их в `status` не шлёт: «просрочена» −1 — в
+    // `subStatus`, замер 2026-09-28), чтобы не потерять предупреждение.
+    expect(parseTask({ id: '1', title: 'X', status: '-1' })?.status).toBe(-1)
+    expect(parseTask({ id: '1', title: 'X', status: 0 })?.status).toBe(0)
   })
 
   it('теги приходят в том же списке v2 (select TAGS) и разбираются в parseTask', () => {
     const row = { id: '2', title: 'IFT: задача сделки с тегами', responsibleId: '1', ufCrmTask: ['D_4'], timeSpentInLogs: '5400', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } }
     expect(parseTask(row)?.tags).toEqual(['Срочно', 'ЧЧ1'])
+  })
+
+  it('больше 100 тегов у задачи — берём первые 100: страховка от мусора в ответе', () => {
+    const tags = Object.fromEntries(Array.from({ length: 150 }, (_, n) => [n + 1, { id: n + 1, title: `тег${n + 1}` }]))
+    const parsed = parseTaskTags({ id: '1', tags })
+    expect(parsed).toHaveLength(100)
+    expect(parsed.at(-1)).toBe('тег100')
   })
 
   it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
@@ -57,6 +109,17 @@ describe('перепроверка привязки к CRM', () => {
       { id: '1', ufCrmTask: ['D_5'] }
     ]
     expect(tasksBoundTo(rows, crmBindingCodes(2, 5)).map(t => t.id)).toEqual([1])
+  })
+
+  it('задачи — по возрастанию ID, как бы их ни отдал портал: строки счёта идут в том же порядке', () => {
+    const rows = [{ id: '30', ufCrmTask: ['D_5'] }, { id: '4', ufCrmTask: ['D_5'] }, { id: '12', ufCrmTask: ['D_5'] }]
+    expect(tasksBoundTo(rows, crmBindingCodes(2, 5)).map(t => t.id)).toEqual([4, 12, 30])
+  })
+
+  it('ID и ответственный 0 — не задача и не сотрудник', () => {
+    expect(parseTask({ id: '0', title: 'X' })).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', responsibleId: '0' })?.responsibleId).toBeNull()
+    expect(parseTimeEntry({ ID: '1', TASK_ID: '2', USER_ID: '0', SECONDS: '60' })?.userId).toBeNull()
   })
 
   it('для счёта ищет оба возможных кода, без учёта регистра', () => {

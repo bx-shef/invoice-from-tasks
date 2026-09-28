@@ -33,10 +33,12 @@ describe('параметры запросов сценария счёта', () =
     expect(vatListCall()).toEqual({ method: 'catalog.vat.list', params: {} })
   })
 
-  it('задачи: фильтр ОБЪЕКТОМ по UF_CRM_TASK и теги в том же списке', () => {
+  it('задачи: фильтр ОБЪЕКТОМ по UF_CRM_TASK, теги и статус в том же списке', () => {
     expect(taskListCall('D_4')).toEqual({ method: 'tasks.task.list', params: { filter: { UF_CRM_TASK: 'D_4' }, select: TASK_SELECT } })
     expect(TASK_SELECT).toContain('TAGS')
     expect(TASK_SELECT).toContain('UF_CRM_TASK')
+    // Без STATUS портал статус не отдаст — предупреждение о незакрытой задаче молча пропадёт.
+    expect(TASK_SELECT).toContain('STATUS')
   })
 
   it('записи времени: позиционные параметры, страница 50', () => {

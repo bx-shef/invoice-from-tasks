@@ -18,6 +18,23 @@ export const OKEI_NAMES: Readonly<Record<number, string>> = {
   796: 'Штука'
 }
 
+/** Краткие обозначения тех же кодов — для столбца «Количество» предпросмотра, как «шт» в счёте. */
+export const OKEI_SYMBOLS: Readonly<Record<number, string>> = {
+  6: 'м',
+  112: 'л',
+  163: 'г',
+  166: 'кг',
+  355: 'мин',
+  356: 'ч',
+  359: 'сут',
+  796: 'шт'
+}
+
+/** Краткое обозначение единицы строк; не задана или код незнакомый — пусто (портал решит сам). */
+export function measureSymbol(code: number | null | undefined): string {
+  return code ? OKEI_SYMBOLS[code] ?? '' : ''
+}
+
 /** Предел названия единицы: справочник ведёт администратор портала, длинная строка ломала бы список. */
 export const MAX_MEASURE_TITLE = 100
 

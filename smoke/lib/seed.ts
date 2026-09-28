@@ -136,6 +136,10 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
     if (!res.ok) throw new Error(`task.elapseditem.add пакетом: ${res.errors.join('; ')}`)
   }
   await portal.callV3('tasks.task.result.add', { fields: { taskId: tasks.design, text: 'Сверстаны главная и адаптив' } })
+  // Статусы для предупреждения о незакрытых задачах: «настройка сервера» завершена (5), «звонок»
+  // начат (3), прочие ждут выполнения (2) — коды замера 2026-09-28. Время внесено ДО завершения.
+  await portal.call('tasks.task.complete', { taskId: tasks.plain })
+  await portal.call('tasks.task.start', { taskId: tasks.tiny })
   await portal.call('crm.item.productrow.set', {
     ownerType: 'SI',
     ownerId: invoices.paging,

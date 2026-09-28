@@ -3,6 +3,7 @@
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
+import { measureSymbol } from '~/utils/measures'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -166,11 +167,13 @@ async function consult(promptId: string) {
           :rows="result.rows"
           :errors="result.errors"
           :warnings="result.warnings"
+          :open-tasks="result.openTasks"
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"
+          :unit="measureSymbol(app.settings.value.measureCode)"
           :currency="fill.invoice.value?.currencyId ?? ''"
-          :rate-currency="app.settings.value.currency"
+          :conversion="fill.conversion.value"
           :origin="origin"
           :user-label="users.label"
         />

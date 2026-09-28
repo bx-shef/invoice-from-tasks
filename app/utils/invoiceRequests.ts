@@ -8,9 +8,10 @@ import type { ProductRowPayload } from '#shared/domain/fill'
 /**
  * Поля задачи в tasks.task.list (REST v2). `TAGS` — теги прямо в списке
  * (`tags: { "<id>": { id, title } }`, замер 2026-09-24): решение владельца — брать их из v2, а
- * не отдельным `tasks.task.get` v3 на каждую задачу; вернуться к v3 — issue #13.
+ * не отдельным `tasks.task.get` v3 на каждую задачу; вернуться к v3 — issue #13. `STATUS` — код
+ * статуса строкой («2», «5»): по нему предупреждение о незакрытой задаче (tasks.ts).
  */
-export const TASK_SELECT = ['ID', 'TITLE', 'DESCRIPTION', 'RESPONSIBLE_ID', 'UF_CRM_TASK', 'TIME_SPENT_IN_LOGS', 'TAGS']
+export const TASK_SELECT = ['ID', 'TITLE', 'DESCRIPTION', 'RESPONSIBLE_ID', 'UF_CRM_TASK', 'TIME_SPENT_IN_LOGS', 'TAGS', 'STATUS']
 
 /** Страница task.elapseditem.getlist — максимум 50 (документация метода). */
 export const ELAPSED_PAGE = 50

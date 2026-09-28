@@ -15,7 +15,8 @@ const task: TaskInfo = {
   responsibleId: 7,
   crmBindings: ['D_5'],
   timeSpentInLogs: 5400,
-  tags: []
+  tags: [],
+  status: 5
 }
 
 const entries: TimeEntry[] = [
@@ -244,6 +245,43 @@ describe('общие правила', () => {
     expect(over).toHaveLength(MAX_ROW_NAME)
     expect(over.endsWith('…')).toBe(true)
     expect(clampName('  две\n строки\t ')).toBe('две строки')
+  })
+})
+
+describe('незакрытые задачи — отдельный список, не стоп', () => {
+  it('задача не завершена — строки есть, ошибок нет, задача со статусом в openTasks', () => {
+    for (const mode of ['task', 'time'] as const) {
+      const res = buildRows(input({ mode, tasks: [{ ...task, status: 3 }] }))
+      expect(res.rows.length).toBeGreaterThan(0)
+      expect(res.errors).toEqual([])
+      expect(res.openTasks).toEqual([{ taskId: 10, status: 'выполняется' }])
+    }
+  })
+
+  it('в списке — каждая незакрытая задача по порядку; завершённая и без статуса — нет', () => {
+    const tasks: TaskInfo[] = [{ ...task, status: 2 }, { ...task, id: 11, status: 5 }, { ...task, id: 12, status: null }, { ...task, id: 13, status: 4 }]
+    expect(buildRows(input({ mode: 'time', tasks })).openTasks).toEqual([
+      { taskId: 10, status: 'ждёт выполнения' },
+      { taskId: 13, status: 'ждёт контроля' }
+    ])
+  })
+
+  it('в общий список предупреждений не попадают: их бывает много, а предупреждения о суммах важнее', () => {
+    for (const mode of ['task', 'time'] as const) {
+      const open = buildRows(input({ mode, tasks: [{ ...task, status: 3 }] }))
+      const closed = buildRows(input({ mode, tasks: [{ ...task, status: 5 }] }))
+      expect(open.warnings).toEqual(closed.warnings)
+    }
+  })
+
+  it('задача с ошибкой тоже в списке — человек увидит всё сразу', () => {
+    const res = buildRows(input({ tasks: [{ ...task, status: 6, responsibleId: null }] }))
+    expect(res.errors.length).toBeGreaterThan(0)
+    expect(res.openTasks).toEqual([{ taskId: 10, status: 'отложена' }])
+  })
+
+  it('все задачи закрыты — список пуст', () => {
+    expect(buildRows(input()).openTasks).toEqual([])
   })
 })
 

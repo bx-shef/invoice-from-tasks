@@ -31,6 +31,55 @@ export interface TaskInfo {
    * {@link parseTaskTags}.
    */
   tags: string[]
+  /**
+   * Код статуса REST v2 (`STATUS`, {@link TASK_STATUS_LABELS}); `null` — портал его не отдал.
+   * Незакрытая задача — предупреждение, а не стоп ({@link openTaskStatus}).
+   */
+  status: number | null
+}
+
+/** Статус «завершена» — единственный, при котором задача закрыта. */
+export const TASK_COMPLETED = 5
+
+/**
+ * Названия статусов задачи REST v2 — как в карточке задачи. Замер 2026-09-28 на тестовом портале
+ * (tasks.task.add → start → defer → complete → renew): 2 — новая задача и после «Возобновить»,
+ * 3 — после «Начать», 6 — после «Отложить», 5 — после «Завершить». У просроченной задачи `status`
+ * тот же (2), а «просрочена» (−1) и «почти просрочена» (−3) приходят в отдельном `subStatus` — его
+ * не читаем. 1, 4 и 7 — коды ядра, не замерены: «ждёт контроля» бывает только у задачи с контролем
+ * постановщика другим сотрудником, а на тестовом портале сотрудник один (проверка — в #2).
+ * Документация v2 кодов не перечисляет (в v3 статус — строка).
+ */
+export const TASK_STATUS_LABELS: Readonly<Record<number, string>> = {
+  1: 'новая',
+  2: 'ждёт выполнения',
+  3: 'выполняется',
+  4: 'ждёт контроля',
+  5: 'завершена',
+  6: 'отложена',
+  7: 'отклонена'
+}
+
+/**
+ * Статус незакрытой задачи для предупреждения или `null`. Не стоп (решение владельца 2026-09-28):
+ * счёт бывает и до закрытия задачи, но в незакрытую ещё может добавиться время — человек должен
+ * это видеть. Незнакомый код (и ноль, и отрицательный) — тоже «не закрыта», с кодом: закрыта только
+ * 5. Статус не пришёл (портал не отдал поле) — молчим: гадать не будем.
+ */
+export function openTaskStatus(status: number | null): string | null {
+  if (status === null || status === TASK_COMPLETED) return null
+  return TASK_STATUS_LABELS[status] ?? `статус ${status}`
+}
+
+/**
+ * Код статуса: целое число или строка из цифр («2», «-1»); пусто и мусор — `null` (не «0»).
+ * Строку проверяем по цифрам, а не `Number()`: тот понял бы «0x5» и «5e0» как 5 — «завершена»,
+ * и предупреждение молча пропало бы (находка /code-review).
+ */
+function toStatus(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isInteger(value) ? value : null
+  if (typeof value !== 'string' || !/^-?\d{1,9}$/.test(value.trim())) return null
+  return Number(value.trim())
 }
 
 export interface TimeEntry {
@@ -90,7 +139,8 @@ export function parseTask(row: Row): TaskInfo | null {
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
-    tags: parseTaskTags(row)
+    tags: parseTaskTags(row),
+    status: toStatus(pick(row, 'status', 'STATUS'))
   }
 }
 
@@ -166,7 +216,7 @@ export function tasksBoundTo(rows: Row[], codes: string[]): TaskInfo[] {
   return [...byId.values()].sort((a, b) => a.id - b.id)
 }
 
-/** Адрес задачи в портале для ссылок в ошибках и предпросмотре. */
-export function taskUrl(domain: string, taskId: number): string {
-  return `https://${domain}/company/personal/user/0/tasks/task/view/${taskId}/`
+/** Путь задачи в портале для ссылок в ошибках и предпросмотре (адрес — origin портала + путь). */
+export function taskPath(taskId: number): string {
+  return `/company/personal/user/0/tasks/task/view/${taskId}/`
 }
