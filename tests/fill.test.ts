@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyNames, applyTaskIds, buildRows, clampName, MAX_ROW_NAME, OUTLIER_RATIO, timeOutliers, toProductRows, withTaskId, type DraftRow, type FillInput } from '#shared/domain/fill'
+import { applyNames, applyTaskIds, buildRows, clampName, finishRows, MAX_ROW_NAME, OUTLIER_PERCENT, timeOutliers, toProductRows, withTaskId, type DraftRow, type FillInput } from '#shared/domain/fill'
 import { defaultSettings, type AppSettings } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import { vatTotals } from '#shared/domain/vat'
@@ -390,10 +390,31 @@ describe('ID задачи в названии строки (настройка t
     expect(long.endsWith('…')).toBe(true)
   })
 
-  it('включено — ко всем строкам (и типа 2 — ID задачи записи); выключено — те же строки', () => {
+  it('название уже начинается с «[102]» — второй раз не добавляется; «[1020]» — не то же самое', () => {
+    expect(withTaskId('[102] Сверстать лендинг', 102)).toBe('[102] Сверстать лендинг')
+    expect(withTaskId('[1020] Сверстать лендинг', 102)).toBe('[102] [1020] Сверстать лендинг')
+  })
+
+  it('включено — ко всем строкам (и в типе 2 — ID задачи, а не записи времени); выключено — те же строки', () => {
     const { rows } = buildRows(input({ mode: 'time' }))
     expect(applyTaskIds(rows, true).map(r => r.name)).toEqual(['[10] Вёрстка шапки', '[10] Правки по макету'])
     expect(applyTaskIds(rows, false)).toBe(rows)
+  })
+
+  it('finishRows: сначала названия от BitrixGPT, потом ID — ID не теряется под новым названием', () => {
+    const built = buildRows(input({ mode: 'time' }))
+    const names = Object.fromEntries(built.rows.map((r, i) => [r.key, `Название ${i + 1}`]))
+    expect(finishRows(built, names, true).rows.map(r => r.name)).toEqual(['[10] Название 1', '[10] Название 2'])
+    expect(finishRows(built, names, false).rows.map(r => r.name)).toEqual(['Название 1', 'Название 2'])
+    // Режим «как есть» (names = null) — только ID; ошибки сборки остаются.
+    expect(finishRows(built, null, true).rows.map(r => r.name)).toEqual(['[10] Вёрстка шапки', '[10] Правки по макету'])
+  })
+
+  it('finishRows: BitrixGPT не вернул название — ошибка строки, как у applyNames', () => {
+    const built = buildRows(input({ mode: 'time' }))
+    const res = finishRows(built, { [built.rows[0]!.key]: 'Только первая' }, true)
+    expect(res.errors).toEqual([{ taskId: 10, entryId: built.rows[1]!.entryId, message: 'BitrixGPT не вернул название строки' }])
+    expect(res.outliers).toBe(built.outliers)
   })
 })
 
@@ -402,9 +423,10 @@ describe('задачи со временем заметно больше обы�
     const [base] = buildRows(input()).rows
     return { ...base!, key, taskId, seconds: hours * 3600, roundedSeconds: hours * 3600, hours }
   }
+  const timed = (taskId: number, seconds: number, roundedSeconds = seconds): DraftRow => ({ ...row(taskId, 0), seconds, roundedSeconds })
 
   it('больше медианы более чем на 40% — подсветить; медиана по задачам, а не по строкам', () => {
-    expect(OUTLIER_RATIO).toBe(1.4)
+    expect(OUTLIER_PERCENT).toBe(40)
     // 1 ч, 1 ч, 5 ч: обычное — 1 ч, 5 ч больше на 400%.
     expect(timeOutliers([row(1, 1), row(2, 1), row(3, 5)])).toEqual([{ taskId: 3, seconds: 18_000, typicalSeconds: 3600 }])
   })
@@ -412,6 +434,19 @@ describe('задачи со временем заметно больше обы�
   it('ровно +40% — ещё не выброс; чуть больше — уже', () => {
     expect(timeOutliers([row(1, 1), row(2, 1), row(3, 1.4)])).toEqual([])
     expect(timeOutliers([row(1, 1), row(2, 1), row(3, 1.5)]).map(o => o.taskId)).toEqual([3])
+  })
+
+  it('граница — в целых числах: 5400 × 1.4 в плавающей точке — 7559.999…, но 7560 с — не выброс', () => {
+    expect(timeOutliers([timed(1, 5400), timed(2, 5400), timed(3, 7560)])).toEqual([])
+    expect(timeOutliers([timed(1, 5400), timed(2, 5400), timed(3, 7561)]).map(o => o.taskId)).toEqual([3])
+    // Медиана из двух средних — с половиной секунды: 3600, 3601 → 3600,5; порог — 5040,7.
+    expect(timeOutliers([timed(1, 3600), timed(2, 3600), timed(3, 3601), timed(4, 5041)]).map(o => o.taskId)).toEqual([4])
+  })
+
+  it('сравнивается время после округления — то, что уйдёт в счёт, а не списанное', () => {
+    // Списано 5 ч, в счёт — 1 ч: не выброс. Списано 1 ч, в счёт — 3 ч: выброс, и в тексте — 3 ч.
+    expect(timeOutliers([timed(1, 3600), timed(2, 3600), timed(3, 18_000, 3600)])).toEqual([])
+    expect(timeOutliers([timed(1, 3600), timed(2, 3600), timed(3, 3600, 10_800)])).toEqual([{ taskId: 3, seconds: 10_800, typicalSeconds: 3600 }])
   })
 
   it('только вверх: короткая задача среди длинных — не выброс', () => {

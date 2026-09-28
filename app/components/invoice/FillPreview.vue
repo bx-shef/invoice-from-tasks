@@ -22,6 +22,7 @@ import {
   previewLine,
   previewTotals,
   taskHref,
+  taskLinks,
   unitNoticeShown
 } from '~/utils/fillPreview'
 
@@ -60,6 +61,8 @@ const footer = computed(() => previewTotals(props.totals, props.vat, props.curre
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
 const outlierIds = computed(() => outlierTaskIds(props.outliers))
+const openLinks = computed(() => taskLinks(props.openTasks, openTaskText))
+const outlierLinks = computed(() => taskLinks(props.outliers, outlierText))
 const unitWarning = computed(() => unitNoticeShown(props.unitNotice, props.rows.length))
 const href = (taskId: number) => taskHref(props.origin, taskId)
 /** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
@@ -122,45 +125,21 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
       </template>
     </B24Alert>
 
-    <B24Alert
-      v-if="openTasks.length"
-      color="air-primary-warning"
+    <InvoiceTaskLinks
+      v-if="openLinks.length"
       :title="OPEN_TASKS_TITLE"
+      :links="openLinks"
+      :origin="origin"
       data-testid="fill-open-tasks"
-    >
-      <template #description>
-        <span
-          v-for="(task, i) in openTasks"
-          :key="task.taskId"
-          class="mr-1"
-        ><a
-          :href="href(task.taskId)"
-          target="_blank"
-          rel="noopener"
-          class="underline"
-        >Задача #{{ task.taskId }}</a>{{ openTaskText(task, i === openTasks.length - 1) }}</span>
-      </template>
-    </B24Alert>
+    />
 
-    <B24Alert
-      v-if="outliers.length"
-      color="air-primary-warning"
+    <InvoiceTaskLinks
+      v-if="outlierLinks.length"
       :title="OUTLIERS_TITLE"
+      :links="outlierLinks"
+      :origin="origin"
       data-testid="fill-outliers"
-    >
-      <template #description>
-        <span
-          v-for="(outlier, i) in outliers"
-          :key="outlier.taskId"
-          class="mr-1"
-        ><a
-          :href="href(outlier.taskId)"
-          target="_blank"
-          rel="noopener"
-          class="underline"
-        >Задача #{{ outlier.taskId }}</a>{{ outlierText(outlier, i === outliers.length - 1) }}</span>
-      </template>
-    </B24Alert>
+    />
 
     <div
       v-if="rows.length"

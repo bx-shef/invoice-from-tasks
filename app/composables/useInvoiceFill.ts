@@ -5,7 +5,7 @@
 
 import { buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, applyTaskIds, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { buildRows, finishRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
@@ -36,6 +36,7 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
+import { positionsChanged } from '~/utils/writeConfirm'
 import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
@@ -242,7 +243,7 @@ export function useInvoiceFill() {
       await users.load([...involved])
       const userNames = new Map(Object.entries(users.names.value).map(([id, name]) => [Number(id), name]))
 
-      let built = buildRows({
+      const built = buildRows({
         mode,
         tasks: tasks.value,
         entries,
@@ -253,18 +254,17 @@ export function useInvoiceFill() {
         userNames
       })
 
+      let names: Record<string, string> | null = null
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
-        const names: Record<string, string> = {}
+        names = {}
         // Пакетами по MAX_NAMING_ITEMS: сервер больше за раз не примет (бюджет модели).
         for (const part of chunk(await namingItems(mode, built), MAX_NAMING_ITEMS)) {
           const res = await post<{ names: Record<string, string> }>('/api/ai/names', { mode, items: part })
           Object.assign(names, res.names)
         }
-        const named = applyNames(built.rows, names)
-        built = { ...built, rows: named.rows, errors: named.errors }
       }
-      // ID задачи — после названий (и от BitrixGPT): предпросмотр показывает то, что уйдёт в счёт.
-      result.value = { ...built, rows: applyTaskIds(built.rows, settings.value.taskIdInName) }
+      // Названия от BitrixGPT, затем ID задачи (finishRows): предпросмотр — то, что уйдёт в счёт.
+      result.value = finishRows(built, names, settings.value.taskIdInName)
       step.value = 'preview'
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -294,8 +294,10 @@ export function useInvoiceFill() {
    * Автоматических повторов SDK при сетевых сбоях нет (config/b24.ts → sdkRestrictionParams), а
    * итог определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
    * нет ли лишних строк, можно ли повторять.
+   * `askedExisting` — сколько позиций было в счёте, когда сотрудника спросили (writeConfirm.ts):
+   * изменилось — не пишем, предпросмотр остаётся, вопрос зададут заново с верным числом.
    */
-  async function write(replace: boolean): Promise<void> {
+  async function write(replace: boolean, askedExisting?: number): Promise<void> {
     const inv = invoice.value
     if (!inv || !canWrite.value || !result.value) return
     const mode: WriteMode = replace ? 'replace' : 'append'
@@ -317,6 +319,14 @@ export function useInvoiceFill() {
       error.value = stale
       result.value = null
       step.value = 'idle'
+      return
+    }
+    const changed = askedExisting === undefined ? null : positionsChanged(askedExisting, existing.value.length)
+    if (changed) {
+      // Под кнопками записи (notice), а не наверху страницы: сотрудник смотрит туда, куда нажал.
+      writing.value = null
+      notice.value = changed
+      step.value = 'preview'
       return
     }
     const draft = result.value.rows

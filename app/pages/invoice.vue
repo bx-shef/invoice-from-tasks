@@ -5,7 +5,7 @@
 import type { FillMode, TaskSource } from '#shared/domain/fill'
 import { TimeoutError, withTimeout } from '#shared/utils/timeout'
 import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
-import { writeConfirmations } from '~/utils/writeConfirm'
+import { answerYes, startConfirm, type ConfirmState } from '~/utils/writeConfirm'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -56,6 +56,14 @@ const roundingText = computed(() => {
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
 watch([source, mode], () => fill.reset())
 const result = computed(() => fill.result.value)
+/**
+ * Идущие вопросы перед записью (writeConfirm.ts) — на месте кнопок. Строки собрали заново или
+ * сбросили — вопросы были о прежних строках: снимаем.
+ */
+const confirming = ref<ConfirmState | null>(null)
+watch(result, () => {
+  confirming.value = null
+})
 
 onMounted(async () => {
   const frame = await b24.init()
@@ -96,13 +104,23 @@ async function collect() {
   await fill.collect(source.value, mode.value)
 }
 
-async function write(replace: boolean) {
-  // «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts).
-  const questions = writeConfirmations(replace ? 'replace' : 'append', fill.existing.value.length, result.value?.rows.length ?? 0)
-  for (const question of questions) {
-    if (!window.confirm(question)) return
-  }
-  await fill.write(replace)
+/** «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts). */
+function write(replace: boolean) {
+  const existing = fill.existing.value
+  const state = startConfirm(replace ? 'replace' : 'append', existing.map(r => r.productName), result.value?.rows.map(r => r.name) ?? [])
+  if (state) confirming.value = state
+  else void doWrite(replace, existing.length)
+}
+
+function confirmYes() {
+  const state = confirming.value
+  if (!state) return
+  confirming.value = answerYes(state)
+  if (!confirming.value) void doWrite(state.mode === 'replace', state.existing)
+}
+
+async function doWrite(replace: boolean, askedExisting: number) {
+  await fill.write(replace, askedExisting)
   if (fill.step.value === 'done') toast.add({ title: 'Товары счёта обновлены', description: 'Обновите карточку счёта, чтобы увидеть изменения', color: 'air-primary-success' })
 }
 
@@ -218,9 +236,15 @@ async function consult(promptId: string) {
           :user-label="users.label"
         />
 
+        <InvoiceWriteConfirm
+          v-if="confirming && fill.canWrite.value"
+          :state="confirming"
+          @confirm="confirmYes"
+          @cancel="confirming = null"
+        />
         <!-- Во время записи кнопки остаются на месте: иначе индикатор загрузки некому показать. -->
         <div
-          v-if="fill.canWrite.value || fill.step.value === 'writing'"
+          v-else-if="fill.canWrite.value || fill.step.value === 'writing'"
           class="flex flex-wrap gap-3"
         >
           <B24Button
