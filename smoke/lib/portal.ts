@@ -12,8 +12,8 @@ export interface BatchAnswer {
 export interface Portal {
   /** REST v2: `result` ответа или ошибка «метод: текст портала». */
   call<T = unknown>(method: string, params?: Record<string, unknown> | unknown[]): Promise<T>
-  /** REST v2 целиком: `result` и служебные поля (`total`, `next`) — для сверки листания. */
-  callRaw<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>
+  /** REST v2: `result` и `total` списка (SDK: `getTotal()`) — для сверки листания. */
+  callWithTotal<T = unknown>(method: string, params?: Record<string, unknown>): Promise<{ result: T, total: number }>
   /** REST v3 (`/rest/api/…`). */
   callV3<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>
   /** Все страницы списка курсором (как `useB24.callList`). */
@@ -26,6 +26,7 @@ interface AjaxLike {
   isSuccess: boolean
   getData: () => unknown
   getErrorMessages: () => string[]
+  getTotal?: () => number
 }
 
 function answer(r: AjaxLike): BatchAnswer {
@@ -43,7 +44,7 @@ export function connectPortal(hook: string): Portal {
   const b24 = B24Hook.fromWebhookUrl(hook)
   b24.offClientSideWarning()
 
-  async function whole(method: string, run: () => Promise<AjaxLike>): Promise<unknown> {
+  async function answered(method: string, run: () => Promise<AjaxLike>): Promise<AjaxLike> {
     let res: AjaxLike
     try {
       res = await run()
@@ -51,16 +52,19 @@ export function connectPortal(hook: string): Portal {
       throw safe(method, e)
     }
     if (!res.isSuccess) throw new Error(`${method}: ${res.getErrorMessages().join('; ')}`)
-    return res.getData()
+    return res
   }
 
   async function unwrap<T>(method: string, run: () => Promise<AjaxLike>): Promise<T> {
-    return ((await whole(method, run)) as { result?: T } | undefined)?.result as T
+    return ((await answered(method, run)).getData() as { result?: T } | undefined)?.result as T
   }
 
   return {
     call: (method, params = {}) => unwrap(method, () => b24.actions.v2.call.make({ method, params: params as Record<string, unknown> })),
-    callRaw: async <T>(method: string, params: Record<string, unknown> = {}) => (await whole(method, () => b24.actions.v2.call.make({ method, params }))) as T,
+    callWithTotal: async <T>(method: string, params: Record<string, unknown> = {}) => {
+      const res = await answered(method, () => b24.actions.v2.call.make({ method, params }))
+      return { result: (res.getData() as { result?: T } | undefined)?.result as T, total: Number(res.getTotal?.()) }
+    },
     callV3: (method, params = {}) => unwrap(method, () => b24.actions.v3.call.make({ method, params })),
     async callList<T>(method: string, params: Record<string, unknown>, opts: { idKey: string, cursorIdKey: string, customKeyForResult: string }) {
       let res
