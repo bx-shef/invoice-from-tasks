@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { chunk, mapLimit } from '~/utils/concurrency'
+import { describe, expect, it, vi } from 'vitest'
+import { chunk, mapLimit, withTimeout } from '~/utils/concurrency'
 
 describe('chunk', () => {
   it('режет на куски не длиннее size; хвост короче', () => {
@@ -60,5 +60,35 @@ describe('mapLimit', () => {
 
   it('limit меньше 1 — работает как 1, а не молча пропускает всё', async () => {
     expect(await mapLimit([1, 2, 3], 0, async n => n * 2)).toEqual([2, 4, 6])
+  })
+})
+
+describe('withTimeout — не ждать вечно', () => {
+  it('успел — его результат; не успел — отказ с текстом; ошибка исходного — она же', async () => {
+    vi.useFakeTimers()
+    try {
+      await expect(withTimeout(Promise.resolve(7), 100, 'долго')).resolves.toBe(7)
+      const slow = withTimeout(new Promise(() => {}), 100, 'справочник не ответил')
+      vi.advanceTimersByTime(100)
+      await expect(slow).rejects.toThrow('справочник не ответил')
+      await expect(withTimeout(Promise.reject(new Error('отказ')), 100, 'долго')).rejects.toThrow('отказ')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('до срока не отказывает', async () => {
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      withTimeout(new Promise(() => {}), 100, 'долго').catch(() => {
+        settled = true
+      })
+      vi.advanceTimersByTime(99)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

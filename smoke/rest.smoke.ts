@@ -37,6 +37,8 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
   it('catalog.measure.list: у каждой единицы подпись; единица по умолчанию одна; своя единица — со своим обозначением', async () => {
     const measures = await listMeasures(portal)
     expect(measures.length).toBeGreaterThan(0)
+    // Листание без повторов: одна единица — один раз (порядок страниц — по id, measureListCall).
+    expect(new Set(measures.map(m => m.code)).size).toBe(measures.length)
     for (const m of measures) expect(m.label).toMatch(/\S/)
     // По ней портал подставляет единицу строке без кода и вместо кода не из справочника.
     expect(measures.filter(m => m.isDefault)).toHaveLength(1)

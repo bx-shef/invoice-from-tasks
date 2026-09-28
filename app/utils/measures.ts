@@ -7,6 +7,7 @@
 // коду, а международные обозначения — последний запас.
 
 import type { PriceMode } from '#shared/domain/settings'
+import { collectOffsetPages } from './paging'
 
 /** Названия частых кодов ОКЕИ — для единиц, у которых портал не отдал своё название. */
 export const OKEI_NAMES: Readonly<Record<number, string>> = {
@@ -148,7 +149,7 @@ export function measureItems(measures: readonly MeasureOption[] | null, saved: n
   const list = readList(measures)
   const items = (list ?? []).map(m => ({ label: m.label, value: m.code }))
   if (saved && !(list && findMeasure(list, saved))) {
-    items.push({ label: measureMissing(measures, saved) ? `код ${saved} — нет в справочнике` : `код ${saved}`, value: saved })
+    items.push({ label: list ? `код ${saved} — нет в справочнике` : `код ${saved}`, value: saved })
   }
   return items
 }
@@ -156,7 +157,41 @@ export function measureItems(measures: readonly MeasureOption[] | null, saved: n
 /** Код ОКЕИ «час». */
 export const HOUR_MEASURE = 356
 
-/** Единица «час» при «сумма × 1» читалась бы в счёте как «1 час» за всю работу — предупреждаем. */
-export function hourInSumMode(priceMode: PriceMode, measureCode: number | null): boolean {
-  return priceMode === 'sum' && measureCode === HOUR_MEASURE
+/** Обозначение или название часовой единицы: «ч», «час», «чел.-ч», «человеко-час». */
+const HOUR_WORD = /час|(?:^|[^а-яё])ч\.?$/i
+
+/**
+ * Единица «час» при «сумма × 1» читалась бы в счёте как «1 час» за всю работу — предупреждаем.
+ * Не только код ОКЕИ 356: в справочнике портала «часа» может не быть, и администратор заводит
+ * свою часовую единицу («чел.-ч») — её узнаём по обозначению и названию (находка /code-review).
+ */
+export function hourInSumMode(priceMode: PriceMode, measureCode: number | null, measures: readonly MeasureOption[] | null = null): boolean {
+  if (priceMode !== 'sum' || measureCode === null) return false
+  if (measureCode === HOUR_MEASURE) return true
+  const unit = readList(measures) && findMeasure(readList(measures)!, measureCode)
+  return !!unit && (HOUR_WORD.test(unit.symbol) || HOUR_WORD.test(unit.title))
+}
+
+/**
+ * Весь справочник единиц постранично — одна реализация для страницы (useCatalog) и смока:
+ * `fetchPage(start)` — ответ catalog.measure.list на смещение `start` (measureListCall). Разбираем
+ * после сбора: страница с битой записью короче 50, и листание кончилось бы раньше; `measures` не
+ * массив — пустая страница (листание кончается), а не падение. Больше `max` — ошибка.
+ */
+export async function readMeasures(
+  fetchPage: (start: number) => Promise<unknown>,
+  pageSize: number,
+  max: number
+): Promise<MeasureOption[]> {
+  const raw = await collectOffsetPages(
+    async (start) => {
+      const res = await fetchPage(start)
+      const page = res && typeof res === 'object' ? (res as { measures?: unknown }).measures : undefined
+      return Array.isArray(page) ? page : []
+    },
+    pageSize,
+    max,
+    `Единиц измерения в портале больше ${max} — справочник не прочитан`
+  )
+  return parseMeasures(raw)
 }

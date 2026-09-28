@@ -3,6 +3,7 @@
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
+import { withTimeout } from '~/utils/concurrency'
 import { rowUnit, type MeasureOption } from '~/utils/measures'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
@@ -23,10 +24,13 @@ const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | n
 /** Справочник единиц; `null` — не прочитан (нет права чтения каталога): единица — из ОКЕИ. */
 const measures = ref<MeasureOption[] | null>(null)
 /**
- * Пока справочник грузится, «Собрать строки» ждёт: иначе предпросмотр на миг показал бы единицу
- * из ОКЕИ без предупреждения о подмене, и её успели бы записать (находка /code-review).
+ * Пока справочник грузится, «Собрать строки» ждёт (с индикатором): иначе предпросмотр на миг
+ * показал бы единицу из ОКЕИ без предупреждения о подмене, и её успели бы записать (находка
+ * /code-review). Ждём не дольше MEASURES_WAIT: завис портал — собираем с ОКЕИ, а поздний ответ
+ * справочника всё равно обновит предпросмотр.
  */
 const measuresLoading = ref(true)
+const MEASURES_WAIT = 10_000
 const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode))
 
 const sourceItems = [
@@ -59,14 +63,18 @@ onMounted(async () => {
   if (!invoiceId.value) return
   // Справочник единиц — сразу и параллельно с настройками и счётом; ошибка не мешает счёту:
   // без справочника предпросмотр возьмёт обозначение из ОКЕИ.
-  const measuresLoaded = catalog.measures().then(
-    (list) => {
-      measures.value = list
-    },
-    () => {
-      measures.value = null
-    }
-  ).finally(() => {
+  const measuresLoaded = withTimeout(
+    catalog.measures().then(
+      (list) => {
+        measures.value = list
+      },
+      () => {
+        measures.value = null
+      }
+    ),
+    MEASURES_WAIT,
+    'справочник единиц не ответил'
+  ).catch(() => {}).finally(() => {
     measuresLoading.value = false
   })
   try {
@@ -162,7 +170,7 @@ async function consult(promptId: string) {
               <B24Button
                 color="air-primary"
                 label="Собрать строки"
-                :loading="fill.step.value === 'collecting'"
+                :loading="fill.step.value === 'collecting' || measuresLoading"
                 :disabled="busy || !fill.invoice.value || measuresLoading"
                 data-testid="fill-collect"
                 @click="collect"

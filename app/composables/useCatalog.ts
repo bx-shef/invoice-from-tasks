@@ -5,25 +5,25 @@
 
 import { parseVatRates, type PortalVat } from '#shared/domain/vat'
 import { MAX_MEASURES, MEASURES_PAGE, measureListCall, vatListCall } from '~/utils/invoiceRequests'
-import { parseMeasures, type MeasureOption } from '~/utils/measures'
-import { collectOffsetPages } from '~/utils/paging'
+import { readMeasures, type MeasureOption } from '~/utils/measures'
 
 export function useCatalog() {
   const b24 = useB24()
 
+  /**
+   * Весь справочник единиц — постранично по 50 (readMeasures). Бросает, если портал отказал
+   * (например, нет права чтения каталога) или единиц больше MAX_MEASURES: вызывающий считает
+   * справочник «не прочитанным» и берёт обозначения из ОКЕИ.
+   */
   async function measures(): Promise<MeasureOption[]> {
-    // Разбираем после сбора: страница с битой записью короче 50, и листание кончилось бы раньше.
-    const raw = await collectOffsetPages(
+    return readMeasures(
       async (start) => {
         const { method, params } = measureListCall(start)
-        const res = await b24.call<{ measures?: unknown[] }>(method, params)
-        return Array.isArray(res?.measures) ? res.measures : []
+        return b24.call<unknown>(method, params)
       },
       MEASURES_PAGE,
-      MAX_MEASURES,
-      `Единиц измерения в портале больше ${MAX_MEASURES} — справочник не прочитан`
+      MAX_MEASURES
     )
-    return parseMeasures(raw)
   }
 
   /** Ставки НДС портала — варианты на вкладке «НДС» (активные; «Без НДС» добавляет вкладка). */

@@ -23,7 +23,7 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
-import { parseMeasures, type MeasureOption } from '~/utils/measures'
+import { readMeasures, type MeasureOption } from '~/utils/measures'
 import type { Portal } from './portal'
 
 /** Счёт и его позиции как их отдал портал — для полей, которых приложение не разбирает (налог). */
@@ -53,13 +53,12 @@ export async function listMyCompanies(portal: Portal): Promise<MyCompany[]> {
   return parseMyCompanies(raw)
 }
 
-/** Справочник единиц — тем же листанием, что страница (useCatalog.measures). */
+/** Справочник единиц — тем же кодом листания и разбора, что страница (readMeasures). */
 export async function listMeasures(portal: Portal): Promise<MeasureOption[]> {
-  const raw = await collectOffsetPages(async (start) => {
+  return readMeasures(async (start) => {
     const { method, params } = measureListCall(start)
-    return (await portal.call<{ measures?: unknown[] }>(method, params))?.measures ?? []
-  }, MEASURES_PAGE, MAX_MEASURES, 'слишком много единиц измерения')
-  return parseMeasures(raw)
+    return portal.call<unknown>(method, params)
+  }, MEASURES_PAGE, MAX_MEASURES)
 }
 
 export async function fetchTasks(portal: Portal, source: TaskSource, invoice: InvoiceInfo): Promise<TaskInfo[]> {

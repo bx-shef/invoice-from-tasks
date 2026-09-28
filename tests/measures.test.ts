@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hourInSumMode, MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
+import { hourInSumMode, MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, readMeasures, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
 
 // Ответ catalog.measure.list с тестового портала (замер 2026-09-24): у системных единиц
 // measureTitle и symbol — null, заполнены только международные обозначения.
@@ -161,5 +161,52 @@ describe('hourInSumMode — «час» при «сумма × 1»', () => {
     expect(hourInSumMode('hour', 356)).toBe(false)
     expect(hourInSumMode('sum', 796)).toBe(false)
     expect(hourInSumMode('sum', null)).toBe(false)
+  })
+
+  it('своя часовая единица справочника — по обозначению или названию («чел.-ч», «Час работы»)', () => {
+    const own = parseMeasures([
+      { code: 9990, measureTitle: 'IFT smoke: человеко-час', symbol: 'чел.-ч' },
+      { code: 9991, measureTitle: 'Час работы', symbol: 'чр' },
+      { code: 9992, measureTitle: 'Штука', symbol: 'шт' },
+      { code: 9993, measureTitle: 'Чашка', symbol: 'чаш' }
+    ])
+    expect(hourInSumMode('sum', 9990, own)).toBe(true)
+    expect(hourInSumMode('sum', 9991, own)).toBe(true)
+    expect(hourInSumMode('sum', 9992, own)).toBe(false)
+    expect(hourInSumMode('sum', 9993, own)).toBe(false)
+    expect(hourInSumMode('hour', 9990, own)).toBe(false)
+    // Справочник не прочитан — узнать свою единицу нечем, только код ОКЕИ.
+    expect(hourInSumMode('sum', 9990, null)).toBe(false)
+  })
+})
+
+describe('readMeasures — весь справочник постранично (страница и смок)', () => {
+  const unit = (code: number) => ({ code, measureTitle: `u${code}` })
+
+  it('листает по start, пока страница полная (замер: 61 единица → 50 и 11), и разбирает всё', async () => {
+    const all = Array.from({ length: 61 }, (_, i) => unit(9000 + i))
+    const starts: number[] = []
+    const measures = await readMeasures(async (start) => {
+      starts.push(start)
+      return { measures: all.slice(start, start + 50) }
+    }, 50, 1000)
+    expect(starts).toEqual([0, 50])
+    expect(measures.map(m => m.code)).toEqual(all.map(u => u.code))
+  })
+
+  it('measures не массив — пустая страница: листание кончается, а не падает и не крутит потолок', async () => {
+    let calls = 0
+    const measures = await readMeasures(async () => {
+      calls++
+      return { measures: { 0: unit(6) } }
+    }, 50, 1000)
+    expect(measures).toEqual([])
+    expect(calls).toBe(1)
+    expect(await readMeasures(async () => null, 50, 1000)).toEqual([])
+  })
+
+  it('больше потолка — ошибка, а не молча обрезанный справочник', async () => {
+    await expect(readMeasures(async start => ({ measures: Array.from({ length: 50 }, (_, i) => unit(start + i + 1)) }), 50, 100))
+      .rejects.toThrow('Единиц измерения в портале больше 100')
   })
 })

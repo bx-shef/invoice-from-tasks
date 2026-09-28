@@ -34,3 +34,24 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (it
   await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker))
   return results
 }
+
+/**
+ * Промис, который отклоняется, если исходный не завершился за `ms` миллисекунд; исходный при этом
+ * не отменяется (его результат придёт, но уже не сюда). Ожидание справочника единиц не должно
+ * держать «Собрать строки» вечно, если портал завис (находка /code-review).
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}

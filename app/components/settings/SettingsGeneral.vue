@@ -28,7 +28,7 @@ const currencies = ref<Array<{ label: string, value: string }>>([])
 const measureList = ref<MeasureOption[] | null>(null)
 const measures = computed(() => measureItems(measureList.value, settings.value.measureCode))
 const measureGone = computed(() => measureMissing(measureList.value, settings.value.measureCode))
-const hourWarning = computed(() => hourInSumMode(settings.value.priceMode, settings.value.measureCode))
+const hourWarning = computed(() => hourInSumMode(settings.value.priceMode, settings.value.measureCode, measureList.value))
 
 onMounted(async () => {
   // Валюты и единицы — независимые запросы: параллельно, у каждого свой запас на случай ошибки.
@@ -36,12 +36,14 @@ onMounted(async () => {
     b24.call<Array<{ CURRENCY?: unknown, FULL_NAME?: unknown }>>('crm.currency.list'),
     catalog.measures()
   ])
-  if (currencyList.status === 'fulfilled') {
+  measureList.value = measureResult.status === 'fulfilled' ? measureResult.value : null
+  try {
+    if (currencyList.status === 'rejected') throw currencyList.reason
     currencies.value = (currencyList.value ?? []).map(c => ({ label: `${c.CURRENCY} — ${c.FULL_NAME ?? ''}`, value: String(c.CURRENCY ?? '') })).filter(c => c.value)
-  } else {
+  } catch {
+    // Отказ или битый ответ — список из сохранённой валюты (разбор тоже внутри try: находка /code-review).
     currencies.value = settings.value.currency ? [{ label: settings.value.currency, value: settings.value.currency }] : []
   }
-  measureList.value = measureResult.status === 'fulfilled' ? measureResult.value : null
 })
 
 const measureModel = computed({
