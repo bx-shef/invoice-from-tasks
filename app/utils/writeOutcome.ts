@@ -64,3 +64,16 @@ export function describeWrite(r: WriteReport): WriteVerdict {
     : `На момент проверки добавлено ${Math.max(0, r.after - r.before)} из ${r.planned} строк`
   return { kind: 'error', message: `${done}, дальше — ошибка: ${r.error}. ${check} Чтобы не задвоить строки, соберите их заново.`, resetPreview: true }
 }
+
+/**
+ * Запись прервалась сбоем вне разобранных мест (ошибка разбора, итога): исход неизвестен, но
+ * страница не должна остаться «занятой» навсегда (находка четвёртого круга). «Заменить» — один
+ * вызов: повторить его безопасно, предпросмотр остаётся; «Добавить» мог записать часть строк —
+ * повтор задвоил бы их, строки собираются заново (находка пятого круга).
+ */
+export function writeCrash(mode: WriteMode, reason: string): WriteVerdict {
+  const check = 'Проверьте позиции счёта в карточке'
+  return mode === 'replace'
+    ? { kind: 'error', message: `Запись прервалась (${reason}). ${check}; повторить «Заменить» безопасно.`, resetPreview: false }
+    : { kind: 'error', message: `Запись прервалась (${reason}). ${check} — часть строк могла записаться — и соберите строки заново.`, resetPreview: true }
+}

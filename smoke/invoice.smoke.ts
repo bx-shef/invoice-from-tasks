@@ -11,7 +11,7 @@
 import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { AI_ICON, AI_LOGO, buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, parseCurrencies, type CurrencyConversion, type PortalCurrency } from '#shared/domain/currency'
-import { buildRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
+import { buildRows, finishRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, type InvoiceInfo } from '#shared/domain/invoice'
 import { normalizeTag, type MarkupSettings } from '#shared/domain/markup'
 import type { RateEntry } from '#shared/domain/rates'
@@ -166,6 +166,12 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     if (conversion) expect(warnings[0]).toContain('проверьте курс')
     expect(warnings.some(w => w.includes('менялась за время задачи'))).toBe(v.mode === 'task' && v.src.source === 'deal')
     expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
+    // Ложных выбросов на живых данных нет ни в одном варианте. Запас небольшой: вверх до 30 мин
+    // задачи засева — 1,5 / 2 / 0,5 ч, «сервер» (5400 + 600 с → 7200 с) на +33% от медианы 1,5 ч,
+    // порог — больше 7560 с, запас 6 минут; меняя засев (smoke/lib/seed.ts), пересчитайте. Где
+    // «звонок» обнуляется, задач две — сравнивать не с чем. Что выброс находится, проверяют
+    // юнит-тесты (tests/fill.test.ts): раздутая задача на портале — лишний засев.
+    expect(built.outliers).toEqual([])
     // Незакрытые задачи — отдельным списком, завершённая («сервер») в нём не значится; строки есть.
     expect(built.openTasks.map(t => t.taskId).sort()).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
   })
@@ -263,6 +269,16 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const tax = await taxOf(fx!.invoices.base)
       const totals = vatTotals(rows)
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
+    })
+
+    it('ID задачи в названии: «[id] название» уходит в счёт как есть', async () => {
+      const settings = { ...settingsFor(variant), taskIdInName: true }
+      const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: null, vatRate: VAT_RATE })
+      const { rows } = finishRows(built, null, settings.taskIdInName)
+      const call = replaceRowsCall(fx!.invoices.base, toProductRows(rows, settings))
+      await portal.call(call.method, call.params)
+      const after = await readInvoice(portal, fx!.invoices.base)
+      expect(after.rows.map(r => r.productName)).toEqual(rows.map(r => `[${r.taskId}] ${built.rows.find(b => b.key === r.key)!.name}`))
     })
 
     it('единица строк: предпросмотр (rowUnit) показывает ту, что портал действительно запишет', async () => {

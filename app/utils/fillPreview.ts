@@ -5,11 +5,11 @@
 // части счёта портала (просьба владельца 2026-09-28), скидок приложение не ставит — их столбцов нет.
 
 import type { CurrencyConversion } from '#shared/domain/currency'
-import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
+import type { DraftRow, FillIssue, OpenTask, TimeOutlier } from '#shared/domain/fill'
 import { roundMoney } from '#shared/domain/money'
 import type { PriceMode } from '#shared/domain/settings'
 import { taskPath } from '#shared/domain/tasks'
-import { formatDuration, formatRuDate, HOURS_PRECISION } from '#shared/domain/time'
+import { formatDuration, formatRuDate, HOURS_PRECISION, secondsToHours } from '#shared/domain/time'
 import { columnDrift, lineAmounts, vatLabel, vatRateText, type LineAmounts, type VatRate, type VatTotals } from '#shared/domain/vat'
 
 const NBSP = '\u00A0'
@@ -214,9 +214,42 @@ export function unitNoticeShown(notice: string | null, rowCount: number): string
 /** Заголовок блока незакрытых задач: он виден и тогда, когда записать нельзя, — о записи ни слова. */
 export const OPEN_TASKS_TITLE = 'Не все задачи закрыты — время в них ещё может добавиться'
 
-/** Текст после ссылки на незакрытую задачу: « — выполняется,», у последней — без запятой. */
-export function openTaskText(task: OpenTask, last: boolean): string {
-  return ` — ${task.status}${last ? '' : ','}`
+/** Ссылка «Задача #N» и текст после неё — пункт блоков «незакрытые задачи» и «проверьте время». */
+export interface TaskLinkItem {
+  taskId: number
+  /** Текст после ссылки, с запятой, если пункт не последний. */
+  text: string
+}
+
+/**
+ * Пункты блока ссылок на задачи: хвосты через запятую, у последнего — без неё. Одно правило
+ * пунктуации и одна разметка (components/invoice/TaskLinks.vue) для всех таких блоков — не две
+ * копии (находка /code-review).
+ */
+export function taskLinks<T extends { taskId: number }>(items: readonly T[], text: (item: T) => string): TaskLinkItem[] {
+  return items.map((item, i) => ({ taskId: item.taskId, text: `${text(item)}${i === items.length - 1 ? '' : ','}` }))
+}
+
+/** Текст после ссылки на незакрытую задачу: « — выполняется». */
+export function openTaskText(task: OpenTask): string {
+  return ` — ${task.status}`
+}
+
+/** Заголовок блока задач со временем заметно больше обычного: проверить, записи не мешает. */
+export const OUTLIERS_TITLE = 'Время по задаче заметно больше обычного — проверьте'
+
+/**
+ * Текст после ссылки на задачу: « — 5,5 ч при обычных 1 ч». Часы — тем же `secondsToHours`, что
+ * и столбец «Количество»: блок и таблица не разойдутся, если правило часов поменяют.
+ */
+export function outlierText(outlier: TimeOutlier): string {
+  const hours = (seconds: number) => `${formatNumber(secondsToHours(seconds))} ч`
+  return ` — ${hours(outlier.seconds)} при обычных ${hours(outlier.typicalSeconds)}`
+}
+
+/** Задачи, чьи строки подсветить в таблице. */
+export function outlierTaskIds(outliers: readonly TimeOutlier[]): Set<number> {
+  return new Set(outliers.map(o => o.taskId))
 }
 
 /** Текст проблемы после ссылки «Задача #N»: «: причина»; без задачи — только причина. */

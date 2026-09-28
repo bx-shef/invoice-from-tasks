@@ -10,6 +10,10 @@ import {
   issueText,
   OPEN_TASKS_TITLE,
   openTaskText,
+  outlierTaskIds,
+  outlierText,
+  OUTLIERS_TITLE,
+  taskLinks,
   placementNote,
   PREVIEW_COLUMNS,
   previewContext,
@@ -225,8 +229,12 @@ describe('незакрытые задачи, проблемы, ссылки', ()
   })
 
   it('незакрытые задачи — через запятую, у последней запятой нет', () => {
-    expect(openTaskText({ taskId: 102, status: 'ждёт выполнения' }, false)).toBe(' — ждёт выполнения,')
-    expect(openTaskText({ taskId: 104, status: 'выполняется' }, true)).toBe(' — выполняется')
+    const open = [{ taskId: 102, status: 'ждёт выполнения' }, { taskId: 104, status: 'выполняется' }]
+    expect(taskLinks(open, openTaskText)).toEqual([
+      { taskId: 102, text: ' — ждёт выполнения,' },
+      { taskId: 104, text: ' — выполняется' }
+    ])
+    expect(taskLinks([], openTaskText)).toEqual([])
   })
 
   it('после ссылки «Задача #N» — двоеточие без пробела перед ним; без задачи — только текст', () => {
@@ -236,5 +244,22 @@ describe('незакрытые задачи, проблемы, ссылки', ()
 
   it('ссылка на задачу — адрес портала и путь задачи', () => {
     expect(taskHref('https://portal.bitrix24.by', 104)).toBe('https://portal.bitrix24.by/company/personal/user/0/tasks/task/view/104/')
+  })
+})
+
+describe('задачи со временем заметно больше обычного — тексты блока', () => {
+  it('заголовок просит проверить; «5,5 ч при обычных 1 ч», у последней без запятой', () => {
+    expect(OUTLIERS_TITLE).toBe('Время по задаче заметно больше обычного — проверьте')
+    const outliers = [{ taskId: 104, seconds: 19_800, typicalSeconds: 3600 }, { taskId: 105, seconds: 19_800, typicalSeconds: 5400 }]
+    expect(taskLinks(outliers, outlierText)).toEqual([
+      { taskId: 104, text: ' — 5,5 ч при обычных 1 ч,' },
+      { taskId: 105, text: ' — 5,5 ч при обычных 1,5 ч' }
+    ])
+  })
+
+  it('подсветка — строки этих задач', () => {
+    const ids = outlierTaskIds([{ taskId: 104, seconds: 1, typicalSeconds: 1 }])
+    expect(ids.has(104)).toBe(true)
+    expect(ids.has(102)).toBe(false)
   })
 })

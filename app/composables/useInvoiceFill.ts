@@ -5,7 +5,7 @@
 
 import { buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { buildRows, finishRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
@@ -36,7 +36,8 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
-import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
+import { writeBlocker, type InvoiceCheck, type WriteBlock } from '~/utils/writeConfirm'
+import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
 const MAX_CONSULT_TITLE = 500
@@ -103,6 +104,45 @@ export function useInvoiceFill() {
     if (!parsed) throw new Error(`Счёт #${id} не найден или нет доступа`)
     invoice.value = parsed
     existing.value = rows
+  }
+
+  /** Перечитать счёт и позиции — перед вопросом и перед записью, одним способом. */
+  async function rereadInvoice(id: number): Promise<InvoiceCheck> {
+    try {
+      await readInvoice(id)
+    } catch (e) {
+      return { readError: e instanceof Error ? e.message : String(e), changed: null }
+    }
+    return { readError: null, changed: collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null }
+  }
+
+  /** Показать, почему запись не пошла (writeBlocker): сброс — ошибкой наверху, прочее — под кнопками. */
+  function stopWrite(block: WriteBlock): void {
+    writing.value = null
+    if (block.resetPreview) {
+      error.value = block.message
+      result.value = null
+      step.value = 'idle'
+    } else {
+      notice.value = block.message
+      step.value = 'preview'
+    }
+  }
+
+  /**
+   * Перед вопросом о записи (writeConfirm.ts → openConfirm): перечитать счёт и позиции. Числа и
+   * дубли в вопросе — о счёте сейчас; сменившиеся реквизиты, валюту или сделку видно до вопросов,
+   * а не после двух «да» (находка четвёртого круга). `true` — можно спрашивать.
+   */
+  async function prepareWrite(): Promise<boolean> {
+    const inv = invoice.value
+    if (!inv || !canWrite.value) return false
+    // Прошлые сообщения к новому вопросу не относятся — и красная ошибка прошлой попытки тоже.
+    notice.value = ''
+    error.value = ''
+    const block = writeBlocker(await rereadInvoice(inv.id), null, [])
+    if (block) stopWrite(block)
+    return !block
   }
 
   async function loadInvoice(id: number): Promise<void> {
@@ -242,7 +282,7 @@ export function useInvoiceFill() {
       await users.load([...involved])
       const userNames = new Map(Object.entries(users.names.value).map(([id, name]) => [Number(id), name]))
 
-      let built = buildRows({
+      const built = buildRows({
         mode,
         tasks: tasks.value,
         entries,
@@ -253,17 +293,17 @@ export function useInvoiceFill() {
         userNames
       })
 
+      let names: Record<string, string> | null = null
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
-        const names: Record<string, string> = {}
+        names = {}
         // Пакетами по MAX_NAMING_ITEMS: сервер больше за раз не примет (бюджет модели).
         for (const part of chunk(await namingItems(mode, built), MAX_NAMING_ITEMS)) {
           const res = await post<{ names: Record<string, string> }>('/api/ai/names', { mode, items: part })
           Object.assign(names, res.names)
         }
-        const named = applyNames(built.rows, names)
-        built = { ...built, rows: named.rows, errors: named.errors }
       }
-      result.value = built
+      // Названия от BitrixGPT, затем ID задачи (finishRows): предпросмотр — то, что уйдёт в счёт.
+      result.value = finishRows(built, names, settings.value.taskIdInName)
       step.value = 'preview'
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -293,8 +333,26 @@ export function useInvoiceFill() {
    * Автоматических повторов SDK при сетевых сбоях нет (config/b24.ts → sdkRestrictionParams), а
    * итог определяется по ПЕРЕЧИТАННОМУ счёту (writeOutcome.ts, покрыт тестом): сколько добавилось,
    * нет ли лишних строк, можно ли повторять.
+   * `askedIds` — позиции счёта, о которых спросили (writeConfirm.ts); обязателен, чтобы новый путь
+   * записи не мог молча обойти сверку: состав изменился — не пишем, предпросмотр остаётся, вопрос
+   * зададут заново.
    */
-  async function write(replace: boolean): Promise<void> {
+  async function write(replace: boolean, askedIds: readonly number[]): Promise<void> {
+    try {
+      await writeChecked(replace, askedIds)
+    } catch (e) {
+      // Сбой вне разобранных мест — что сказать и сбросить ли строки, решает writeCrash (с тестом).
+      // В консоль — для разбора: это ошибка кода, а не данные задач (находка пятого круга).
+      console.error('[invoice] запись прервалась', e)
+      const verdict = writeCrash(replace ? 'replace' : 'append', e instanceof Error ? e.message : String(e))
+      writing.value = null
+      if (verdict.resetPreview) result.value = null
+      error.value = verdict.message
+      step.value = result.value ? 'preview' : 'idle'
+    }
+  }
+
+  async function writeChecked(replace: boolean, askedIds: readonly number[]): Promise<void> {
     const inv = invoice.value
     if (!inv || !canWrite.value || !result.value) return
     const mode: WriteMode = replace ? 'replace' : 'append'
@@ -303,19 +361,10 @@ export function useInvoiceFill() {
     error.value = ''
     notice.value = ''
     // Перечитываем счёт перед записью: реквизиты (ставка НДС), валюту или сделку могли сменить в
-    // карточке, пока смотрели предпросмотр, — тогда строки не те, и писать их нельзя.
-    let stale: string | null
-    try {
-      await readInvoice(inv.id)
-      stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
-    } catch (e) {
-      stale = e instanceof Error ? e.message : String(e)
-    }
-    if (stale) {
-      writing.value = null
-      error.value = stale
-      result.value = null
-      step.value = 'idle'
+    // карточке, пока отвечали на вопросы, — тогда строки не те; позиции — тоже сверяются.
+    const block = writeBlocker(await rereadInvoice(inv.id), askedIds, existing.value.map(r => r.id))
+    if (block) {
+      stopWrite(block)
       return
     }
     const draft = result.value.rows
@@ -377,5 +426,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, prepareWrite, write, consult }
 }

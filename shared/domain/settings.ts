@@ -53,6 +53,11 @@ export interface AppSettings {
   vat: CompanyVat[]
   naming: NamingMode
   /**
+   * Добавлять ID задачи в начало названия строки: «[102] Сверстать лендинг» — строки счёта легко
+   * сверить с задачами (просьба владельца 2026-09-28). По умолчанию выключено: клиент видит счёт.
+   */
+  taskIdInName: boolean
+  /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
    * — это просто сброс в `null`, и улучшение системного промпта доходит до всех порталов.
    */
@@ -84,6 +89,7 @@ export function defaultSettings(): AppSettings {
     priceMode: 'hour',
     vat: [],
     naming: 'plain',
+    taskIdInName: false,
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -195,6 +201,7 @@ export function parseSettings(raw: unknown): AppSettings {
     priceMode: o.priceMode === 'sum' ? 'sum' : 'hour',
     vat: parseCompanyVat(o.vat),
     naming: o.naming === 'ai' ? 'ai' : 'plain',
+    taskIdInName: o.taskIdInName === true,
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
       timeBlock: nullablePrompt(prompts.timeBlock)

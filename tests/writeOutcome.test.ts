@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeWrite } from '~/utils/writeOutcome'
+import { describeWrite, writeCrash } from '~/utils/writeOutcome'
 
 describe('describeWrite — «Добавить»', () => {
   const base = { mode: 'append' as const, planned: 10, before: 3 }
@@ -64,5 +64,23 @@ describe('describeWrite — «Заменить»', () => {
 
   it('успех, но позиций другое число — предупреждение', () => {
     expect(describeWrite({ ...base, after: 6, error: null })).toMatchObject({ kind: 'warn' })
+  })
+})
+
+describe('writeCrash — запись прервалась сбоем вне разобранных мест', () => {
+  it('«Заменить» — один вызов: предпросмотр остаётся, повторить безопасно', () => {
+    expect(writeCrash('replace', 'x is undefined')).toEqual({
+      kind: 'error',
+      message: 'Запись прервалась (x is undefined). Проверьте позиции счёта в карточке; повторить «Заменить» безопасно.',
+      resetPreview: false
+    })
+  })
+
+  it('«Добавить» мог записать часть — строки собрать заново', () => {
+    expect(writeCrash('append', 'x is undefined')).toEqual({
+      kind: 'error',
+      message: 'Запись прервалась (x is undefined). Проверьте позиции счёта в карточке — часть строк могла записаться — и соберите строки заново.',
+      resetPreview: true
+    })
   })
 })

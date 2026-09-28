@@ -5,6 +5,9 @@
 import type { FillMode, TaskSource } from '#shared/domain/fill'
 import { TimeoutError, withTimeout } from '#shared/utils/timeout'
 import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
+import type { ComponentPublicInstance } from 'vue'
+import { answerYes, openConfirm, type ConfirmState, type OpenResult } from '~/utils/writeConfirm'
+import type { WriteMode } from '~/utils/writeOutcome'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -55,6 +58,36 @@ const roundingText = computed(() => {
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
 watch([source, mode], () => fill.reset())
 const result = computed(() => fill.result.value)
+/**
+ * Идущие вопросы перед записью (writeConfirm.ts) — на месте кнопок. Строки собрали заново или
+ * сбросили — вопросы были о прежних строках: снимаем.
+ */
+const confirming = ref<ConfirmState | null>(null)
+/** Нажата запись: перечитываем счёт, чтобы вопрос был о счёте сейчас. */
+const opening = ref<WriteMode | null>(null)
+const writeButtons: Record<WriteMode, Readonly<Ref<ComponentPublicInstance | null>>> = {
+  replace: useTemplateRef<ComponentPublicInstance>('replaceButton'),
+  append: useTemplateRef<ComponentPublicInstance>('appendButton')
+}
+const collectButton = useTemplateRef<ComponentPublicInstance>('collectButton')
+/**
+ * Фокус — на кнопку записи, с которой начали: её элемент исчезал (вопрос) или был неактивен. Счёт
+ * изменился и предпросмотр сброшен — кнопок записи нет, фокус на «Собрать строки» (находка
+ * пятого круга).
+ */
+async function focusWriteButton(writeMode: WriteMode) {
+  await nextTick()
+  const button = (writeButtons[writeMode].value ?? collectButton.value)?.$el as HTMLElement | undefined
+  button?.focus()
+}
+watch(result, () => {
+  confirming.value = null
+})
+/**
+ * Пока открыт вопрос, источник, тип и «Собрать строки» заблокированы: иначе вопрос молча исчез бы
+ * вместе со строками, о которых спрашивал (находка второго круга). Выйти — «Отмена».
+ */
+const locked = computed(() => busy.value || confirming.value !== null || opening.value !== null)
 
 onMounted(async () => {
   const frame = await b24.init()
@@ -95,10 +128,52 @@ async function collect() {
   await fill.collect(source.value, mode.value)
 }
 
+/** «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts). */
 async function write(replace: boolean) {
-  const existing = fill.existing.value.length
-  if (replace && existing > 0 && !window.confirm(`В счёте уже ${existing} поз. Заменить их строками из задач?`)) return
-  await fill.write(replace)
+  const writeMode: WriteMode = replace ? 'replace' : 'append'
+  opening.value = writeMode
+  let opened: OpenResult
+  try {
+    // Сначала перечитать счёт, потом спрашивать (openConfirm): вопрос — о счёте сейчас.
+    opened = await openConfirm(writeMode, result.value?.rows.map(r => r.name) ?? [], {
+      refresh: fill.prepareWrite,
+      positions: () => fill.existing.value,
+      now: () => performance.now()
+    })
+  } catch (e) {
+    // prepareWrite сбои разбирает сам; сюда — только неожиданное: не молчим.
+    fill.notice.value = `Не удалось подготовить запись (${e instanceof Error ? e.message : String(e)}) — ничего не записано.`
+    opened = { kind: 'stop' }
+  } finally {
+    opening.value = null
+  }
+  if (opened.kind === 'ask') confirming.value = opened.state
+  else if (opened.kind === 'write') await doWrite(replace, opened.askedIds)
+  else await focusWriteButton(writeMode)
+}
+
+async function confirmYes() {
+  const state = confirming.value
+  if (!state) return
+  // Слишком раннее «да» (двойной клик) answerYes возвращает тем же вопросом — ничего не меняется.
+  confirming.value = answerYes(state, performance.now())
+  if (!confirming.value) {
+    await doWrite(state.mode === 'replace', state.existingIds)
+    // Запись не пошла (счёт или позиции изменились, сбой) — блок вопроса исчез: фокус на кнопку.
+    if (fill.step.value !== 'done') await focusWriteButton(state.mode)
+  }
+}
+
+/** «Отмена» или Esc: вопросов нет, фокус — обратно на кнопку, с которой начали. */
+async function cancelConfirm() {
+  const writeMode = confirming.value?.mode
+  confirming.value = null
+  if (writeMode) await focusWriteButton(writeMode)
+}
+
+async function doWrite(replace: boolean, askedIds: readonly number[]) {
+  // Сбои записи fill.write разбирает сам (и неожиданные — тоже): страница только сообщает итог.
+  await fill.write(replace, askedIds)
   if (fill.step.value === 'done') toast.add({ title: 'Товары счёта обновлены', description: 'Обновите карточку счёта, чтобы увидеть изменения', color: 'air-primary-success' })
 }
 
@@ -156,7 +231,7 @@ async function consult(promptId: string) {
                 v-model="source"
                 :items="sourceItems"
                 value-key="value"
-                :disabled="busy"
+                :disabled="locked"
                 data-testid="fill-source"
               />
             </B24FormField>
@@ -165,7 +240,7 @@ async function consult(promptId: string) {
                 v-model="mode"
                 :items="modeItems"
                 value-key="value"
-                :disabled="busy"
+                :disabled="locked"
                 data-testid="fill-mode"
               />
             </B24FormField>
@@ -173,10 +248,11 @@ async function consult(promptId: string) {
           <template #footer>
             <div class="flex flex-wrap items-center gap-3">
               <B24Button
+                ref="collectButton"
                 color="air-primary"
                 label="Собрать строки"
                 :loading="fill.step.value === 'collecting' || measuresLoading"
-                :disabled="busy || !fill.invoice.value || measuresLoading"
+                :disabled="locked || !fill.invoice.value || measuresLoading"
                 data-testid="fill-collect"
                 @click="collect"
               />
@@ -202,6 +278,7 @@ async function consult(promptId: string) {
           :errors="result.errors"
           :warnings="result.warnings"
           :open-tasks="result.openTasks"
+          :outliers="result.outliers"
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"
@@ -213,24 +290,32 @@ async function consult(promptId: string) {
           :user-label="users.label"
         />
 
+        <InvoiceWriteConfirm
+          v-if="confirming && fill.canWrite.value"
+          :state="confirming"
+          @confirm="confirmYes"
+          @cancel="cancelConfirm"
+        />
         <!-- Во время записи кнопки остаются на месте: иначе индикатор загрузки некому показать. -->
         <div
-          v-if="fill.canWrite.value || fill.step.value === 'writing'"
+          v-else-if="fill.canWrite.value || fill.step.value === 'writing'"
           class="flex flex-wrap gap-3"
         >
           <B24Button
+            ref="replaceButton"
             color="air-primary-success"
             label="Заменить товары в счёте"
-            :loading="fill.writing.value === 'replace'"
-            :disabled="busy"
+            :loading="fill.writing.value === 'replace' || opening === 'replace'"
+            :disabled="busy || opening !== null"
             data-testid="fill-replace"
             @click="write(true)"
           />
           <B24Button
+            ref="appendButton"
             color="air-secondary"
             label="Добавить к товарам счёта"
-            :loading="fill.writing.value === 'append'"
-            :disabled="busy"
+            :loading="fill.writing.value === 'append' || opening === 'append'"
+            :disabled="busy || opening !== null"
             data-testid="fill-append"
             @click="write(false)"
           />

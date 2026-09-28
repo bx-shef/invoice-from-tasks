@@ -106,6 +106,51 @@ export interface FillResult {
    * работе), и строкой на задачу они похоронили бы предупреждения, меняющие суммы.
    */
   openTasks: OpenTask[]
+  /** Задачи, чьё время заметно больше обычного для этого счёта ({@link timeOutliers}) — проверить. */
+  outliers: TimeOutlier[]
+}
+
+/** Задача с временем заметно больше обычного: не стоп, а подсказка проверить. */
+export interface TimeOutlier {
+  taskId: number
+  /** Время задачи в счёте (после округления), секунды. */
+  seconds: number
+  /** Обычное время задачи в этом счёте — медиана по задачам, секунды. */
+  typicalSeconds: number
+}
+
+/**
+ * «Резко больше» — больше обычного более чем на 40% (владелец, 2026-09-28: «больше чем на 40%»):
+ * ровно +40% — ещё не выброс. Процентом, а не множителем 1.4: сравнение идёт в целых числах —
+ * `5400 * 1.4` в плавающей точке даёт 7559.999…, и задача ровно на +40% попала бы в выбросы
+ * (находка /code-review).
+ */
+export const OUTLIER_PERCENT = 40
+/** Сравнивать есть с чем — хотя бы 3 задачи: из двух «основной массы» не сложить. */
+export const OUTLIER_MIN_TASKS = 3
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+}
+
+/**
+ * Задачи, чьё время выбивается вверх из основной массы (просьба владельца 2026-09-28: «подсветить
+ * и проверить»): время задачи в счёте (сумма округлённых строк, в типе 2 — всех её записей) больше
+ * медианы по задачам более чем на 40%. Только вверх: короткий звонок среди длинных задач — не
+ * ошибка, а «списал 20 ч вместо 2 ч» — частая. Задач меньше трёх — не сравниваем. Строк с нулём
+ * после округления в `rows` нет (сборка их пропускает с предупреждением), поэтому у каждой задачи
+ * время больше нуля.
+ */
+export function timeOutliers(rows: readonly DraftRow[]): TimeOutlier[] {
+  const byTask = new Map<number, number>()
+  for (const row of rows) byTask.set(row.taskId, (byTask.get(row.taskId) ?? 0) + row.roundedSeconds)
+  if (byTask.size < OUTLIER_MIN_TASKS) return []
+  const typical = median([...byTask.values()])
+  return [...byTask.entries()]
+    .filter(([, seconds]) => seconds * 100 > typical * (100 + OUTLIER_PERCENT))
+    .map(([taskId, seconds]) => ({ taskId, seconds, typicalSeconds: typical }))
 }
 
 function userLabel(input: FillInput, userId: number): string {
@@ -275,7 +320,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
  * Собирает строки счёта. Если `errors` не пуст — писать в счёт нельзя, даже частично.
  */
 export function buildRows(input: FillInput): FillResult {
-  const result: FillResult = { rows: [], priceMode: input.settings.priceMode, errors: [], warnings: [], openTasks: [] }
+  const result: FillResult = { rows: [], priceMode: input.settings.priceMode, errors: [], warnings: [], openTasks: [], outliers: [] }
   if (input.tasks.length === 0) {
     result.errors.push({ taskId: 0, message: 'не найдено ни одной задачи' })
     return result
@@ -287,6 +332,7 @@ export function buildRows(input: FillInput): FillResult {
     const status = openTaskStatus(task.status)
     if (status) result.openTasks.push({ taskId: task.id, status })
   }
+  result.outliers = timeOutliers(result.rows)
   // Пересчёт валюты — первым предупреждением: он касается каждой цены в счёте.
   if (input.conversion && result.rows.length) result.warnings.unshift({ taskId: 0, message: input.conversion.notice })
   return result
@@ -307,6 +353,38 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
     return { ...row, name }
   })
   return { rows: out, errors }
+}
+
+/**
+ * Название строки с ID задачи в начале: «[102] Сверстать лендинг»; длиннее предела — обрезка.
+ * Название уже начинается с «[102]» (так иногда называют задачи) — второй раз не добавляем,
+ * иначе клиент увидел бы «[102] [102] …» (находка программиста панели).
+ */
+export function withTaskId(name: string, taskId: number): string {
+  const prefix = `[${taskId}]`
+  // Обрезка — в обеих ветках: функция экспортирована, и сырое название длиннее предела тоже придёт.
+  return clampName(name.startsWith(prefix) ? name : `${prefix} ${name}`)
+}
+
+/**
+ * ID задачи в названиях строк, если это включено в настройках (`taskIdInName`). Вызывается
+ * последним шагом, после названий от BitrixGPT: предпросмотр и счёт показывают одно и то же.
+ */
+export function applyTaskIds(rows: DraftRow[], enabled: boolean): DraftRow[] {
+  return enabled ? rows.map(row => ({ ...row, name: withTaskId(row.name, row.taskId) })) : rows
+}
+
+/**
+ * Последний шаг сборки — одна функция для страницы, смока и будущих путей записи («Создать счёт»):
+ * сначала названия от BitrixGPT (`names`; `null` — режим «как есть»), потом ID задачи по
+ * настройке. Порядок важен: названия от BitrixGPT заменяют название целиком, и ID, добавленный
+ * раньше, пропал бы (находка /code-review). Ошибки названий добавляются к ошибкам сборки, а не
+ * заменяют их: вызывающий, запросивший названия при ошибках сборки, не получит «ошибок нет» и не
+ * запишет счёт с недостающими данными (находка второго круга).
+ */
+export function finishRows(built: FillResult, names: Record<string, string> | null, taskIdInName: boolean): FillResult {
+  const named = names ? applyNames(built.rows, names) : { rows: built.rows, errors: [] }
+  return { ...built, rows: applyTaskIds(named.rows, taskIdInName), errors: [...built.errors, ...named.errors] }
 }
 
 /**
