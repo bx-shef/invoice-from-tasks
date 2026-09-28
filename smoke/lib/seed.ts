@@ -2,7 +2,7 @@
 // что прогоны не мешают друг другу и старые данные не влияют на расчёт. Ничего не удаляется
 // (решение владельца: тестовые данные остаются для ручного просмотра).
 
-import { listMyCompanies } from './flow'
+import { listMeasures, listMyCompanies } from './flow'
 import type { Portal } from './portal'
 
 /**
@@ -82,12 +82,15 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
   return id
 }
 
-/** Своя единица смока: есть с этим кодом — берём (другое название — ошибка засева), нет — создаём. */
+/**
+ * Своя единица смока: есть с этим кодом — берём (другое название — ошибка засева), нет — создаём.
+ * Ищем в полном справочнике своим кодом, а не фильтром портала: непонятый фильтр портал не
+ * отвергает, а отдаёт всё (урок tasks.task.list, docs/REST_METHODS.md).
+ */
 async function smokeUnit(portal: Portal): Promise<number> {
-  const res = await portal.call<{ measures?: Array<{ code?: unknown, measureTitle?: unknown }> }>('catalog.measure.list', { filter: { code: SMOKE_UNIT.code } })
-  const found = res?.measures?.[0]
-  if (found && found.measureTitle !== SMOKE_UNIT.measureTitle) {
-    throw new Error(`код единицы ${SMOKE_UNIT.code} в портале занят «${String(found.measureTitle)}» — смени SMOKE_UNIT.code`)
+  const found = (await listMeasures(portal)).find(m => m.code === SMOKE_UNIT.code)
+  if (found && found.title !== SMOKE_UNIT.measureTitle) {
+    throw new Error(`код единицы ${SMOKE_UNIT.code} в портале занят «${found.title}» — смени SMOKE_UNIT.code`)
   }
   if (!found) await portal.call('catalog.measure.add', { fields: { ...SMOKE_UNIT, isDefault: 'N' } })
   return SMOKE_UNIT.code

@@ -18,7 +18,8 @@ import {
   previewContext,
   previewLine,
   previewTotals,
-  taskHref
+  taskHref,
+  unitNoticeShown
 } from '~/utils/fillPreview'
 
 const props = defineProps<{
@@ -53,6 +54,7 @@ const lines = computed(() => {
 const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
+const unitWarning = computed(() => unitNoticeShown(props.unitNotice, props.rows.length))
 const href = (taskId: number) => taskHref(props.origin, taskId)
 /** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
 const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 ? 'pt-3 pb-1' : 'py-1'
@@ -85,7 +87,7 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
     </B24Alert>
 
     <B24Alert
-      v-if="warnings.length || (unitNotice && rows.length)"
+      v-if="warnings.length || unitWarning"
       color="air-primary-warning"
       title="Обратите внимание"
       data-testid="fill-warnings"
@@ -93,10 +95,10 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
       <template #description>
         <ul class="list-disc pl-5">
           <li
-            v-if="unitNotice && rows.length"
+            v-if="unitWarning"
             data-testid="fill-unit-notice"
           >
-            {{ unitNotice }}
+            {{ unitWarning }}
           </li>
           <li
             v-for="(issue, i) in warnings"

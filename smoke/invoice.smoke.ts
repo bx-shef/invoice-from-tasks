@@ -20,11 +20,11 @@ import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import type { RoundingDirection, RoundingStep } from '#shared/domain/time'
 import { roundMoney } from '#shared/domain/money'
 import { grossPrice, lineAmounts, vatForInvoice, vatTotals, type CompanyVat } from '#shared/domain/vat'
-import { addRowCall, measureListCall, replaceRowsCall } from '~/utils/invoiceRequests'
-import { parseMeasures, rowUnit } from '~/utils/measures'
+import { addRowCall, replaceRowsCall } from '~/utils/invoiceRequests'
+import { rowUnit } from '~/utils/measures'
 import { describeWrite } from '~/utils/writeOutcome'
 import { connectPortal, type Portal } from './lib/portal'
-import { fetchEntries, fetchTasks, readInvoice, readInvoiceRaw } from './lib/flow'
+import { fetchEntries, fetchTasks, listMeasures, readInvoice, readInvoiceRaw } from './lib/flow'
 
 const env = inject('smokeEnv')
 const fx = inject('fixture')
@@ -266,8 +266,7 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     })
 
     it('единица строк: предпросмотр (rowUnit) показывает ту, что портал действительно запишет', async () => {
-      const { method, params } = measureListCall()
-      const measures = parseMeasures((await portal.call<{ measures?: unknown[] }>(method, params))?.measures)
+      const measures = await listMeasures(portal)
       // «Час» (356) в справочнике тестового портала не заведён — на нём и проверяем подмену.
       expect(measures.some(m => m.code === 356)).toBe(false)
       const settings = { ...settingsFor(variant), rounding: 0 as const }

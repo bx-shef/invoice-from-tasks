@@ -6,6 +6,8 @@
 // список в настройках показывал бы пустые названия. Поэтому название — из справочника ОКЕИ по
 // коду, а международные обозначения — последний запас.
 
+import type { PriceMode } from '#shared/domain/settings'
+
 /** Названия частых кодов ОКЕИ — для единиц, у которых портал не отдал своё название. */
 export const OKEI_NAMES: Readonly<Record<number, string>> = {
   6: 'Метр',
@@ -86,6 +88,20 @@ export function parseMeasures(raw: unknown): MeasureOption[] {
   return out
 }
 
+/**
+ * Справочник, которому можно верить: пустой ответ — «не прочитан», а не «единиц нет» (у портала
+ * хотя бы единица по умолчанию есть всегда): иначе другая форма ответа дала бы ложное «нет в
+ * справочнике» для существующей единицы (находка /code-review).
+ */
+function readList(measures: readonly MeasureOption[] | null): readonly MeasureOption[] | null {
+  return measures?.length ? measures : null
+}
+
+/** Единица справочника по коду — одно правило для предпросмотра и настроек. */
+function findMeasure(list: readonly MeasureOption[], code: number): MeasureOption | undefined {
+  return list.find(m => m.code === code)
+}
+
 /** Какая единица окажется в строках счёта — для столбца «Количество» предпросмотра. */
 export interface RowUnit {
   /** Обозначение («ч», «чел.-ч»); `''` — неизвестно, предпросмотр пишет число без единицы. */
@@ -102,10 +118,11 @@ export interface RowUnit {
  * (`null`: у сотрудника нет права чтения каталога) — обозначение из ОКЕИ по коду, без догадок.
  */
 export function rowUnit(measures: readonly MeasureOption[] | null, code: number | null): RowUnit {
-  if (!measures) return { symbol: measureSymbol(code), notice: null }
-  const fallback = measures.find(m => m.isDefault)
+  const list = readList(measures)
+  if (!list) return { symbol: measureSymbol(code), notice: null }
+  const fallback = list.find(m => m.isDefault)
   if (code === null) return { symbol: fallback?.symbol ?? '', notice: null }
-  const found = measures.find(m => m.code === code)
+  const found = findMeasure(list, code)
   if (found) return { symbol: found.symbol, notice: null }
   const replacement = fallback ? `единицу по умолчанию «${fallback.title || fallback.symbol || `код ${fallback.code}`}»` : 'единицу по умолчанию'
   return {
@@ -117,7 +134,8 @@ export function rowUnit(measures: readonly MeasureOption[] | null, code: number 
 
 /** Сохранённого кода нет в прочитанном справочнике — в счёт пойдёт единица по умолчанию. */
 export function measureMissing(measures: readonly MeasureOption[] | null, saved: number | null): boolean {
-  return !!measures && !!saved && !measures.some(m => m.code === saved)
+  const list = readList(measures)
+  return !!list && !!saved && !findMeasure(list, saved)
 }
 
 /**
@@ -127,9 +145,18 @@ export function measureMissing(measures: readonly MeasureOption[] | null, saved:
  * (`null`) — только сохранённый код, без пометки: проверить нечем.
  */
 export function measureItems(measures: readonly MeasureOption[] | null, saved: number | null): Array<{ label: string, value: number }> {
-  const items = (measures ?? []).map(m => ({ label: m.label, value: m.code }))
-  if (saved && !items.some(i => i.value === saved)) {
+  const list = readList(measures)
+  const items = (list ?? []).map(m => ({ label: m.label, value: m.code }))
+  if (saved && !(list && findMeasure(list, saved))) {
     items.push({ label: measureMissing(measures, saved) ? `код ${saved} — нет в справочнике` : `код ${saved}`, value: saved })
   }
   return items
+}
+
+/** Код ОКЕИ «час». */
+export const HOUR_MEASURE = 356
+
+/** Единица «час» при «сумма × 1» читалась бы в счёте как «1 час» за всю работу — предупреждаем. */
+export function hourInSumMode(priceMode: PriceMode, measureCode: number | null): boolean {
+  return priceMode === 'sum' && measureCode === HOUR_MEASURE
 }

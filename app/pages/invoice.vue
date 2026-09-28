@@ -22,6 +22,11 @@ const consulting = ref('')
 const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | null>(null)
 /** Справочник единиц; `null` — не прочитан (нет права чтения каталога): единица — из ОКЕИ. */
 const measures = ref<MeasureOption[] | null>(null)
+/**
+ * Пока справочник грузится, «Собрать строки» ждёт: иначе предпросмотр на миг показал бы единицу
+ * из ОКЕИ без предупреждения о подмене, и её успели бы записать (находка /code-review).
+ */
+const measuresLoading = ref(true)
 const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode))
 
 const sourceItems = [
@@ -52,23 +57,24 @@ onMounted(async () => {
   origin.value = frame.getTargetOrigin()
   invoiceId.value = invoiceIdFromOptions(frame.placement.options) ?? invoiceIdFromQuery(route.query.id)
   if (!invoiceId.value) return
+  // Справочник единиц — сразу и параллельно с настройками и счётом; ошибка не мешает счёту:
+  // без справочника предпросмотр возьмёт обозначение из ОКЕИ.
+  const measuresLoaded = catalog.measures().then(
+    (list) => {
+      measures.value = list
+    },
+    () => {
+      measures.value = null
+    }
+  ).finally(() => {
+    measuresLoading.value = false
+  })
   try {
     await app.load()
   } catch {
     return
   }
-  // Справочник единиц — параллельно со счётом и не мешая ему: без него предпросмотр возьмёт ОКЕИ.
-  await Promise.all([
-    fill.loadInvoice(invoiceId.value),
-    catalog.measures().then(
-      (list) => {
-        measures.value = list
-      },
-      () => {
-        measures.value = null
-      }
-    )
-  ])
+  await Promise.all([fill.loadInvoice(invoiceId.value), measuresLoaded])
 })
 
 async function collect() {
@@ -157,7 +163,7 @@ async function consult(promptId: string) {
                 color="air-primary"
                 label="Собрать строки"
                 :loading="fill.step.value === 'collecting'"
-                :disabled="busy || !fill.invoice.value"
+                :disabled="busy || !fill.invoice.value || measuresLoading"
                 data-testid="fill-collect"
                 @click="collect"
               />

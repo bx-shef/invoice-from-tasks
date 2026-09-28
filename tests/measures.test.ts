@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
+import { hourInSumMode, MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
 
 // Ответ catalog.measure.list с тестового портала (замер 2026-09-24): у системных единиц
 // measureTitle и symbol — null, заполнены только международные обозначения.
@@ -116,8 +116,9 @@ describe('rowUnit — какая единица окажется в строка
     })
   })
 
-  it('справочник не прочитан (нет права каталога) — обозначение из ОКЕИ по коду, без предупреждения', () => {
+  it('справочник не прочитан (нет права каталога) или пуст — обозначение из ОКЕИ по коду, без предупреждения', () => {
     expect(rowUnit(null, 356)).toEqual({ symbol: 'ч', notice: null })
+    expect(rowUnit([], 356)).toEqual({ symbol: 'ч', notice: null })
     expect(rowUnit(null, 9990)).toEqual({ symbol: '', notice: null })
     expect(rowUnit(null, null)).toEqual({ symbol: '', notice: null })
   })
@@ -135,7 +136,8 @@ describe('measureMissing — сохранённой единицы нет в с�
     expect(measureMissing(portal, 796)).toBe(false)
     expect(measureMissing(portal, null)).toBe(false)
     expect(measureMissing(null, 356)).toBe(false)
-    expect(measureMissing([], 356)).toBe(true)
+    // Пустой ответ — «не прочитан», а не «единиц нет»: у портала единица по умолчанию есть всегда.
+    expect(measureMissing([], 356)).toBe(false)
   })
 })
 
@@ -148,6 +150,16 @@ describe('measureItems — список единиц в настройках', (
   it('справочник не прочитан — только сохранённый код, без пометки; ничего не сохранено — пусто', () => {
     expect(measureItems(null, 356)).toEqual([{ label: 'код 356', value: 356 }])
     expect(measureItems(null, null)).toEqual([])
+    expect(measureItems([], 356)).toEqual([{ label: 'код 356', value: 356 }])
     expect(measureItems(portal, null)).toHaveLength(3)
+  })
+})
+
+describe('hourInSumMode — «час» при «сумма × 1»', () => {
+  it('только сумма строки и единица «час» (356): в счёте было бы «1 час» за всю работу', () => {
+    expect(hourInSumMode('sum', 356)).toBe(true)
+    expect(hourInSumMode('hour', 356)).toBe(false)
+    expect(hourInSumMode('sum', 796)).toBe(false)
+    expect(hourInSumMode('sum', null)).toBe(false)
   })
 })

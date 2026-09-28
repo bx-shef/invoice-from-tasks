@@ -203,6 +203,14 @@ export function driftNote(rows: readonly DraftRow[], totals: VatTotals): string 
   return parts.length ? `${parts.join(' ')} В счёте будут итоги как здесь.` : null
 }
 
+/**
+ * Предупреждение о единице — только когда есть строки: без строк писать нечего, и предупреждение
+ * о подмене единицы было бы шумом (показ — FillPreview, «Обратите внимание» первым пунктом).
+ */
+export function unitNoticeShown(notice: string | null, rowCount: number): string | null {
+  return notice && rowCount > 0 ? notice : null
+}
+
 /** Заголовок блока незакрытых задач: он виден и тогда, когда записать нельзя, — о записи ни слова. */
 export const OPEN_TASKS_TITLE = 'Не все задачи закрыты — время в них ещё может добавиться'
 

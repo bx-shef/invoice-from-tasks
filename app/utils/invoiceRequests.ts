@@ -96,13 +96,22 @@ export function vatListCall(): RestCall {
   return { method: 'catalog.vat.list', params: {} }
 }
 
+/** Страница catalog.measure.list — 50 (замер 2026-09-28: 61 единица → 50 и 11, `start` — смещение). */
+export const MEASURES_PAGE = 50
+/** Потолок единиц, которые читаем: 20 страниц × 50. */
+export const MAX_MEASURES = 1000
+
 /**
  * Справочник единиц: catalog.measure.list — для списка в настройках и для единицы строк в
  * предпросмотре счёта (`symbol` своих единиц, `isDefault` — её портал ставит вместо кода не из
- * справочника, замер 2026-09-28).
+ * справочника, замер 2026-09-28). Листаем по `start` в порядке `id`: без листания портал отдаёт
+ * только первые 50, и своя единица со второй страницы «пропала» бы (находка /code-review).
  */
-export function measureListCall(): RestCall {
-  return { method: 'catalog.measure.list', params: { select: ['code', 'measureTitle', 'symbol', 'symbolIntl', 'symbolLetterIntl', 'isDefault'] } }
+export function measureListCall(start: number): RestCall {
+  return {
+    method: 'catalog.measure.list',
+    params: { select: ['code', 'measureTitle', 'symbol', 'symbolIntl', 'symbolLetterIntl', 'isDefault'], order: { id: 'asc' }, start }
+  }
 }
 
 /** «Заменить»: crm.item.productrow.set — все позиции счёта заменяются набором. */
