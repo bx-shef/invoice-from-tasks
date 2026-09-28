@@ -3,8 +3,8 @@
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
-import { withTimeout } from '~/utils/concurrency'
-import { rowUnit, type MeasureOption } from '~/utils/measures'
+import { TimeoutError, withTimeout } from '#shared/utils/timeout'
+import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -31,7 +31,9 @@ const measures = ref<MeasureOption[] | null>(null)
  */
 const measuresLoading = ref(true)
 const MEASURES_WAIT = 10_000
-const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode))
+/** Почему справочник не прочитан: не ответил в срок — предпросмотр скажет об этом (rowUnit). */
+const measuresUnread = ref<UnreadReason>('failed')
+const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode, measuresUnread.value))
 
 const sourceItems = [
   { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
@@ -74,7 +76,10 @@ onMounted(async () => {
     ),
     MEASURES_WAIT,
     'справочник единиц не ответил'
-  ).catch(() => {}).finally(() => {
+  ).catch((e: unknown) => {
+    // Поздний ответ всё равно заполнит measures — тогда пометка «не ответил» уйдёт сама.
+    if (e instanceof TimeoutError) measuresUnread.value = 'timeout'
+  }).finally(() => {
     measuresLoading.value = false
   })
   try {

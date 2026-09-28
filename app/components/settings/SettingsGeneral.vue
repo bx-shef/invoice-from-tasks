@@ -30,21 +30,28 @@ const measures = computed(() => measureItems(measureList.value, settings.value.m
 const measureGone = computed(() => measureMissing(measureList.value, settings.value.measureCode))
 const hourWarning = computed(() => hourInSumMode(settings.value.priceMode, settings.value.measureCode, measureList.value))
 
-onMounted(async () => {
-  // Валюты и единицы — независимые запросы: параллельно, у каждого свой запас на случай ошибки.
-  const [currencyList, measureResult] = await Promise.allSettled([
-    b24.call<Array<{ CURRENCY?: unknown, FULL_NAME?: unknown }>>('crm.currency.list'),
-    catalog.measures()
-  ])
-  measureList.value = measureResult.status === 'fulfilled' ? measureResult.value : null
+onMounted(() => {
+  // Валюты и единицы — независимо: медленный справочник единиц не держит список валют.
+  void loadCurrencies()
+  void catalog.measures().then(
+    (list) => {
+      measureList.value = list
+    },
+    () => {
+      measureList.value = null
+    }
+  )
+})
+
+async function loadCurrencies() {
   try {
-    if (currencyList.status === 'rejected') throw currencyList.reason
-    currencies.value = (currencyList.value ?? []).map(c => ({ label: `${c.CURRENCY} — ${c.FULL_NAME ?? ''}`, value: String(c.CURRENCY ?? '') })).filter(c => c.value)
+    const list = await b24.call<Array<{ CURRENCY?: unknown, FULL_NAME?: unknown }>>('crm.currency.list')
+    currencies.value = (list ?? []).map(c => ({ label: `${c.CURRENCY} — ${c.FULL_NAME ?? ''}`, value: String(c.CURRENCY ?? '') })).filter(c => c.value)
   } catch {
-    // Отказ или битый ответ — список из сохранённой валюты (разбор тоже внутри try: находка /code-review).
+    // Отказ или битый ответ — список из сохранённой валюты (разбор тоже внутри try).
     currencies.value = settings.value.currency ? [{ label: settings.value.currency, value: settings.value.currency }] : []
   }
-})
+}
 
 const measureModel = computed({
   get: () => settings.value.measureCode ?? 0,

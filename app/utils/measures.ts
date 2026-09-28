@@ -18,6 +18,7 @@ export const OKEI_NAMES: Readonly<Record<number, string>> = {
   355: 'Минута',
   356: 'Час',
   359: 'Сутки',
+  539: 'Человеко-час',
   796: 'Штука'
 }
 
@@ -33,6 +34,7 @@ export const OKEI_SYMBOLS: Readonly<Record<number, string>> = {
   355: 'мин',
   356: 'ч',
   359: 'сут',
+  539: 'чел.-ч',
   796: 'шт'
 }
 
@@ -103,6 +105,9 @@ function findMeasure(list: readonly MeasureOption[], code: number): MeasureOptio
   return list.find(m => m.code === code)
 }
 
+/** Почему справочник не прочитан: нет права или ошибка — молча; не ответил в срок — с пометкой. */
+export type UnreadReason = 'failed' | 'timeout'
+
 /** Какая единица окажется в строках счёта — для столбца «Количество» предпросмотра. */
 export interface RowUnit {
   /** Обозначение («ч», «чел.-ч»); `''` — неизвестно, предпросмотр пишет число без единицы. */
@@ -118,9 +123,17 @@ export interface RowUnit {
  * предпросмотр показывает то, что будет в счёте, и предупреждает. Справочник не прочитан
  * (`null`: у сотрудника нет права чтения каталога) — обозначение из ОКЕИ по коду, без догадок.
  */
-export function rowUnit(measures: readonly MeasureOption[] | null, code: number | null): RowUnit {
+export function rowUnit(measures: readonly MeasureOption[] | null, code: number | null, unread: UnreadReason = 'failed'): RowUnit {
   const list = readList(measures)
-  if (!list) return { symbol: measureSymbol(code), notice: null }
+  if (!list) {
+    // Не ответил в срок (портал медленный, а не без прав) — о подмене единицы сказать нечем,
+    // поэтому честно предупреждаем: единица показана по коду (находка /code-review).
+    const notice = unread === 'timeout' && code !== null
+      ? 'Справочник единиц портала не ответил вовремя — единица показана по коду; если её нет в '
+      + 'справочнике, портал запишет единицу по умолчанию. Проверьте единицу в счёте после записи.'
+      : null
+    return { symbol: measureSymbol(code), notice }
+  }
   const fallback = list.find(m => m.isDefault)
   if (code === null) return { symbol: fallback?.symbol ?? '', notice: null }
   const found = findMeasure(list, code)
@@ -157,8 +170,13 @@ export function measureItems(measures: readonly MeasureOption[] | null, saved: n
 /** Код ОКЕИ «час». */
 export const HOUR_MEASURE = 356
 
-/** Обозначение или название часовой единицы: «ч», «час», «чел.-ч», «человеко-час». */
-const HOUR_WORD = /час|(?:^|[^а-яё])ч\.?$/i
+/**
+ * Отдельное слово «час» («Час работы», «человеко-час», «часа», «часов») или обозначение «ч»
+ * («ч», «ч.», «чел.-ч», «чел.ч»), а также латиница у системных единиц («h», «hr», «hour»,
+ * «man-h»). Слово — не часть другого: «Часть», «Участок», «Часы», «Чашка» — не час; «км/ч» —
+ * скорость (перед «ч» — косая черта). Находки /code-review и программиста по PR #26.
+ */
+const HOUR_WORD = /(?:^|[\s.-])(?:час(?:а|ов)?|ч\.?|hours?|hrs?|h)(?=$|[\s.,)])/i
 
 /**
  * Единица «час» при «сумма × 1» читалась бы в счёте как «1 час» за всю работу — предупреждаем.
@@ -167,16 +185,21 @@ const HOUR_WORD = /час|(?:^|[^а-яё])ч\.?$/i
  */
 export function hourInSumMode(priceMode: PriceMode, measureCode: number | null, measures: readonly MeasureOption[] | null = null): boolean {
   if (priceMode !== 'sum' || measureCode === null) return false
-  if (measureCode === HOUR_MEASURE) return true
-  const unit = readList(measures) && findMeasure(readList(measures)!, measureCode)
-  return !!unit && (HOUR_WORD.test(unit.symbol) || HOUR_WORD.test(unit.title))
+  const list = readList(measures)
+  // Справочник не прочитан — судим по коду ОКЕИ.
+  if (!list) return measureCode === HOUR_MEASURE
+  // Кода нет в справочнике — в счёт пойдёт единица по умолчанию, не час (об этом — measureMissing).
+  const unit = findMeasure(list, measureCode)
+  return !!unit && (unit.code === HOUR_MEASURE || HOUR_WORD.test(unit.symbol) || HOUR_WORD.test(unit.title))
 }
 
 /**
  * Весь справочник единиц постранично — одна реализация для страницы (useCatalog) и смока:
  * `fetchPage(start)` — ответ catalog.measure.list на смещение `start` (measureListCall). Разбираем
- * после сбора: страница с битой записью короче 50, и листание кончилось бы раньше; `measures` не
- * массив — пустая страница (листание кончается), а не падение. Больше `max` — ошибка.
+ * после сбора: страница с битой записью короче 50, и листание кончилось бы раньше. Ответ без
+ * массива `measures` — ошибка: на второй странице он молча обрезал бы справочник, и своя единица
+ * «пропала» бы (находка /code-review); вызывающий считает справочник не прочитанным. Больше
+ * `max` — тоже ошибка.
  */
 export async function readMeasures(
   fetchPage: (start: number) => Promise<unknown>,
@@ -187,7 +210,8 @@ export async function readMeasures(
     async (start) => {
       const res = await fetchPage(start)
       const page = res && typeof res === 'object' ? (res as { measures?: unknown }).measures : undefined
-      return Array.isArray(page) ? page : []
+      if (!Array.isArray(page)) throw new Error(`catalog.measure.list: ответ без списка единиц (start ${start})`)
+      return page
     },
     pageSize,
     max,

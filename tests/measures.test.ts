@@ -116,6 +116,16 @@ describe('rowUnit — какая единица окажется в строка
     })
   })
 
+  it('справочник не ответил в срок — обозначение из ОКЕИ и честное предупреждение; без кода — молча', () => {
+    expect(rowUnit(null, 356, 'timeout')).toEqual({
+      symbol: 'ч',
+      notice: 'Справочник единиц портала не ответил вовремя — единица показана по коду; если её нет в справочнике, '
+        + 'портал запишет единицу по умолчанию. Проверьте единицу в счёте после записи.'
+    })
+    expect(rowUnit(null, null, 'timeout')).toEqual({ symbol: '', notice: null })
+    expect(rowUnit(portal, 796, 'timeout')).toEqual({ symbol: 'шт', notice: null })
+  })
+
   it('справочник не прочитан (нет права каталога) или пуст — обозначение из ОКЕИ по коду, без предупреждения', () => {
     expect(rowUnit(null, 356)).toEqual({ symbol: 'ч', notice: null })
     expect(rowUnit([], 356)).toEqual({ symbol: 'ч', notice: null })
@@ -163,20 +173,33 @@ describe('hourInSumMode — «час» при «сумма × 1»', () => {
     expect(hourInSumMode('sum', null)).toBe(false)
   })
 
-  it('своя часовая единица справочника — по обозначению или названию («чел.-ч», «Час работы»)', () => {
+  it('своя часовая единица справочника — по обозначению или по названию, каждое само по себе', () => {
     const own = parseMeasures([
-      { code: 9990, measureTitle: 'IFT smoke: человеко-час', symbol: 'чел.-ч' },
+      { code: 9990, measureTitle: 'Работа специалиста', symbol: 'чел.-ч' },
       { code: 9991, measureTitle: 'Час работы', symbol: 'чр' },
-      { code: 9992, measureTitle: 'Штука', symbol: 'шт' },
-      { code: 9993, measureTitle: 'Чашка', symbol: 'чаш' }
+      { code: 9994, measureTitle: 'Единица времени', symbol: 'ч.' },
+      { code: 9995, symbolIntl: 'man-h' },
+      { code: 539 }
     ])
-    expect(hourInSumMode('sum', 9990, own)).toBe(true)
-    expect(hourInSumMode('sum', 9991, own)).toBe(true)
-    expect(hourInSumMode('sum', 9992, own)).toBe(false)
-    expect(hourInSumMode('sum', 9993, own)).toBe(false)
+    for (const code of [9990, 9991, 9994, 9995, 539]) expect(hourInSumMode('sum', code, own), String(code)).toBe(true)
     expect(hourInSumMode('hour', 9990, own)).toBe(false)
     // Справочник не прочитан — узнать свою единицу нечем, только код ОКЕИ.
     expect(hourInSumMode('sum', 9990, null)).toBe(false)
+  })
+
+  it('не час: слово «час» внутри другого, скорость «км/ч», прочие единицы', () => {
+    const titles = ['Часть', 'Участок', 'Запчасть', 'Часы', 'Чашка', 'Мяч', 'Штука']
+    const other = parseMeasures([
+      ...titles.map((title, i): Record<string, unknown> => ({ code: 9100 + i, measureTitle: title })),
+      { code: 9200, measureTitle: 'Скорость', symbol: 'км/ч' },
+      { code: 9201, measureTitle: 'Расход', symbol: 'м3/ч' }
+    ])
+    for (const m of other) expect(hourInSumMode('sum', m.code, other), m.title).toBe(false)
+  })
+
+  it('356 из прочитанного справочника пропал — не «час»: портал запишет единицу по умолчанию', () => {
+    expect(hourInSumMode('sum', 356, portal)).toBe(false)
+    expect(hourInSumMode('sum', 356, parseMeasures([{ code: 356, isDefault: 'N' }, { code: 796, isDefault: 'Y' }]))).toBe(true)
   })
 })
 
@@ -194,15 +217,18 @@ describe('readMeasures — весь справочник постранично 
     expect(measures.map(m => m.code)).toEqual(all.map(u => u.code))
   })
 
-  it('measures не массив — пустая страница: листание кончается, а не падает и не крутит потолок', async () => {
-    let calls = 0
-    const measures = await readMeasures(async () => {
-      calls++
-      return { measures: { 0: unit(6) } }
-    }, 50, 1000)
-    expect(measures).toEqual([])
-    expect(calls).toBe(1)
-    expect(await readMeasures(async () => null, 50, 1000)).toEqual([])
+  it('ответ без списка — ошибка («не прочитан»), в том числе на второй странице: без молча обрезанного справочника', async () => {
+    await expect(readMeasures(async () => ({ measures: { 0: unit(6) } }), 50, 1000)).rejects.toThrow('ответ без списка единиц (start 0)')
+    await expect(readMeasures(async () => null, 50, 1000)).rejects.toThrow('ответ без списка единиц')
+    const firstFull = Array.from({ length: 50 }, (_, i) => unit(9000 + i))
+    await expect(readMeasures(async start => (start === 0 ? { measures: firstFull } : { error: 'x' }), 50, 1000))
+      .rejects.toThrow('(start 50)')
+  })
+
+  it('записи разобраны (название из ОКЕИ, обозначение, «по умолчанию»), а не отданы как есть', async () => {
+    const measures = await readMeasures(async () => ({ measures: live }), 50, 1000)
+    expect(measures).toEqual(parseMeasures(live))
+    expect(measures[1]).toMatchObject({ title: 'Штука', symbol: 'шт', isDefault: true })
   })
 
   it('больше потолка — ошибка, а не молча обрезанный справочник', async () => {

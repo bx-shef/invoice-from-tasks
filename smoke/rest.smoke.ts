@@ -6,7 +6,7 @@ import { parseCurrencies } from '#shared/domain/currency'
 import { normalizeTag } from '#shared/domain/markup'
 import { listRows, parseTask, parseTaskTags } from '#shared/domain/tasks'
 import { parseVatRates } from '#shared/domain/vat'
-import { COMPANY_ENTITY_TYPE_ID, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
+import { COMPANY_ENTITY_TYPE_ID, measureListCall, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
 import { collectOffsetPages } from '~/utils/paging'
 import { connectPortal, type Portal } from './lib/portal'
 import { fetchEntries, listMeasures, listMyCompanies, readInvoice } from './lib/flow'
@@ -37,8 +37,10 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
   it('catalog.measure.list: у каждой единицы подпись; единица по умолчанию одна; своя единица — со своим обозначением', async () => {
     const measures = await listMeasures(portal)
     expect(measures.length).toBeGreaterThan(0)
-    // Листание без повторов: одна единица — один раз (порядок страниц — по id, measureListCall).
+    // Листание без повторов и пропусков: одна единица — один раз, всего — сколько сказал портал.
     expect(new Set(measures.map(m => m.code)).size).toBe(measures.length)
+    const first = await portal.callRaw<{ total?: unknown }>(measureListCall(0).method, measureListCall(0).params)
+    expect(measures.length).toBe(Number(first.total))
     for (const m of measures) expect(m.label).toMatch(/\S/)
     // По ней портал подставляет единицу строке без кода и вместо кода не из справочника.
     expect(measures.filter(m => m.isDefault)).toHaveLength(1)

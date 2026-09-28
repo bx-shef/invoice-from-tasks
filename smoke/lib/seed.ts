@@ -90,8 +90,11 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
 async function smokeUnit(portal: Portal): Promise<number> {
   const found = (await listMeasures(portal)).find(m => m.code === SMOKE_UNIT.code)
   // И название, и обозначение: чужая единица с пустым названием могла бы совпасть по запасной подписи.
-  if (found && (found.title !== SMOKE_UNIT.measureTitle || found.symbol !== SMOKE_UNIT.symbol)) {
+  if (found && found.title !== SMOKE_UNIT.measureTitle) {
     throw new Error(`код единицы ${SMOKE_UNIT.code} в портале занят «${found.title}» — смени SMOKE_UNIT.code`)
+  }
+  if (found && found.symbol !== SMOKE_UNIT.symbol) {
+    throw new Error(`у единицы смока ${SMOKE_UNIT.code} обозначение «${found.symbol}», ждём «${SMOKE_UNIT.symbol}» — верни его в справочнике`)
   }
   if (!found) await portal.call('catalog.measure.add', { fields: { ...SMOKE_UNIT, isDefault: 'N' } })
   return SMOKE_UNIT.code
