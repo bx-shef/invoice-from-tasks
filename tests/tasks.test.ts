@@ -64,6 +64,12 @@ describe('разбор задач', () => {
     // Не строка и не число — не статус: иначе ['5'] стало бы «завершена» и предупреждение пропало.
     expect(parseTask({ id: '1', title: 'X', status: ['5'] })?.status).toBeNull()
     expect(parseTask({ id: '1', title: 'X', status: true })?.status).toBeNull()
+    // Number() понял бы их как 5 — «завершена», и незакрытая задача пропала бы из предупреждения.
+    for (const junk of ['0x5', '5e0', '0b101', '+5', '5.0', ' ']) {
+      expect(parseTask({ id: '1', title: 'X', status: junk })?.status, junk).toBeNull()
+    }
+    expect(parseTask({ id: '1', title: 'X', status: ' 3 ' })?.status).toBe(3)
+    expect(parseTask({ id: '1', title: 'X', status: 2.5 })?.status).toBeNull()
     // Ноль и отрицательные — код как есть (портал их в `status` не шлёт: «просрочена» −1 — в
     // `subStatus`, замер 2026-09-28), чтобы не потерять предупреждение.
     expect(parseTask({ id: '1', title: 'X', status: '-1' })?.status).toBe(-1)
@@ -73,6 +79,13 @@ describe('разбор задач', () => {
   it('теги приходят в том же списке v2 (select TAGS) и разбираются в parseTask', () => {
     const row = { id: '2', title: 'IFT: задача сделки с тегами', responsibleId: '1', ufCrmTask: ['D_4'], timeSpentInLogs: '5400', tags: { 2: { id: 2, title: 'Срочно' }, 4: { id: 4, title: 'ЧЧ1' } } }
     expect(parseTask(row)?.tags).toEqual(['Срочно', 'ЧЧ1'])
+  })
+
+  it('больше 100 тегов у задачи — берём первые 100: страховка от мусора в ответе', () => {
+    const tags = Object.fromEntries(Array.from({ length: 150 }, (_, n) => [n + 1, { id: n + 1, title: `тег${n + 1}` }]))
+    const parsed = parseTaskTags({ id: '1', tags })
+    expect(parsed).toHaveLength(100)
+    expect(parsed.at(-1)).toBe('тег100')
   })
 
   it('тег длиннее 100 символов отбрасывается, а не обрезается; ровно 100 — остаётся', () => {
@@ -96,6 +109,17 @@ describe('перепроверка привязки к CRM', () => {
       { id: '1', ufCrmTask: ['D_5'] }
     ]
     expect(tasksBoundTo(rows, crmBindingCodes(2, 5)).map(t => t.id)).toEqual([1])
+  })
+
+  it('задачи — по возрастанию ID, как бы их ни отдал портал: строки счёта идут в том же порядке', () => {
+    const rows = [{ id: '30', ufCrmTask: ['D_5'] }, { id: '4', ufCrmTask: ['D_5'] }, { id: '12', ufCrmTask: ['D_5'] }]
+    expect(tasksBoundTo(rows, crmBindingCodes(2, 5)).map(t => t.id)).toEqual([4, 12, 30])
+  })
+
+  it('ID и ответственный 0 — не задача и не сотрудник', () => {
+    expect(parseTask({ id: '0', title: 'X' })).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', responsibleId: '0' })?.responsibleId).toBeNull()
+    expect(parseTimeEntry({ ID: '1', TASK_ID: '2', USER_ID: '0', SECONDS: '60' })?.userId).toBeNull()
   })
 
   it('для счёта ищет оба возможных кода, без учёта регистра', () => {

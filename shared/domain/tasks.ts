@@ -71,12 +71,15 @@ export function openTaskStatus(status: number | null): string | null {
   return TASK_STATUS_LABELS[status] ?? `статус ${status}`
 }
 
-/** Код статуса: целое число строкой или числом; пусто и мусор — `null` (не «0»). */
+/**
+ * Код статуса: целое число или строка из цифр («2», «-1»); пусто и мусор — `null` (не «0»).
+ * Строку проверяем по цифрам, а не `Number()`: тот понял бы «0x5» и «5e0» как 5 — «завершена»,
+ * и предупреждение молча пропало бы (находка /code-review).
+ */
 function toStatus(value: unknown): number | null {
-  if (typeof value !== 'number' && typeof value !== 'string') return null
-  if (typeof value === 'string' && !value.trim()) return null
-  const n = Number(value)
-  return Number.isInteger(n) ? n : null
+  if (typeof value === 'number') return Number.isInteger(value) ? value : null
+  if (typeof value !== 'string' || !/^-?\d{1,9}$/.test(value.trim())) return null
+  return Number(value.trim())
 }
 
 export interface TimeEntry {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DraftRow } from '#shared/domain/fill'
 import { vatTotals } from '#shared/domain/vat'
 import {
+  alignClass,
   driftNote,
   formatMoney,
   formatNumber,
@@ -11,6 +12,7 @@ import {
   openTaskText,
   placementNote,
   PREVIEW_COLUMNS,
+  previewContext,
   previewLine,
   previewTotals,
   rateBasis,
@@ -20,7 +22,7 @@ import {
 } from '~/utils/fillPreview'
 
 // Карточка счёта пишет тысячи через неразрывный пробел: «1 122,00».
-const nb = (text: string) => text.replace(/ /g, ' ')
+const nb = (text: string) => text.replace(/ /g, '\u00A0')
 
 /** Строка t2 счёта t12 (живая проверка владельца 2026-09-28): 5 ч 01 мин → 5,5 ч по 170 при 20%. */
 const row: DraftRow = {
@@ -54,6 +56,14 @@ describe('столбцы — как в товарной части счёта', 
     const line = previewLine(row, 'ч', ctx)
     expect(line.cells).toEqual(['170,00', nb('5,5 ч'), '20%', 'нет', '187,00', nb('1 122,00')])
     expect(line.cells).toHaveLength(PREVIEW_COLUMNS.length)
+  })
+
+  it('в каждой строке — ровно по ячейке на столбец, выравнивание — из столбца', () => {
+    for (const r of [row, { ...row, taxRate: null }, { ...row, taxRate: 0 }, { ...row, price: 2.75, quantity: 1.5 }]) {
+      expect(previewLine(r, 'ч', ctx).cells).toHaveLength(PREVIEW_COLUMNS.length)
+    }
+    expect(PREVIEW_COLUMNS.map(alignClass)).toEqual(['text-right', 'text-right', 'text-right', 'text-center', 'text-right', 'text-right'])
+    expect(alignClass(undefined)).toBe('text-right')
   })
 
   it('единица не задана — количество без неё', () => {
@@ -118,6 +128,19 @@ describe('числа — без toLocaleString, одинаково в любой
     expect(formatMoney(-12.5)).toBe('-12,50')
   })
 
+  it('не число или неправдоподобно большое — прочерк, а не «NaN,undefined» или «1e+21»', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1e21, 1e15]) {
+      expect(formatMoney(bad), String(bad)).toBe('—')
+      expect(formatNumber(bad), String(bad)).toBe('—')
+    }
+    expect(formatMoney(999_999_999_999.99)).toBe(nb('999 999 999 999,99'))
+  })
+
+  it('знак у количества: минус остаётся, округлённый до нуля — нет', () => {
+    expect(formatNumber(-5.5)).toBe('-5,5')
+    expect(formatNumber(-0.00001)).toBe('0')
+  })
+
   it('количество и проценты: до четырёх знаков, без хвостовых нулей', () => {
     expect(formatNumber(5.5)).toBe('5,5')
     expect(formatNumber(1)).toBe('1')
@@ -132,6 +155,13 @@ describe('подстроки расчёта', () => {
   it('часы: округление ничего не поменяло — без «списано»', () => {
     expect(hoursText({ ...row, seconds: 3600, roundedSeconds: 3600, hours: 1 })).toBe('1 ч')
     expect(hoursText(row)).toBe('5,5 ч (списано 5 ч 01 мин)')
+  })
+
+  it('«по курсу» — по самому пересчёту: валюта ставок из него, нет пересчёта — нет подписи', () => {
+    const label = (id: number) => `#${id}`
+    expect(previewContext({ from: 'RUB', to: 'USD', factor: 0.0123, notice: '' }, label).convertedFrom).toBe('RUB')
+    expect(previewContext(null, label).convertedFrom).toBeNull()
+    expect(previewContext(null, label).userLabel).toBe(label)
   })
 
   it('наценка по тегу — с тегом, дробная — с запятой; цены пересчитаны — «по курсу»', () => {
@@ -159,13 +189,19 @@ describe('driftNote — когда видимые числа строк не с�
     expect(driftNote(rows, vatTotals(rows))).toBeNull()
   })
 
-  it('столбец «Сумма»: три строки по 0,01 при 20% — в строках 0,01 × 3, итог 0,04; подстроки — тоже', () => {
-    // Налог строк 0,002 → 0: без налога внизу 0,04 − 0 = 0,04, а в подстроках 0,01 × 3.
+  it('столбец «Сумма»: три строки по 0,01 при 20% — в строках 0,01 × 3, итог 0,04', () => {
+    // Налог строк 0,002 → 0: «без налога» внизу и есть «Общая сумма» — второе пояснение лишнее.
     const rows = withRows([[0.01, 1, 20], [0.01, 1, 20], [0.01, 1, 20]])
     expect(driftNote(rows, vatTotals(rows))).toBe('Каждая строка округлена до копеек, а «Общую сумму» портал округляет '
-      + 'один раз — поэтому столбец «Сумма» расходится с ней на 0,01. «Сумма без налога» — это «Общая сумма» минус '
-      + '«Сумма налога», а налог округлён по строкам — поэтому суммы в подстроках расчёта расходятся с ней на 0,01. '
-      + 'В счёте будут итоги как здесь.')
+      + 'один раз — поэтому столбец «Сумма» расходится с ней на 0,01. В счёте будут итоги как здесь.')
+  })
+
+  it('без налога («Без НДС» и 0%) — только про столбец «Сумма»: причина одна, налог не округлялся', () => {
+    for (const rate of [null, 0]) {
+      const rows = withRows([[1.01, 0.5, rate], [1.01, 0.5, rate]])
+      expect(driftNote(rows, vatTotals(rows)), String(rate)).toBe('Каждая строка округлена до копеек, а «Общую сумму» '
+        + 'портал округляет один раз — поэтому столбец «Сумма» расходится с ней на 0,01. В счёте будут итоги как здесь.')
+    }
   })
 
   it('подстроки: одна строка 2,75 × 1,5 при 20% — «= 4,13», а «Сумма без налога» 4,95 − 0,83 = 4,12', () => {

@@ -8,12 +8,14 @@ import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import type { VatRate, VatTotals } from '#shared/domain/vat'
 import {
+  alignClass,
   driftNote,
   issueText,
   OPEN_TASKS_TITLE,
   openTaskText,
   placementNote,
   PREVIEW_COLUMNS,
+  previewContext,
   previewLine,
   previewTotals,
   taskHref
@@ -42,14 +44,16 @@ const props = defineProps<{
   userLabel: (id: number) => string
 }>()
 
-const lines = computed(() => props.rows.map(row => previewLine(row, props.unit, {
-  convertedFrom: props.conversion?.from ?? null,
-  userLabel: props.userLabel
-})))
+const lines = computed(() => {
+  const ctx = previewContext(props.conversion, props.userLabel)
+  return props.rows.map(row => previewLine(row, props.unit, ctx))
+})
 const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
 const href = (taskId: number) => taskHref(props.origin, taskId)
+/** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
+const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 ? 'pt-3 pb-1' : 'py-1'
 </script>
 
 <template>
@@ -137,14 +141,18 @@ const href = (taskId: number) => taskHref(props.origin, taskId)
       >
         <thead>
           <tr class="text-left opacity-70">
-            <th class="py-2 pr-3 font-medium">
+            <th
+              scope="col"
+              class="py-2 pr-3 font-medium"
+            >
               Название строки
             </th>
             <th
               v-for="(column, c) in PREVIEW_COLUMNS"
               :key="column.title"
+              scope="col"
               class="py-2 font-medium whitespace-nowrap"
-              :class="[column.align === 'center' ? 'text-center' : 'text-right', c < PREVIEW_COLUMNS.length - 1 ? 'pr-3' : '']"
+              :class="[alignClass(column), c < PREVIEW_COLUMNS.length - 1 ? 'pr-3' : '']"
             >
               {{ column.title }}
             </th>
@@ -173,7 +181,7 @@ const href = (taskId: number) => taskHref(props.origin, taskId)
               v-for="(cell, c) in line.cells"
               :key="c"
               class="py-2 whitespace-nowrap"
-              :class="[PREVIEW_COLUMNS[c]?.align === 'center' ? 'text-center' : 'text-right', c < line.cells.length - 1 ? 'pr-3' : '']"
+              :class="[alignClass(PREVIEW_COLUMNS[c]), c < line.cells.length - 1 ? 'pr-3' : '']"
             >
               {{ cell }}
             </td>
@@ -185,16 +193,17 @@ const href = (taskId: number) => taskHref(props.origin, taskId)
             :key="item.testId"
             :class="[{ 'text-base font-semibold': item.strong }, { 'border-t border-(--ui-color-divider-less)': i === 0 }]"
           >
-            <td
+            <th
+              scope="row"
               :colspan="PREVIEW_COLUMNS.length"
-              class="py-1 pr-3 text-right"
-              :class="{ 'pt-3': i === 0, 'py-2': item.strong }"
+              class="pr-3 text-right"
+              :class="[footerPadding(item.strong, i), item.strong ? 'font-semibold' : 'font-normal']"
             >
               {{ item.label }}
-            </td>
+            </th>
             <td
-              class="py-1 text-right whitespace-nowrap"
-              :class="{ 'pt-3': i === 0, 'py-2': item.strong }"
+              class="text-right whitespace-nowrap"
+              :class="footerPadding(item.strong, i)"
               :data-testid="item.testId"
             >
               {{ item.value }}

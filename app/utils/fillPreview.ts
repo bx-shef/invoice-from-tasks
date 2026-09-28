@@ -4,14 +4,21 @@
 // components/invoice/FillPreview.vue только обходит массивы отсюда. Столбцы — как в товарной
 // части счёта портала (просьба владельца 2026-09-28), скидок приложение не ставит — их столбцов нет.
 
+import type { CurrencyConversion } from '#shared/domain/currency'
 import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
 import { roundMoney } from '#shared/domain/money'
 import type { PriceMode } from '#shared/domain/settings'
 import { taskPath } from '#shared/domain/tasks'
-import { formatDuration, formatRuDate } from '#shared/domain/time'
-import { columnDrift, lineAmounts, vatLabel, vatRateText, type VatRate, type VatTotals } from '#shared/domain/vat'
+import { formatDuration, formatRuDate, HOURS_PRECISION } from '#shared/domain/time'
+import { columnDrift, lineAmounts, vatLabel, vatRateText, type LineAmounts, type VatRate, type VatTotals } from '#shared/domain/vat'
 
-const NBSP = ' '
+const NBSP = '\u00A0'
+/**
+ * Больше — не сумма счёта, а сбой выше по цепочке: `toFixed` и `String` дали бы экспоненту
+ * («1e+21»), а NaN — «NaN,undefined». Показываем прочерк, а не мусор.
+ */
+const MAX_SHOWN = 1e15
+const NOT_A_NUMBER = '—'
 
 /** Целая часть с разрядами через неразрывный пробел, как в карточке счёта: «1 122». */
 function groupThousands(digits: string): string {
@@ -23,15 +30,21 @@ function groupThousands(digits: string): string {
  * (в урезанной сборке Node — «1122.00»), так же сделаны formatUsage и formatRate. −0 — «0,00».
  */
 export function formatMoney(value: number): string {
+  if (!Number.isFinite(value) || Math.abs(value) >= MAX_SHOWN) return NOT_A_NUMBER
   const fixed = roundMoney(Math.abs(value)).toFixed(2)
   const [int, frac] = fixed.split('.') as [string, string]
   const sign = value < 0 && fixed !== '0.00' ? '-' : ''
   return `${sign}${groupThousands(int)},${frac}`
 }
 
-/** Количество, часы, проценты: до четырёх знаков, без хвостовых нулей — «5,5», «12,5». */
+/**
+ * Количество, часы, проценты: до {@link HOURS_PRECISION} знаков, как хранятся часы строки, без
+ * хвостовых нулей — «5,5», «12,5».
+ */
 export function formatNumber(value: number): string {
-  const rounded = Math.round(Math.abs(value) * 10_000) / 10_000
+  if (!Number.isFinite(value) || Math.abs(value) >= MAX_SHOWN) return NOT_A_NUMBER
+  const factor = 10 ** HOURS_PRECISION
+  const rounded = Math.round(Math.abs(value) * factor) / factor
   const [int, frac] = String(rounded).split('.') as [string, string | undefined]
   const sign = value < 0 && rounded !== 0 ? '-' : ''
   return `${sign}${groupThousands(int)}${frac ? `,${frac}` : ''}`
@@ -48,23 +61,52 @@ export interface PreviewContext {
   userLabel: (id: number) => string
 }
 
-/** Столбцы с числами — справа от названия строки, в порядке товарной части счёта. */
-export const PREVIEW_COLUMNS = [
-  { title: 'Цена', align: 'right' },
-  { title: 'Количество', align: 'right' },
-  { title: 'Налог', align: 'right' },
-  { title: 'Включён', align: 'center' },
-  { title: 'Сумма налога', align: 'right' },
-  { title: 'Сумма', align: 'right' }
-] as const
+/** Контекст из пересчёта валюты: подписывать ли ставку «по курсу» (и какой валютой). */
+export function previewContext(conversion: CurrencyConversion | null, userLabel: (id: number) => string): PreviewContext {
+  return { convertedFrom: conversion?.from ?? null, userLabel }
+}
+
+/** Что нужно ячейке: строка, её суммы и единица. */
+interface CellInput {
+  row: DraftRow
+  amounts: LineAmounts
+  unit: string
+}
+
+/** Столбец справа от названия строки: заголовок, выравнивание и что в ячейке. */
+export interface PreviewColumn {
+  title: string
+  align: 'right' | 'center'
+  cell: (input: CellInput) => string
+}
+
+/**
+ * Столбцы в порядке товарной части счёта. Ячейка — из самого столбца: заголовок и значение не
+ * разойдутся при перестановке (находка /code-review: раньше их связывала только позиция).
+ */
+export const PREVIEW_COLUMNS: readonly PreviewColumn[] = [
+  { title: 'Цена', align: 'right', cell: ({ row }) => formatMoney(row.price) },
+  {
+    title: 'Количество',
+    align: 'right',
+    cell: ({ row, unit }) => unit ? `${formatNumber(row.quantity)}${NBSP}${unit}` : formatNumber(row.quantity)
+  },
+  { title: 'Налог', align: 'right', cell: ({ row }) => vatRateText(row.taxRate) },
+  // Налог включён в цену: «нет» — налог сверху (решение владельца #4); «—» — налога нет.
+  { title: 'Включён', align: 'center', cell: ({ row }) => row.taxRate === null ? '—' : 'нет' },
+  { title: 'Сумма налога', align: 'right', cell: ({ amounts }) => formatMoney(amounts.vat) },
+  { title: 'Сумма', align: 'right', cell: ({ amounts }) => formatMoney(amounts.total) }
+]
+
+/** Класс выравнивания столбца — один на заголовок и ячейки. */
+export function alignClass(column: PreviewColumn | undefined): string {
+  return column?.align === 'center' ? 'text-center' : 'text-right'
+}
 
 /** Строка предпросмотра: ячейки в порядке {@link PREVIEW_COLUMNS} и подстроки расчёта. */
 export interface PreviewLine {
   row: DraftRow
-  /**
-   * Цена; количество с единицей; налог («20%», «Без НДС»); включён ли налог в цену («нет» —
-   * налог сверху, решение владельца #4; «—» без налога); сумма налога; сумма с налогом.
-   */
+  /** Значения ячеек — по одной на каждый из {@link PREVIEW_COLUMNS}, в том же порядке. */
   cells: string[]
   /** Подстрока: «сотрудник · часы × цена часа = сумма без налога». */
   calc: string
@@ -95,17 +137,10 @@ export function rateBasis(row: DraftRow, ctx: PreviewContext): string {
 
 /** Строка предпросмотра; `unit` — краткое обозначение единицы («ч»), пусто — без неё. */
 export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): PreviewLine {
-  const amounts = lineAmounts(row)
+  const input: CellInput = { row, amounts: lineAmounts(row), unit }
   return {
     row,
-    cells: [
-      formatMoney(row.price),
-      unit ? `${formatNumber(row.quantity)}${NBSP}${unit}` : formatNumber(row.quantity),
-      vatRateText(row.taxRate),
-      row.taxRate === null ? '—' : 'нет',
-      formatMoney(amounts.vat),
-      formatMoney(amounts.total)
-    ],
+    cells: PREVIEW_COLUMNS.map(column => column.cell(input)),
     calc: `${ctx.userLabel(row.userId)} · ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.sum)}`,
     basis: rateBasis(row, ctx),
     rateTitle: `Ставка на ${formatRuDate(row.rateDate)}`
@@ -149,7 +184,9 @@ export function placementNote(priceMode: PriceMode, rate: VatRate | undefined): 
  * Пояснение, если видимые числа строк не складываются в итоги: «Сумма» строк — с «Общей суммой»
  * (строки округлены каждая, итог — один раз); суммы без налога в подстроках — с «Суммой без
  * налога» (она — итог минус налог, а налог округлён по строкам: у строки 2,75 × 1,5 ч при 20%
- * подстрока «= 4,13», внизу 4,12). `null` — всё сходится. «Сумма налога» сходится всегда.
+ * подстрока «= 4,13», внизу 4,12). Налога нет — «без налога» и есть «Общая сумма», причина та же,
+ * что у столбца «Сумма», и второе пояснение было бы неправдой (находка /code-review). `null` — всё
+ * сходится. «Сумма налога» сходится всегда.
  */
 export function driftNote(rows: readonly DraftRow[], totals: VatTotals): string | null {
   const total = columnDrift(rows.map(r => lineAmounts(r).total), totals.total)
@@ -159,7 +196,7 @@ export function driftNote(rows: readonly DraftRow[], totals: VatTotals): string 
     parts.push('Каждая строка округлена до копеек, а «Общую сумму» портал округляет один раз — поэтому '
       + `столбец «Сумма» расходится с ней на ${formatMoney(Math.abs(total))}.`)
   }
-  if (net) {
+  if (net && totals.vat) {
     parts.push('«Сумма без налога» — это «Общая сумма» минус «Сумма налога», а налог округлён по строкам — '
       + `поэтому суммы в подстроках расчёта расходятся с ней на ${formatMoney(Math.abs(net))}.`)
   }
