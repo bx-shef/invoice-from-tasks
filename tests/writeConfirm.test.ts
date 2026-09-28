@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answerYes, CONFIRM_ARM_MS, duplicateCount, positionsChanged, rowsWord, startConfirm, writeBlocker, writeConfirmations } from '~/utils/writeConfirm'
+import { answerYes, CONFIRM_ARM_MS, duplicateCount, openConfirm, positionsChanged, rowsWord, startConfirm, writeBlocker, writeConfirmations, type ExistingPosition } from '~/utils/writeConfirm'
 
 const NO_UNDO = 'Отменить добавление нельзя — лишние позиции придётся удалять в карточке счёта.'
 
@@ -90,6 +90,50 @@ describe('шаги вопросов на странице', () => {
     // Второй клик того же двойного — через 100 мс после первого: второй вопрос не проскочен.
     expect(answerYes(second, later(CONFIRM_ARM_MS + 100))).toBe(second)
     expect(answerYes(second, later(2 * CONFIRM_ARM_MS))).toBeNull()
+  })
+})
+
+describe('openConfirm — нажата кнопка записи: сначала перечитать счёт, потом решать', () => {
+  /** Счёт, который «меняется» при перечитывании: до него — одни позиции, после — другие. */
+  const portal = (before: ExistingPosition[], after: ExistingPosition[], ok = true) => {
+    let current = before
+    const calls: string[] = []
+    return {
+      calls,
+      deps: {
+        refresh: async () => {
+          calls.push('refresh')
+          current = after
+          return ok
+        },
+        positions: () => {
+          calls.push('positions')
+          return current
+        },
+        now: () => 42
+      }
+    }
+  }
+
+  it('вопрос — о позициях ПОСЛЕ перечитывания, а не на момент сбора строк', async () => {
+    const { calls, deps } = portal([pos(1)], [pos(1), pos(2, 'x')])
+    const opened = await openConfirm('append', ['x'], deps)
+    expect(calls).toEqual(['refresh', 'positions'])
+    expect(opened).toMatchObject({ kind: 'ask', state: { existingIds: [1, 2], askedAt: 42 } })
+    if (opened.kind !== 'ask') throw new Error('ожидался вопрос')
+    expect(opened.state.questions[0]!.text).toBe('Добавить 1 строку к 2 поз. счёта? Строки встанут после существующих.')
+    expect(opened.state.questions[1]!.text).toContain('названиями: 1 — будут дубли')
+  })
+
+  it('перечитать не вышло или счёт изменился — стоп, ни вопросов, ни записи', async () => {
+    const { calls, deps } = portal([pos(1)], [pos(1)], false)
+    expect(await openConfirm('replace', ['x'], deps)).toEqual({ kind: 'stop' })
+    expect(calls).toEqual(['refresh'])
+  })
+
+  it('«Заменить» в пустой (после перечитывания) счёт — писать сразу, со свежими ID', async () => {
+    const { deps } = portal([pos(1)], [])
+    expect(await openConfirm('replace', ['x'], deps)).toEqual({ kind: 'write', askedIds: [] })
   })
 })
 

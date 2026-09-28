@@ -3,12 +3,14 @@
 // app/utils/writeConfirm.ts). «Добавить» задаёт два вопроса подряд, «Заменить» — один.
 // Кнопка согласия после каждого вопроса неактивна CONFIRM_ARM_MS — так видно правило answerYes:
 // двойной клик не ответит «да» на непрочитанный вопрос. Фокус — на блок вопроса (кнопка записи,
-// где он был, исчезла); Esc — «Отмена».
+// где он был, исчезла); Esc — «Отмена», где бы ни был фокус, пока вопрос открыт.
 import type { ComponentPublicInstance } from 'vue'
 import { CONFIRM_ARM_MS, type ConfirmState } from '~/utils/writeConfirm'
 
 const props = defineProps<{ state: ConfirmState }>()
-defineEmits<{ confirm: [], cancel: [] }>()
+const emit = defineEmits<{ confirm: [], cancel: [] }>()
+// На окне, а не на блоке: кликнули по таблице — фокус ушёл, а Esc всё равно закрывает вопрос.
+onKeyStroke('Escape', () => emit('cancel'))
 
 const question = computed(() => props.state.questions[props.state.step]!)
 const title = computed(() => props.state.questions.length > 1
@@ -42,7 +44,6 @@ watch(() => props.state, () => {
     tabindex="-1"
     data-testid="fill-confirm"
     :data-step="state.step + 1"
-    @keydown.esc="$emit('cancel')"
   >
     <template #actions>
       <B24Button

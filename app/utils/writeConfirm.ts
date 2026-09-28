@@ -96,11 +96,16 @@ export interface ConfirmState {
   step: number
   /** ID позиций счёта, о которых спросили: перед записью сверяются ({@link positionsChanged}). */
   existingIds: number[]
-  /** Когда задан текущий вопрос (мс): «да» раньше `askedAt + CONFIRM_ARM_MS` не принимается. */
+  /**
+   * Когда задан текущий вопрос, мс по монотонным часам (`performance.now()`): «да» раньше
+   * `askedAt + CONFIRM_ARM_MS` не принимается. Не `Date.now()`: системное время переводят (NTP,
+   * сон), а таймер кнопки идёт по монотонным — кнопка стала бы активной, а «да» молча не
+   * принималось бы (находка четвёртого круга).
+   */
   askedAt: number
 }
 
-/** Начать вопросы; `null` — спрашивать нечего, можно писать сразу. `now` — `Date.now()`. */
+/** Начать вопросы; `null` — спрашивать нечего, можно писать сразу. `now` — `performance.now()`. */
 export function startConfirm(mode: WriteMode, existing: readonly ExistingPosition[], plannedNames: readonly string[], now: number): ConfirmState | null {
   const questions = writeConfirmations(mode, existing.map(p => p.productName), plannedNames)
   return questions.length ? { mode, questions, step: 0, existingIds: existing.map(p => p.id), askedAt: now } : null
@@ -130,6 +135,32 @@ export function positionsChanged(askedIds: readonly number[], nowIds: readonly n
     : `было ${askedIds.length} поз., стало ${nowIds.length}`
   return `Позиции счёта изменились, пока открыт предпросмотр (${how}). `
     + 'Ничего не записано — проверьте счёт и нажмите кнопку записи ещё раз.'
+}
+
+/** Что делать после нажатия кнопки записи ({@link openConfirm}). */
+export type OpenResult = { kind: 'ask', state: ConfirmState } | { kind: 'write', askedIds: number[] } | { kind: 'stop' }
+
+/** Откуда {@link openConfirm} берёт счёт и время — внедряются, чтобы порядок проверял тест. */
+export interface OpenDeps {
+  /** Перечитать счёт и позиции; `false` — не вышло или счёт изменился (сообщение — на нём). */
+  refresh: () => Promise<boolean>
+  /** Позиции счёта — после перечитывания. */
+  positions: () => readonly ExistingPosition[]
+  /** Монотонное время, мс (`performance.now()`). */
+  now: () => number
+}
+
+/**
+ * Нажата кнопка записи: сначала перечитать счёт, потом решать — спросить (`ask`), писать сразу
+ * (`write`: «Заменить» в пустой счёт) или остановиться (`stop`: перечитать не вышло или счёт
+ * изменился). Вопросы — о позициях после перечитывания, а не на момент сбора строк (находки
+ * третьего и четвёртого кругов: решение — в чистом модуле, порядок ловит тест).
+ */
+export async function openConfirm(mode: WriteMode, plannedNames: readonly string[], deps: OpenDeps): Promise<OpenResult> {
+  if (!await deps.refresh()) return { kind: 'stop' }
+  const existing = deps.positions()
+  const state = startConfirm(mode, existing, plannedNames, deps.now())
+  return state ? { kind: 'ask', state } : { kind: 'write', askedIds: existing.map(p => p.id) }
 }
 
 /** Почему запись не пошла после перечитывания счёта. */

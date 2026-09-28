@@ -93,15 +93,6 @@ export function useInvoiceFill() {
     return parseExistingRows(raw)
   }
 
-  /**
-   * Перечитать только позиции счёта — перед вопросом о записи: числа и дубли в вопросе должны быть
-   * о счёте сейчас, а не на момент сбора строк (находка третьего круга).
-   */
-  async function refreshExisting(): Promise<void> {
-    const inv = invoice.value
-    if (inv) existing.value = await fetchExistingRows(inv.id)
-  }
-
   /** Счёт и его позиции. Состояние шага не трогает — это делают вызывающие. */
   async function readInvoice(id: number): Promise<void> {
     const get = invoiceGetCall(id)
@@ -113,6 +104,33 @@ export function useInvoiceFill() {
     if (!parsed) throw new Error(`Счёт #${id} не найден или нет доступа`)
     invoice.value = parsed
     existing.value = rows
+  }
+
+  /**
+   * Перед вопросом о записи (writeConfirm.ts → openConfirm): перечитать счёт и позиции. Числа и
+   * дубли в вопросе — о счёте сейчас; сменившиеся реквизиты, валюту или сделку видно до вопросов,
+   * а не после двух «да» (находка четвёртого круга). Счёт изменился — предпросмотр сбрасывается с
+   * ошибкой, как при записи; не прочитался — сообщение под кнопками, предпросмотр остаётся.
+   * `true` — можно спрашивать.
+   */
+  async function prepareWrite(): Promise<boolean> {
+    const inv = invoice.value
+    if (!inv || !canWrite.value) return false
+    notice.value = ''
+    try {
+      await readInvoice(inv.id)
+    } catch (e) {
+      notice.value = `Не удалось перечитать счёт (${e instanceof Error ? e.message : String(e)}) — ничего не записано. Попробуйте ещё раз.`
+      return false
+    }
+    const stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
+    if (stale) {
+      error.value = stale
+      result.value = null
+      step.value = 'idle'
+      return false
+    }
+    return true
   }
 
   async function loadInvoice(id: number): Promise<void> {
@@ -308,6 +326,20 @@ export function useInvoiceFill() {
    * зададут заново.
    */
   async function write(replace: boolean, askedIds: readonly number[]): Promise<void> {
+    try {
+      await writeChecked(replace, askedIds)
+    } catch (e) {
+      // Сбой вне обработанных мест (разбор, итог): исход записи неизвестен. Страница не должна
+      // остаться «занятой» навсегда, а строки — готовыми к повтору (находка четвёртого круга).
+      writing.value = null
+      result.value = null
+      step.value = 'idle'
+      error.value = `Запись прервалась (${e instanceof Error ? e.message : String(e)}). Проверьте позиции `
+        + 'счёта в карточке — часть строк могла записаться — и соберите строки заново.'
+    }
+  }
+
+  async function writeChecked(replace: boolean, askedIds: readonly number[]): Promise<void> {
     const inv = invoice.value
     if (!inv || !canWrite.value || !result.value) return
     const mode: WriteMode = replace ? 'replace' : 'append'
@@ -398,5 +430,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, refreshExisting, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, prepareWrite, write, consult }
 }
