@@ -163,25 +163,37 @@ export async function openConfirm(mode: WriteMode, plannedNames: readonly string
   return state ? { kind: 'ask', state } : { kind: 'write', askedIds: existing.map(p => p.id) }
 }
 
+/** Итог перечитывания счёта: не прочитался или изменился со сбора строк. */
+export interface InvoiceCheck {
+  /** Текст ошибки чтения (может быть пустым); `null` — прочитан. */
+  readError: string | null
+  /** Что изменилось со сбора строк (invoiceChangedSince); `null` — ничего. */
+  changed: string | null
+}
+
 /** Почему запись не пошла после перечитывания счёта. */
 export interface WriteBlock {
   /**
-   * `stale` — счёт изменился (реквизиты, валюта, сделка) или не перечитан: строки не те, предпросмотр
-   * сбросить. `changed` — изменились позиции: строки верны, предпросмотр оставить, спросить заново.
+   * `stale` — счёт изменился (реквизиты, валюта, сделка): строки не те — предпросмотр сбросить,
+   * ошибкой. `unread` — счёт не прочитался (сбой сети) и `positions` — изменились позиции: строки
+   * верны — предпросмотр оставить, сообщение под кнопками, нажать ещё раз.
    */
-  kind: 'stale' | 'changed'
+  kind: 'stale' | 'unread' | 'positions'
   message: string
 }
 
 /**
- * Решение перед записью — чистой функцией, чтобы его ловил тест (CLAUDE.md: решение — в чистом
- * модуле, находка второго круга): `stale` — итог invoiceChangedSince или ошибка перечитывания,
- * `askedIds` — позиции, о которых спросили, `nowIds` — позиции перечитанного счёта.
+ * Решение после перечитывания — одно для вопроса (`askedIds = null`: позиции ещё не с чем сверять)
+ * и для записи; чистой функцией, чтобы его ловил тест (находки второго–пятого кругов: перед
+ * вопросом и перед записью сбой чтения трактовался по-разному). Сбой чтения не стирает
+ * предпросмотр: повторить нажатие дешевле, чем собирать строки заново (и тратить BitrixGPT).
  */
-export function writeBlocker(stale: string | null, askedIds: readonly number[], nowIds: readonly number[]): WriteBlock | null {
-  // `!== null`, а не «если непусто»: пустой текст ошибки перечитывания — тоже сбой, а не «свежий
-  // счёт» (находка третьего круга); текст подставит вызывающий.
-  if (stale !== null) return { kind: 'stale', message: stale || 'Не удалось перечитать счёт перед записью — ничего не записано.' }
-  const changed = positionsChanged(askedIds, nowIds)
-  return changed ? { kind: 'changed', message: changed } : null
+export function writeBlocker(check: InvoiceCheck, askedIds: readonly number[] | null, nowIds: readonly number[]): WriteBlock | null {
+  // `!== null`, а не «если непусто»: пустой текст ошибки — тоже сбой, а не «счёт прочитан».
+  if (check.readError !== null) {
+    return { kind: 'unread', message: `Не удалось перечитать счёт (${check.readError || 'без описания'}) — ничего не записано. Попробуйте ещё раз.` }
+  }
+  if (check.changed) return { kind: 'stale', message: check.changed }
+  const changed = askedIds === null ? null : positionsChanged(askedIds, nowIds)
+  return changed ? { kind: 'positions', message: changed } : null
 }

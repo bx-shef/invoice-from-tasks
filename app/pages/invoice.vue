@@ -6,7 +6,7 @@ import type { FillMode, TaskSource } from '#shared/domain/fill'
 import { TimeoutError, withTimeout } from '#shared/utils/timeout'
 import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
 import type { ComponentPublicInstance } from 'vue'
-import { answerYes, openConfirm, type ConfirmState } from '~/utils/writeConfirm'
+import { answerYes, openConfirm, type ConfirmState, type OpenResult } from '~/utils/writeConfirm'
 import type { WriteMode } from '~/utils/writeOutcome'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
@@ -69,10 +69,15 @@ const writeButtons: Record<WriteMode, Readonly<Ref<ComponentPublicInstance | nul
   replace: useTemplateRef<ComponentPublicInstance>('replaceButton'),
   append: useTemplateRef<ComponentPublicInstance>('appendButton')
 }
-/** Фокус — на кнопку записи, с которой начали: её элемент исчезал (вопрос) или был неактивен. */
+const collectButton = useTemplateRef<ComponentPublicInstance>('collectButton')
+/**
+ * Фокус — на кнопку записи, с которой начали: её элемент исчезал (вопрос) или был неактивен. Счёт
+ * изменился и предпросмотр сброшен — кнопок записи нет, фокус на «Собрать строки» (находка
+ * пятого круга).
+ */
 async function focusWriteButton(writeMode: WriteMode) {
   await nextTick()
-  const button = writeButtons[writeMode].value?.$el as HTMLElement | undefined
+  const button = (writeButtons[writeMode].value ?? collectButton.value)?.$el as HTMLElement | undefined
   button?.focus()
 }
 watch(result, () => {
@@ -127,7 +132,7 @@ async function collect() {
 async function write(replace: boolean) {
   const writeMode: WriteMode = replace ? 'replace' : 'append'
   opening.value = writeMode
-  let opened
+  let opened: OpenResult
   try {
     // Сначала перечитать счёт, потом спрашивать (openConfirm): вопрос — о счёте сейчас.
     opened = await openConfirm(writeMode, result.value?.rows.map(r => r.name) ?? [], {
@@ -135,6 +140,10 @@ async function write(replace: boolean) {
       positions: () => fill.existing.value,
       now: () => performance.now()
     })
+  } catch (e) {
+    // prepareWrite сбои разбирает сам; сюда — только неожиданное: не молчим.
+    fill.notice.value = `Не удалось подготовить запись (${e instanceof Error ? e.message : String(e)}) — ничего не записано.`
+    opened = { kind: 'stop' }
   } finally {
     opening.value = null
   }
@@ -235,6 +244,7 @@ async function consult(promptId: string) {
           <template #footer>
             <div class="flex flex-wrap items-center gap-3">
               <B24Button
+                ref="collectButton"
                 color="air-primary"
                 label="Собрать строки"
                 :loading="fill.step.value === 'collecting' || measuresLoading"

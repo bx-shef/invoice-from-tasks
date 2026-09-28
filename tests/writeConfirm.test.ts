@@ -157,17 +157,25 @@ describe('positionsChanged — позиции счёта изменились п
   })
 })
 
-describe('writeBlocker — решение перед записью после перечитывания счёта', () => {
-  it('счёт изменился (реквизиты, валюта, сделка) — stale, даже если позиции те же', () => {
-    expect(writeBlocker('Реквизиты счёта изменились', [1], [1])).toEqual({ kind: 'stale', message: 'Реквизиты счёта изменились' })
+describe('writeBlocker — решение после перечитывания счёта (перед вопросом и перед записью)', () => {
+  const read = { readError: null, changed: null }
+
+  it('счёт изменился (реквизиты, валюта, сделка) — stale: сбросить строки, даже если позиции те же', () => {
+    expect(writeBlocker({ readError: null, changed: 'Реквизиты счёта изменились' }, [1], [1])).toEqual({ kind: 'stale', message: 'Реквизиты счёта изменились' })
   })
 
-  it('ошибка перечитывания с пустым текстом — тоже stale, со своим текстом, а не «счёт свежий»', () => {
-    expect(writeBlocker('', [1], [1])).toEqual({ kind: 'stale', message: 'Не удалось перечитать счёт перед записью — ничего не записано.' })
+  it('счёт не прочитался — unread, предпросмотр остаётся; пустой текст ошибки — тоже сбой', () => {
+    expect(writeBlocker({ readError: 'сеть', changed: null }, [1], [1])).toEqual({ kind: 'unread', message: 'Не удалось перечитать счёт (сеть) — ничего не записано. Попробуйте ещё раз.' })
+    expect(writeBlocker({ readError: '', changed: null }, [1], [1])).toMatchObject({ kind: 'unread', message: expect.stringContaining('(без описания)') })
   })
 
-  it('позиции изменились — changed; всё то же — пишем', () => {
-    expect(writeBlocker(null, [1], [1, 2])).toMatchObject({ kind: 'changed' })
-    expect(writeBlocker(null, [1], [1])).toBeNull()
+  it('позиции изменились — positions; всё то же — пишем', () => {
+    expect(writeBlocker(read, [1], [1, 2])).toMatchObject({ kind: 'positions' })
+    expect(writeBlocker(read, [1], [1])).toBeNull()
+  })
+
+  it('перед вопросом (askedIds = null) позиции не с чем сверять — только чтение и изменения счёта', () => {
+    expect(writeBlocker(read, null, [1, 2])).toBeNull()
+    expect(writeBlocker({ readError: null, changed: 'Валюта счёта изменилась' }, null, [])).toMatchObject({ kind: 'stale' })
   })
 })

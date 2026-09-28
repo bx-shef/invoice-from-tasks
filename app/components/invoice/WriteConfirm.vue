@@ -9,8 +9,6 @@ import { CONFIRM_ARM_MS, type ConfirmState } from '~/utils/writeConfirm'
 
 const props = defineProps<{ state: ConfirmState }>()
 const emit = defineEmits<{ confirm: [], cancel: [] }>()
-// На окне, а не на блоке: кликнули по таблице — фокус ушёл, а Esc всё равно закрывает вопрос.
-onKeyStroke('Escape', () => emit('cancel'))
 
 const question = computed(() => props.state.questions[props.state.step]!)
 const title = computed(() => props.state.questions.length > 1
@@ -19,6 +17,16 @@ const title = computed(() => props.state.questions.length > 1
 
 const armed = ref(false)
 const root = useTemplateRef<ComponentPublicInstance>('root')
+
+// На окне, а не на блоке: кликнули по таблице — фокус ушёл на страницу, а Esc всё равно закрывает
+// вопрос. Но не чужой Esc: фокус в другом элементе (тост, поле) — это его клавиша (находка пятого
+// круга), как и Esc, уже обработанный кем-то (`defaultPrevented`).
+onKeyStroke('Escape', (e) => {
+  const active = document.activeElement
+  const block = root.value?.$el as HTMLElement | undefined
+  const elsewhere = !!active && active !== document.body && !block?.contains(active)
+  if (!e.defaultPrevented && !elsewhere) emit('cancel')
+})
 const arm = useTimeoutFn(() => {
   armed.value = true
 }, CONFIRM_ARM_MS, { immediate: false })

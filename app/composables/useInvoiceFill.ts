@@ -36,8 +36,8 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
-import { writeBlocker } from '~/utils/writeConfirm'
-import { describeWrite, type WriteMode } from '~/utils/writeOutcome'
+import { writeBlocker, type InvoiceCheck, type WriteBlock } from '~/utils/writeConfirm'
+import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
 const MAX_CONSULT_TITLE = 500
@@ -106,31 +106,41 @@ export function useInvoiceFill() {
     existing.value = rows
   }
 
+  /** Перечитать счёт и позиции — перед вопросом и перед записью, одним способом. */
+  async function rereadInvoice(id: number): Promise<InvoiceCheck> {
+    try {
+      await readInvoice(id)
+    } catch (e) {
+      return { readError: e instanceof Error ? e.message : String(e), changed: null }
+    }
+    return { readError: null, changed: collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null }
+  }
+
+  /** Показать, почему запись не пошла (writeBlocker): `stale` — сброс предпросмотра, прочее — под кнопками. */
+  function stopWrite(block: WriteBlock): void {
+    writing.value = null
+    if (block.kind === 'stale') {
+      error.value = block.message
+      result.value = null
+      step.value = 'idle'
+    } else {
+      notice.value = block.message
+      step.value = 'preview'
+    }
+  }
+
   /**
    * Перед вопросом о записи (writeConfirm.ts → openConfirm): перечитать счёт и позиции. Числа и
    * дубли в вопросе — о счёте сейчас; сменившиеся реквизиты, валюту или сделку видно до вопросов,
-   * а не после двух «да» (находка четвёртого круга). Счёт изменился — предпросмотр сбрасывается с
-   * ошибкой, как при записи; не прочитался — сообщение под кнопками, предпросмотр остаётся.
-   * `true` — можно спрашивать.
+   * а не после двух «да» (находка четвёртого круга). `true` — можно спрашивать.
    */
   async function prepareWrite(): Promise<boolean> {
     const inv = invoice.value
     if (!inv || !canWrite.value) return false
     notice.value = ''
-    try {
-      await readInvoice(inv.id)
-    } catch (e) {
-      notice.value = `Не удалось перечитать счёт (${e instanceof Error ? e.message : String(e)}) — ничего не записано. Попробуйте ещё раз.`
-      return false
-    }
-    const stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
-    if (stale) {
-      error.value = stale
-      result.value = null
-      step.value = 'idle'
-      return false
-    }
-    return true
+    const block = writeBlocker(await rereadInvoice(inv.id), null, [])
+    if (block) stopWrite(block)
+    return !block
   }
 
   async function loadInvoice(id: number): Promise<void> {
@@ -329,13 +339,14 @@ export function useInvoiceFill() {
     try {
       await writeChecked(replace, askedIds)
     } catch (e) {
-      // Сбой вне обработанных мест (разбор, итог): исход записи неизвестен. Страница не должна
-      // остаться «занятой» навсегда, а строки — готовыми к повтору (находка четвёртого круга).
+      // Сбой вне разобранных мест — что сказать и сбросить ли строки, решает writeCrash (с тестом).
+      // В консоль — для разбора: это ошибка кода, а не данные задач (находка пятого круга).
+      console.error('[invoice] запись прервалась', e)
+      const verdict = writeCrash(replace ? 'replace' : 'append', e instanceof Error ? e.message : String(e))
       writing.value = null
-      result.value = null
-      step.value = 'idle'
-      error.value = `Запись прервалась (${e instanceof Error ? e.message : String(e)}). Проверьте позиции `
-        + 'счёта в карточке — часть строк могла записаться — и соберите строки заново.'
+      if (verdict.resetPreview) result.value = null
+      error.value = verdict.message
+      step.value = result.value ? 'preview' : 'idle'
     }
   }
 
@@ -348,27 +359,10 @@ export function useInvoiceFill() {
     error.value = ''
     notice.value = ''
     // Перечитываем счёт перед записью: реквизиты (ставка НДС), валюту или сделку могли сменить в
-    // карточке, пока смотрели предпросмотр, — тогда строки не те, и писать их нельзя.
-    let stale: string | null
-    try {
-      await readInvoice(inv.id)
-      stale = collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null
-    } catch (e) {
-      stale = e instanceof Error ? e.message : String(e)
-    }
-    const block = writeBlocker(stale, askedIds, existing.value.map(r => r.id))
-    if (block?.kind === 'stale') {
-      writing.value = null
-      error.value = block.message
-      result.value = null
-      step.value = 'idle'
-      return
-    }
+    // карточке, пока отвечали на вопросы, — тогда строки не те; позиции — тоже сверяются.
+    const block = writeBlocker(await rereadInvoice(inv.id), askedIds, existing.value.map(r => r.id))
     if (block) {
-      // Под кнопками записи (notice), а не наверху страницы: сотрудник смотрит туда, куда нажал.
-      writing.value = null
-      notice.value = block.message
-      step.value = 'preview'
+      stopWrite(block)
       return
     }
     const draft = result.value.rows
