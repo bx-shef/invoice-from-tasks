@@ -61,6 +61,8 @@ const result = computed(() => fill.result.value)
  * сбросили — вопросы были о прежних строках: снимаем.
  */
 const confirming = ref<ConfirmState | null>(null)
+/** Нажата запись: перечитываем позиции счёта, чтобы вопрос был о счёте сейчас. */
+const opening = ref<'replace' | 'append' | null>(null)
 watch(result, () => {
   confirming.value = null
 })
@@ -68,7 +70,7 @@ watch(result, () => {
  * Пока открыт вопрос, источник, тип и «Собрать строки» заблокированы: иначе вопрос молча исчез бы
  * вместе со строками, о которых спрашивал (находка второго круга). Выйти — «Отмена».
  */
-const locked = computed(() => busy.value || confirming.value !== null)
+const locked = computed(() => busy.value || confirming.value !== null || opening.value !== null)
 
 onMounted(async () => {
   const frame = await b24.init()
@@ -111,10 +113,21 @@ async function collect() {
 
 /** «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts). */
 async function write(replace: boolean) {
+  const mode = replace ? 'replace' : 'append'
   // Прежнее «позиции изменились — нажмите ещё раз» к новому вопросу уже не относится.
   fill.notice.value = ''
+  opening.value = mode
+  try {
+    // Позиции — на момент вопроса, а не сбора строк: числа и дубли в вопросе верны сразу.
+    await fill.refreshExisting()
+  } catch (e) {
+    fill.notice.value = `Не удалось перечитать позиции счёта (${e instanceof Error ? e.message : String(e)}) — ничего не записано. Попробуйте ещё раз.`
+    return
+  } finally {
+    opening.value = null
+  }
   const existing = fill.existing.value
-  const state = startConfirm(replace ? 'replace' : 'append', existing, result.value?.rows.map(r => r.name) ?? [])
+  const state = startConfirm(mode, existing, result.value?.rows.map(r => r.name) ?? [], Date.now())
   if (state) confirming.value = state
   else await doWrite(replace, existing.map(r => r.id))
 }
@@ -122,17 +135,29 @@ async function write(replace: boolean) {
 async function confirmYes() {
   const state = confirming.value
   if (!state) return
-  confirming.value = answerYes(state)
-  if (!confirming.value) await doWrite(state.mode === 'replace', state.existingIds)
+  const next = answerYes(state, Date.now())
+  // Тот же вопрос — «да» слишком раннее (двойной клик): не прочли, ждём.
+  if (next === state) return
+  confirming.value = next
+  if (!next) await doWrite(state.mode === 'replace', state.existingIds)
 }
 
-function cancelConfirm() {
+/** «Отмена» или Esc: вопросов нет, фокус — обратно на кнопку, с которой начали. */
+async function cancelConfirm() {
+  const mode = confirming.value?.mode
   confirming.value = null
-  fill.notice.value = ''
+  await nextTick()
+  if (mode) document.querySelector<HTMLElement>(`[data-testid="fill-${mode}"]`)?.focus()
 }
 
 async function doWrite(replace: boolean, askedIds: readonly number[]) {
-  await fill.write(replace, askedIds)
+  try {
+    await fill.write(replace, askedIds)
+  } catch (e) {
+    // Кнопка b24ui не ждёт обработчик — без перехвата сбой потерялся бы молча.
+    toast.add({ title: 'Запись не удалась', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
+    return
+  }
   if (fill.step.value === 'done') toast.add({ title: 'Товары счёта обновлены', description: 'Обновите карточку счёта, чтобы увидеть изменения', color: 'air-primary-success' })
 }
 
@@ -262,16 +287,16 @@ async function consult(promptId: string) {
           <B24Button
             color="air-primary-success"
             label="Заменить товары в счёте"
-            :loading="fill.writing.value === 'replace'"
-            :disabled="busy"
+            :loading="fill.writing.value === 'replace' || opening === 'replace'"
+            :disabled="busy || opening !== null"
             data-testid="fill-replace"
             @click="write(true)"
           />
           <B24Button
             color="air-secondary"
             label="Добавить к товарам счёта"
-            :loading="fill.writing.value === 'append'"
-            :disabled="busy"
+            :loading="fill.writing.value === 'append' || opening === 'append'"
+            :disabled="busy || opening !== null"
             data-testid="fill-append"
             @click="write(false)"
           />

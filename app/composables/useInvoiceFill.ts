@@ -93,6 +93,15 @@ export function useInvoiceFill() {
     return parseExistingRows(raw)
   }
 
+  /**
+   * Перечитать только позиции счёта — перед вопросом о записи: числа и дубли в вопросе должны быть
+   * о счёте сейчас, а не на момент сбора строк (находка третьего круга).
+   */
+  async function refreshExisting(): Promise<void> {
+    const inv = invoice.value
+    if (inv) existing.value = await fetchExistingRows(inv.id)
+  }
+
   /** Счёт и его позиции. Состояние шага не трогает — это делают вызывающие. */
   async function readInvoice(id: number): Promise<void> {
     const get = invoiceGetCall(id)
@@ -389,5 +398,5 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, write, consult }
+  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, refreshExisting, write, consult }
 }

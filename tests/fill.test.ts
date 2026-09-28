@@ -417,6 +417,9 @@ describe('ID задачи в названии строки (настройка t
     const names = Object.fromEntries(built.rows.map(r => [r.key, 'Название']))
     expect(finishRows(built, null, true).errors).toEqual([{ taskId: 5, message: 'нет ставки' }])
     expect(finishRows(built, names, true).errors).toEqual([{ taskId: 5, message: 'нет ставки' }])
+    // Обе стороны непусты: сначала ошибки сборки, потом названий.
+    const partial = finishRows(built, { [built.rows[0]!.key]: 'Только первая' }, true)
+    expect(partial.errors.map(e => e.message)).toEqual(['нет ставки', 'BitrixGPT не вернул название строки'])
   })
 
   it('finishRows: BitrixGPT не вернул название — ошибка строки, как у applyNames', () => {
