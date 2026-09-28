@@ -38,6 +38,7 @@ squash-сообщении (`docs/AGENT_RULES.md` §4.2): уже настроен
 | `priceMode` | как строка ложится в счёт: `hour` — цена часа × часы, `sum` — сумма строки × 1 (`docs/PROCESSING.md` §5а) | `hour` |
 | `vat` | `[{companyId, title, rate}]` — НДС по «Реквизитам вашей компании»: `companyId` — ID «моей компании» CRM (`mycompanyId` счёта), `title` — её название на момент сохранения (для сообщений), `rate` — ставка в % (0–100, до сотых) или `null` — «Без НДС»; повтор компании отбрасывается; до 50 записей | `[]` → заполнять нельзя |
 | `naming` | `plain` (как есть) или `ai` (BitrixGPT) | `plain` |
+| `taskIdInName` | добавлять ID задачи в начало названия строки: «[102] Сверстать лендинг» (`docs/PROCESSING.md` §6) | `false` |
 | `prompts.taskTitle`, `prompts.timeBlock` | свои промпты названий; `null` — системный | `null` |
 | `consultPrompts` | `[{id, title, text}]` — промпты консультаций (до 20) | `[]` |
 

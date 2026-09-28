@@ -5,7 +5,7 @@
 // части счёта портала (просьба владельца 2026-09-28), скидок приложение не ставит — их столбцов нет.
 
 import type { CurrencyConversion } from '#shared/domain/currency'
-import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
+import type { DraftRow, FillIssue, OpenTask, TimeOutlier } from '#shared/domain/fill'
 import { roundMoney } from '#shared/domain/money'
 import type { PriceMode } from '#shared/domain/settings'
 import { taskPath } from '#shared/domain/tasks'
@@ -217,6 +217,20 @@ export const OPEN_TASKS_TITLE = 'Не все задачи закрыты — в�
 /** Текст после ссылки на незакрытую задачу: « — выполняется,», у последней — без запятой. */
 export function openTaskText(task: OpenTask, last: boolean): string {
   return ` — ${task.status}${last ? '' : ','}`
+}
+
+/** Заголовок блока задач со временем заметно больше обычного: проверить, записи не мешает. */
+export const OUTLIERS_TITLE = 'Время по задаче заметно больше обычного — проверьте'
+
+/** Текст после ссылки на задачу: « — 5,5 ч при обычных 1 ч,», у последней — без запятой. */
+export function outlierText(outlier: TimeOutlier, last: boolean): string {
+  const hours = (seconds: number) => `${formatNumber(seconds / 3600)} ч`
+  return ` — ${hours(outlier.seconds)} при обычных ${hours(outlier.typicalSeconds)}${last ? '' : ','}`
+}
+
+/** Задачи, чьи строки подсветить в таблице. */
+export function outlierTaskIds(outliers: readonly TimeOutlier[]): Set<number> {
+  return new Set(outliers.map(o => o.taskId))
 }
 
 /** Текст проблемы после ссылки «Задача #N»: «: причина»; без задачи — только причина. */

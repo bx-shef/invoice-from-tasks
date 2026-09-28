@@ -141,3 +141,15 @@ describe('режим цены и НДС (2026-09-26)', () => {
     expect(settingsProblems({ ...defaultSettings(), currency: 'RUB', vat: [{ companyId: 20, title: 'А', rate: 20 }] })).toEqual([])
   })
 })
+
+describe('taskIdInName — ID задачи в названии строки', () => {
+  it('по умолчанию выключено; включается только настоящим true', () => {
+    expect(defaultSettings().taskIdInName).toBe(false)
+    expect(parseSettings({ taskIdInName: true }).taskIdInName).toBe(true)
+    for (const junk of ['true', 1, 'yes', null, {}]) expect(parseSettings({ taskIdInName: junk }).taskIdInName).toBe(false)
+  })
+
+  it('сохраняется и читается обратно', () => {
+    expect(parseSettings(serializeSettings({ ...defaultSettings(), taskIdInName: true })).taskIdInName).toBe(true)
+  })
+})

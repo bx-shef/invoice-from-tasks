@@ -5,6 +5,7 @@
 import type { FillMode, TaskSource } from '#shared/domain/fill'
 import { TimeoutError, withTimeout } from '#shared/utils/timeout'
 import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
+import { writeConfirmations } from '~/utils/writeConfirm'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -96,8 +97,11 @@ async function collect() {
 }
 
 async function write(replace: boolean) {
-  const existing = fill.existing.value.length
-  if (replace && existing > 0 && !window.confirm(`В счёте уже ${existing} поз. Заменить их строками из задач?`)) return
+  // «Добавить» спрашивает дважды, «Заменить» — если в счёте уже есть позиции (writeConfirm.ts).
+  const questions = writeConfirmations(replace ? 'replace' : 'append', fill.existing.value.length, result.value?.rows.length ?? 0)
+  for (const question of questions) {
+    if (!window.confirm(question)) return
+  }
   await fill.write(replace)
   if (fill.step.value === 'done') toast.add({ title: 'Товары счёта обновлены', description: 'Обновите карточку счёта, чтобы увидеть изменения', color: 'air-primary-success' })
 }
@@ -202,6 +206,7 @@ async function consult(promptId: string) {
           :errors="result.errors"
           :warnings="result.warnings"
           :open-tasks="result.openTasks"
+          :outliers="result.outliers"
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"

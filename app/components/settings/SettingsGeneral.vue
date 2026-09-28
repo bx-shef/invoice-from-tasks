@@ -119,6 +119,13 @@ const measureModel = computed({
         value-key="value"
         data-testid="settings-naming"
       />
+      <B24Checkbox
+        v-model="settings.taskIdInName"
+        class="mt-3"
+        label="Добавлять ID задачи в начало названия: «[102] Сверстать лендинг»"
+        description="Строки счёта легко сверить с задачами; клиент тоже увидит номер"
+        data-testid="settings-task-id-in-name"
+      />
     </B24FormField>
 
     <B24FormField

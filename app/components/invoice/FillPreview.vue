@@ -4,7 +4,7 @@
 // (просьба владельца 2026-09-28). Столбцы, ячейки, итоги и подписи — app/utils/fillPreview.ts
 // (с тестами); шаблон только обходит их массивы — переставить здесь столбец нечем.
 import type { CurrencyConversion } from '#shared/domain/currency'
-import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
+import type { DraftRow, FillIssue, OpenTask, TimeOutlier } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import type { VatRate, VatTotals } from '#shared/domain/vat'
 import {
@@ -13,6 +13,9 @@ import {
   issueText,
   OPEN_TASKS_TITLE,
   openTaskText,
+  outlierTaskIds,
+  outlierText,
+  OUTLIERS_TITLE,
   placementNote,
   PREVIEW_COLUMNS,
   previewContext,
@@ -28,6 +31,8 @@ const props = defineProps<{
   warnings: FillIssue[]
   /** Незакрытые задачи — отдельным блоком: их бывает много. */
   openTasks: OpenTask[]
+  /** Задачи со временем заметно больше обычного — блок и подсветка их строк. */
+  outliers: TimeOutlier[]
   /** Итоги как их посчитает портал: без налога, налог, общая сумма (vatTotals). */
   totals: VatTotals
   /** НДС счёта и чьи это «Реквизиты вашей компании». */
@@ -54,6 +59,7 @@ const lines = computed(() => {
 const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
+const outlierIds = computed(() => outlierTaskIds(props.outliers))
 const unitWarning = computed(() => unitNoticeShown(props.unitNotice, props.rows.length))
 const href = (taskId: number) => taskHref(props.origin, taskId)
 /** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
@@ -136,6 +142,26 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
       </template>
     </B24Alert>
 
+    <B24Alert
+      v-if="outliers.length"
+      color="air-primary-warning"
+      :title="OUTLIERS_TITLE"
+      data-testid="fill-outliers"
+    >
+      <template #description>
+        <span
+          v-for="(outlier, i) in outliers"
+          :key="outlier.taskId"
+          class="mr-1"
+        ><a
+          :href="href(outlier.taskId)"
+          target="_blank"
+          rel="noopener"
+          class="underline"
+        >Задача #{{ outlier.taskId }}</a>{{ outlierText(outlier, i === outliers.length - 1) }}</span>
+      </template>
+    </B24Alert>
+
     <div
       v-if="rows.length"
       class="overflow-x-auto"
@@ -174,6 +200,8 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             v-for="line in lines"
             :key="line.row.key"
             class="align-top border-t border-(--ui-color-divider-less)"
+            :class="{ 'bg-(--ui-color-design-tinted-warning-bg)': outlierIds.has(line.row.taskId) }"
+            :data-outlier="outlierIds.has(line.row.taskId) || undefined"
           >
             <td class="py-2 pr-3">
               {{ line.row.name }}

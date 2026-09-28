@@ -5,7 +5,7 @@
 
 import { buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, needsConversion, parseCurrencies, type CurrencyConversion } from '#shared/domain/currency'
-import { applyNames, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
+import { applyNames, applyTaskIds, buildRows, toProductRows, type FillMode, type FillResult, type TaskSource } from '#shared/domain/fill'
 import { checkInvoice, invoiceChangedSince, parseExistingRows, parseInvoice, type ExistingRow, type InvoiceInfo } from '#shared/domain/invoice'
 import { clipNamingItem, fitConsultContext, MAX_NAMING_ITEMS, type NamingItem } from '#shared/domain/prompts'
 import {
@@ -263,7 +263,8 @@ export function useInvoiceFill() {
         const named = applyNames(built.rows, names)
         built = { ...built, rows: named.rows, errors: named.errors }
       }
-      result.value = built
+      // ID задачи — после названий (и от BitrixGPT): предпросмотр показывает то, что уйдёт в счёт.
+      result.value = { ...built, rows: applyTaskIds(built.rows, settings.value.taskIdInName) }
       step.value = 'preview'
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)

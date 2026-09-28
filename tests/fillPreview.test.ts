@@ -10,6 +10,9 @@ import {
   issueText,
   OPEN_TASKS_TITLE,
   openTaskText,
+  outlierTaskIds,
+  outlierText,
+  OUTLIERS_TITLE,
   placementNote,
   PREVIEW_COLUMNS,
   previewContext,
@@ -236,5 +239,19 @@ describe('незакрытые задачи, проблемы, ссылки', ()
 
   it('ссылка на задачу — адрес портала и путь задачи', () => {
     expect(taskHref('https://portal.bitrix24.by', 104)).toBe('https://portal.bitrix24.by/company/personal/user/0/tasks/task/view/104/')
+  })
+})
+
+describe('задачи со временем заметно больше обычного — тексты блока', () => {
+  it('заголовок просит проверить; «5,5 ч при обычных 1 ч», у последней без запятой', () => {
+    expect(OUTLIERS_TITLE).toBe('Время по задаче заметно больше обычного — проверьте')
+    expect(outlierText({ taskId: 104, seconds: 19_800, typicalSeconds: 3600 }, false)).toBe(' — 5,5 ч при обычных 1 ч,')
+    expect(outlierText({ taskId: 104, seconds: 19_800, typicalSeconds: 5400 }, true)).toBe(' — 5,5 ч при обычных 1,5 ч')
+  })
+
+  it('подсветка — строки этих задач', () => {
+    const ids = outlierTaskIds([{ taskId: 104, seconds: 1, typicalSeconds: 1 }])
+    expect(ids.has(104)).toBe(true)
+    expect(ids.has(102)).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyNames, buildRows, clampName, MAX_ROW_NAME, toProductRows, type FillInput } from '#shared/domain/fill'
+import { applyNames, applyTaskIds, buildRows, clampName, MAX_ROW_NAME, OUTLIER_RATIO, timeOutliers, toProductRows, withTaskId, type DraftRow, type FillInput } from '#shared/domain/fill'
 import { defaultSettings, type AppSettings } from '#shared/domain/settings'
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import { vatTotals } from '#shared/domain/vat'
@@ -378,5 +378,65 @@ describe('НДС в строках', () => {
     const { rows } = buildRows(input({ vatRate: 20, settings: settings({ priceMode: 'sum' }) }))
     expect(toProductRows(rows, settings())[0]).toMatchObject({ price: 360, quantity: 1, taxRate: 20 })
     expect(vatTotals(rows)).toEqual({ net: 300, vat: 60, total: 360 })
+  })
+})
+
+describe('ID задачи в названии строки (настройка taskIdInName)', () => {
+  it('«[102] Сверстать лендинг»; длинное — обрезается до предела с многоточием', () => {
+    expect(withTaskId('Сверстать лендинг', 102)).toBe('[102] Сверстать лендинг')
+    const long = withTaskId('я'.repeat(MAX_ROW_NAME), 7)
+    expect(long).toHaveLength(MAX_ROW_NAME)
+    expect(long.startsWith('[7] я')).toBe(true)
+    expect(long.endsWith('…')).toBe(true)
+  })
+
+  it('включено — ко всем строкам (и типа 2 — ID задачи записи); выключено — те же строки', () => {
+    const { rows } = buildRows(input({ mode: 'time' }))
+    expect(applyTaskIds(rows, true).map(r => r.name)).toEqual(['[10] Вёрстка шапки', '[10] Правки по макету'])
+    expect(applyTaskIds(rows, false)).toBe(rows)
+  })
+})
+
+describe('задачи со временем заметно больше обычного (timeOutliers)', () => {
+  const row = (taskId: number, hours: number, key = `t${taskId}`): DraftRow => {
+    const [base] = buildRows(input()).rows
+    return { ...base!, key, taskId, seconds: hours * 3600, roundedSeconds: hours * 3600, hours }
+  }
+
+  it('больше медианы более чем на 40% — подсветить; медиана по задачам, а не по строкам', () => {
+    expect(OUTLIER_RATIO).toBe(1.4)
+    // 1 ч, 1 ч, 5 ч: обычное — 1 ч, 5 ч больше на 400%.
+    expect(timeOutliers([row(1, 1), row(2, 1), row(3, 5)])).toEqual([{ taskId: 3, seconds: 18_000, typicalSeconds: 3600 }])
+  })
+
+  it('ровно +40% — ещё не выброс; чуть больше — уже', () => {
+    expect(timeOutliers([row(1, 1), row(2, 1), row(3, 1.4)])).toEqual([])
+    expect(timeOutliers([row(1, 1), row(2, 1), row(3, 1.5)]).map(o => o.taskId)).toEqual([3])
+  })
+
+  it('только вверх: короткая задача среди длинных — не выброс', () => {
+    expect(timeOutliers([row(1, 5), row(2, 5), row(3, 0.25)])).toEqual([])
+  })
+
+  it('меньше трёх задач — сравнивать не с чем; чётное число — медиана посередине', () => {
+    expect(timeOutliers([row(1, 1), row(2, 10)])).toEqual([])
+    // 1, 1, 2, 10 → медиана 1,5; 2 ч — +33% (нет), 10 ч — да.
+    expect(timeOutliers([row(1, 1), row(2, 1), row(3, 2), row(4, 10)]).map(o => [o.taskId, o.typicalSeconds])).toEqual([[4, 5400]])
+  })
+
+  it('тип 2: время задачи — сумма её записей', () => {
+    const rows = [row(1, 1, 'e1'), row(2, 1, 'e2'), row(3, 1, 'e3'), row(3, 1, 'e4')]
+    expect(timeOutliers(rows)).toEqual([{ taskId: 3, seconds: 7200, typicalSeconds: 3600 }])
+  })
+
+  it('buildRows кладёт их в результат; в предупреждения не пишет', () => {
+    const tasks: TaskInfo[] = [{ ...task, id: 10 }, { ...task, id: 11 }, { ...task, id: 12 }]
+    const res = buildRows(input({ mode: 'task', tasks, entries: [
+      { id: 1, taskId: 10, userId: 7, seconds: 3600, comment: 'a', date: '2026-05-10' },
+      { id: 2, taskId: 11, userId: 7, seconds: 3600, comment: 'b', date: '2026-05-10' },
+      { id: 3, taskId: 12, userId: 7, seconds: 36_000, comment: 'c', date: '2026-05-10' }
+    ] }))
+    expect(res.outliers.map(o => o.taskId)).toEqual([12])
+    expect(res.warnings.some(w => w.taskId === 12)).toBe(false)
   })
 })

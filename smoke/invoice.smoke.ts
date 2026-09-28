@@ -11,7 +11,7 @@
 import { beforeAll, describe, expect, inject, it } from 'vitest'
 import { AI_ICON, AI_LOGO, buildConsultActivity } from '#shared/domain/activity'
 import { currencyConversion, parseCurrencies, type CurrencyConversion, type PortalCurrency } from '#shared/domain/currency'
-import { buildRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
+import { applyTaskIds, buildRows, toProductRows, type FillMode, type TaskSource } from '#shared/domain/fill'
 import { invoiceProblems, type InvoiceInfo } from '#shared/domain/invoice'
 import { normalizeTag, type MarkupSettings } from '#shared/domain/markup'
 import type { RateEntry } from '#shared/domain/rates'
@@ -166,6 +166,9 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     if (conversion) expect(warnings[0]).toContain('проверьте курс')
     expect(warnings.some(w => w.includes('менялась за время задачи'))).toBe(v.mode === 'task' && v.src.source === 'deal')
     expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
+    // Время задач засева не выбивается вверх: 1,5 / 1,7 / 0,25 ч — медиана 1,5 ч, +40% не набирает
+    // ни одна; к ближайшему часу «звонок» обнуляется, и задач остаётся две — сравнивать не с чем.
+    expect(built.outliers).toEqual([])
     // Незакрытые задачи — отдельным списком, завершённая («сервер») в нём не значится; строки есть.
     expect(built.openTasks.map(t => t.taskId).sort()).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
   })
@@ -263,6 +266,16 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const tax = await taxOf(fx!.invoices.base)
       const totals = vatTotals(rows)
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
+    })
+
+    it('ID задачи в названии: «[id] название» уходит в счёт как есть', async () => {
+      const settings = { ...settingsFor(variant), taskIdInName: true }
+      const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: null, vatRate: VAT_RATE })
+      const rows = applyTaskIds(built.rows, settings.taskIdInName)
+      const call = replaceRowsCall(fx!.invoices.base, toProductRows(rows, settings))
+      await portal.call(call.method, call.params)
+      const after = await readInvoice(portal, fx!.invoices.base)
+      expect(after.rows.map(r => r.productName)).toEqual(rows.map(r => `[${r.taskId}] ${built.rows.find(b => b.key === r.key)!.name}`))
     })
 
     it('единица строк: предпросмотр (rowUnit) показывает ту, что портал действительно запишет', async () => {
