@@ -3,7 +3,7 @@
 // app/utils/writeConfirm.ts). «Добавить» задаёт два вопроса подряд, «Заменить» — один.
 // Кнопка согласия после каждого вопроса неактивна CONFIRM_ARM_MS — так видно правило answerYes:
 // двойной клик не ответит «да» на непрочитанный вопрос. Фокус — на блок вопроса (кнопка записи,
-// где он был, исчезла); Esc — «Отмена», где бы ни был фокус, пока вопрос открыт.
+// где он был, исчезла); Esc — «Отмена», пока вопрос открыт (кроме Esc в поле ввода).
 import type { ComponentPublicInstance } from 'vue'
 import { CONFIRM_ARM_MS, type ConfirmState } from '~/utils/writeConfirm'
 
@@ -17,15 +17,13 @@ const title = computed(() => props.state.questions.length > 1
 
 const armed = ref(false)
 const root = useTemplateRef<ComponentPublicInstance>('root')
-
-// На окне, а не на блоке: кликнули по таблице — фокус ушёл на страницу, а Esc всё равно закрывает
-// вопрос. Но не чужой Esc: фокус в другом элементе (тост, поле) — это его клавиша (находка пятого
-// круга), как и Esc, уже обработанный кем-то (`defaultPrevented`).
+// На окне, а не на блоке: кликнули по таблице или ссылке на задачу — фокус ушёл, а Esc всё равно
+// закрывает вопрос (находка шестого круга). Не закрывает Esc, уже обработанный кем-то
+// (`defaultPrevented`: тост, меню), и Esc в поле ввода — это клавиша поля (находка пятого круга).
+const EDITABLE = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]'
 onKeyStroke('Escape', (e) => {
-  const active = document.activeElement
-  const block = root.value?.$el as HTMLElement | undefined
-  const elsewhere = !!active && active !== document.body && !block?.contains(active)
-  if (!e.defaultPrevented && !elsewhere) emit('cancel')
+  const inField = document.activeElement?.closest(EDITABLE)
+  if (!e.defaultPrevented && !inField) emit('cancel')
 })
 const arm = useTimeoutFn(() => {
   armed.value = true

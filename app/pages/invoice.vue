@@ -157,7 +157,11 @@ async function confirmYes() {
   if (!state) return
   // Слишком раннее «да» (двойной клик) answerYes возвращает тем же вопросом — ничего не меняется.
   confirming.value = answerYes(state, performance.now())
-  if (!confirming.value) await doWrite(state.mode === 'replace', state.existingIds)
+  if (!confirming.value) {
+    await doWrite(state.mode === 'replace', state.existingIds)
+    // Запись не пошла (счёт или позиции изменились, сбой) — блок вопроса исчез: фокус на кнопку.
+    if (fill.step.value !== 'done') await focusWriteButton(state.mode)
+  }
 }
 
 /** «Отмена» или Esc: вопросов нет, фокус — обратно на кнопку, с которой начали. */

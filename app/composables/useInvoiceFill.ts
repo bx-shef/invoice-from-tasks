@@ -116,10 +116,10 @@ export function useInvoiceFill() {
     return { readError: null, changed: collectedFrom.value && invoice.value ? invoiceChangedSince(collectedFrom.value, invoice.value) : null }
   }
 
-  /** Показать, почему запись не пошла (writeBlocker): `stale` — сброс предпросмотра, прочее — под кнопками. */
+  /** Показать, почему запись не пошла (writeBlocker): сброс — ошибкой наверху, прочее — под кнопками. */
   function stopWrite(block: WriteBlock): void {
     writing.value = null
-    if (block.kind === 'stale') {
+    if (block.resetPreview) {
       error.value = block.message
       result.value = null
       step.value = 'idle'
@@ -137,7 +137,9 @@ export function useInvoiceFill() {
   async function prepareWrite(): Promise<boolean> {
     const inv = invoice.value
     if (!inv || !canWrite.value) return false
+    // Прошлые сообщения к новому вопросу не относятся — и красная ошибка прошлой попытки тоже.
     notice.value = ''
+    error.value = ''
     const block = writeBlocker(await rereadInvoice(inv.id), null, [])
     if (block) stopWrite(block)
     return !block

@@ -180,6 +180,8 @@ export interface WriteBlock {
    */
   kind: 'stale' | 'unread' | 'positions'
   message: string
+  /** Сбросить собранные строки (только `stale`): решение здесь, с тестом, а не в композабле. */
+  resetPreview: boolean
 }
 
 /**
@@ -191,9 +193,15 @@ export interface WriteBlock {
 export function writeBlocker(check: InvoiceCheck, askedIds: readonly number[] | null, nowIds: readonly number[]): WriteBlock | null {
   // `!== null`, а не «если непусто»: пустой текст ошибки — тоже сбой, а не «счёт прочитан».
   if (check.readError !== null) {
-    return { kind: 'unread', message: `Не удалось перечитать счёт (${check.readError || 'без описания'}) — ничего не записано. Попробуйте ещё раз.` }
+    // Не «попробуйте ещё раз» безусловно: «нет доступа» повтор не исправит (находка шестого круга).
+    return {
+      kind: 'unread',
+      message: `Не удалось перечитать счёт (${check.readError || 'без описания'}) — ничего не записано. `
+        + 'Нажмите ещё раз; если ошибка повторяется — откройте окно заново.',
+      resetPreview: false
+    }
   }
-  if (check.changed) return { kind: 'stale', message: check.changed }
+  if (check.changed) return { kind: 'stale', message: check.changed, resetPreview: true }
   const changed = askedIds === null ? null : positionsChanged(askedIds, nowIds)
-  return changed ? { kind: 'positions', message: changed } : null
+  return changed ? { kind: 'positions', message: changed, resetPreview: false } : null
 }
