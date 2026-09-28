@@ -1,17 +1,19 @@
 <script setup lang="ts">
 // Предпросмотр строк счёта и проблем. Ничего не пишет — только показывает, что будет записано.
-// Столбцы — как в товарной части счёта портала (цена, количество, налог, включён ли он в цену,
-// сумма налога, сумма), расчёт строки — подстрокой под названием (просьба владельца 2026-09-28).
-// Скидок приложение не ставит — их столбцов нет.
-import type { DraftRow, FillIssue } from '#shared/domain/fill'
+// Столбцы — как в товарной части счёта портала, расчёт строки — подстрокой под названием
+// (просьба владельца 2026-09-28). Что стоит в каждом столбце и все подписи — app/utils/fillPreview.ts
+// (с тестами); здесь только разметка.
+import type { DraftRow, FillIssue, OpenTask } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
-import { formatDuration, formatRuDate } from '#shared/domain/time'
-import { columnDrift, lineAmounts, vatLabel, type VatRate, type VatTotals } from '#shared/domain/vat'
+import type { VatRate, VatTotals } from '#shared/domain/vat'
+import { driftNote, formatMoney, issueText, openTaskText, placementNote, previewLine, vatCaption } from '~/utils/fillPreview'
 
 const props = defineProps<{
   rows: DraftRow[]
   errors: FillIssue[]
   warnings: FillIssue[]
+  /** Незакрытые задачи — отдельным блоком: их бывает много. */
+  openTasks: OpenTask[]
   /** Итоги как их посчитает портал: без налога, налог, общая сумма (vatTotals). */
   totals: VatTotals
   /** НДС счёта и чьи это «Реквизиты вашей компании». */
@@ -22,54 +24,23 @@ const props = defineProps<{
   unit: string
   /** Валюта счёта — в ней цены и суммы. */
   currency: string
-  /** Валюта ставок; отличается от валюты счёта — ставка в подстроке подписана ею (цены пересчитаны). */
+  /** Валюта ставок; отличается от валюты счёта — ставка в подстроке подписана ею и «по курсу». */
   rateCurrency: string
   /** Адрес портала для ссылок на задачи (`https://portal.bitrix24.ru`). */
   origin: string
   userLabel: (id: number) => string
 }>()
 
-const money = (v: number) => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const number = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 4 })
-const markupLabel = (row: DraftRow) => row.markupSource === 'tag' ? `#${row.markupTag ?? ''}` : 'на всё'
-const placement = computed(() => props.priceMode === 'sum'
-  ? 'в счёт: цена — сумма строки, количество — 1'
-  : 'в счёт: цена — цена часа, количество — часы')
-const placementNote = computed(() => props.vat?.rate === null
-  ? `Без НДС — налога в строках нет; ${placement.value}`
-  : `Цена — без НДС, налог сверху (в цену не включён); ${placement.value}`)
-const lines = computed(() => props.rows.map(row => ({ row, amounts: lineAmounts(row) })))
-const rateSuffix = computed(() => props.rateCurrency && props.rateCurrency !== props.currency ? ` ${props.rateCurrency}` : '')
-/** Столбцы округлены построчно, итог портала — одной суммой: копейку разницы объясняем. */
-const drift = computed(() => ({
-  net: columnDrift(lines.value.map(l => l.amounts.net), props.totals.net),
-  total: columnDrift(lines.value.map(l => l.amounts.total), props.totals.total)
-}))
-const vatCaption = computed(() => props.vat
-  ? `Сумма налога (${vatLabel(props.vat.rate)} — реквизиты «${props.vat.company}»):`
-  : 'Сумма налога:')
-const driftText = computed(() => {
-  const parts = [
-    drift.value.net ? `без налога — на ${money(Math.abs(drift.value.net))}` : '',
-    drift.value.total ? `общая сумма — на ${money(Math.abs(drift.value.total))}` : ''
-  ].filter(Boolean)
-  return 'Строки округлены до копеек по отдельности, а итог портал считает одной суммой, поэтому '
-    + `столбцы расходятся с итогом на копейки (${parts.join('; ')}). В счёте будут цифры как здесь внизу.`
-})
-
-/** Текст проблемы после ссылки на задачу: «: причина»; без задачи — только причина. */
-function issueText(issue: FillIssue): string {
-  return issue.taskId ? `: ${issue.message}` : issue.message
-}
+const lines = computed(() => props.rows.map(row => previewLine(row, {
+  currency: props.currency,
+  rateCurrency: props.rateCurrency,
+  userLabel: props.userLabel
+})))
+const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
+const drift = computed(() => driftNote(lines.value, props.totals))
 
 function taskHref(taskId: number): string {
   return `${props.origin}/company/personal/user/0/tasks/task/view/${taskId}/`
-}
-
-/** Часы строки: округлённые, а если округление их изменило — и сколько списано на самом деле. */
-function hoursText(row: DraftRow): string {
-  const rounded = `${number(row.hours)} ч`
-  return row.roundedSeconds !== row.seconds ? `${rounded} (списано ${formatDuration(row.seconds)})` : rounded
 }
 </script>
 
@@ -122,6 +93,26 @@ function hoursText(row: DraftRow): string {
       </template>
     </B24Alert>
 
+    <B24Alert
+      v-if="openTasks.length"
+      color="air-primary-warning"
+      title="Не все задачи закрыты — время в них ещё может добавиться; записать счёт можно"
+      data-testid="fill-open-tasks"
+    >
+      <template #description>
+        <span
+          v-for="(task, i) in openTasks"
+          :key="task.taskId"
+          class="mr-1"
+        ><a
+          :href="taskHref(task.taskId)"
+          target="_blank"
+          rel="noopener"
+          class="underline"
+        >Задача #{{ task.taskId }}</a>{{ openTaskText(task, i === openTasks.length - 1) }}</span>
+      </template>
+    </B24Alert>
+
     <div
       v-if="rows.length"
       class="overflow-x-auto"
@@ -130,7 +121,7 @@ function hoursText(row: DraftRow): string {
         class="text-xs opacity-70 mb-2"
         data-testid="fill-placement"
       >
-        {{ placementNote }}
+        {{ note }}
       </p>
       <table
         class="w-full text-sm"
@@ -163,49 +154,43 @@ function hoursText(row: DraftRow): string {
         </thead>
         <tbody>
           <tr
-            v-for="{ row, amounts } in lines"
-            :key="row.key"
+            v-for="line in lines"
+            :key="line.row.key"
             class="align-top border-t border-(--ui-color-divider-less)"
           >
             <td class="py-2 pr-3">
-              {{ row.name }}
-              <span
-                class="block text-xs opacity-60"
-                data-testid="fill-row-calc"
-              >
-                {{ userLabel(row.userId) }} · {{ hoursText(row) }} × {{ money(row.hourPrice) }} = {{ money(row.sum) }}
-              </span>
+              {{ line.row.name }}
+              <span class="block text-xs opacity-60">{{ line.calc }}</span>
               <span class="block text-xs opacity-60">
-                <span :title="`Ставка на ${formatRuDate(row.rateDate)}`">ставка {{ money(row.baseRate) }}{{ rateSuffix }}</span>
-                + наценка {{ row.markupPercent }}% ({{ markupLabel(row) }}) ·
+                <span :title="line.rateTitle">{{ line.basis }}</span> ·
                 <a
-                  :href="taskHref(row.taskId)"
+                  :href="taskHref(line.row.taskId)"
                   target="_blank"
                   rel="noopener"
                   class="underline"
-                >задача #{{ row.taskId }}</a>
+                >задача #{{ line.row.taskId }}</a>
               </span>
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ money(row.price) }}
+              {{ line.price }}
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ number(row.quantity) }}<span
+              {{ line.quantity }}<span
                 v-if="unit"
                 class="opacity-60 ml-1"
               >{{ unit }}</span>
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ row.taxRate === null ? 'Без НДС' : `${number(row.taxRate)} %` }}
+              {{ line.tax }}
             </td>
             <td class="py-2 pr-3 text-center">
-              {{ row.taxRate === null ? '—' : 'нет' }}
+              {{ line.included }}
             </td>
             <td class="py-2 pr-3 text-right whitespace-nowrap">
-              {{ money(amounts.vat) }}
+              {{ line.vat }}
             </td>
             <td class="py-2 text-right whitespace-nowrap">
-              {{ money(amounts.total) }}
+              {{ line.total }}
             </td>
           </tr>
         </tbody>
@@ -221,7 +206,7 @@ function hoursText(row: DraftRow): string {
               class="pt-3 pb-1 text-right whitespace-nowrap"
               data-testid="fill-net"
             >
-              {{ money(totals.net) }}
+              {{ formatMoney(totals.net) }}
             </td>
           </tr>
           <tr>
@@ -230,13 +215,13 @@ function hoursText(row: DraftRow): string {
               class="py-1 pr-3 text-right"
               data-testid="fill-vat-label"
             >
-              {{ vatCaption }}
+              {{ vatCaption(vat) }}
             </td>
             <td
               class="py-1 text-right whitespace-nowrap"
               data-testid="fill-vat"
             >
-              {{ money(totals.vat) }}
+              {{ formatMoney(totals.vat) }}
             </td>
           </tr>
           <tr class="text-base font-semibold">
@@ -250,17 +235,17 @@ function hoursText(row: DraftRow): string {
               class="py-2 text-right whitespace-nowrap"
               data-testid="fill-total"
             >
-              {{ money(totals.total) }} {{ currency }}
+              {{ formatMoney(totals.total) }} {{ currency }}
             </td>
           </tr>
         </tfoot>
       </table>
       <p
-        v-if="drift.net || drift.total"
+        v-if="drift"
         class="text-xs opacity-70 mt-1 text-right"
         data-testid="fill-drift"
       >
-        {{ driftText }}
+        {{ drift }}
       </p>
     </div>
   </div>

@@ -8,6 +8,7 @@ import {
   parseVatRates,
   vatForInvoice,
   vatLabel,
+  vatRateText,
   vatTotals,
   type CompanyVat
 } from '#shared/domain/vat'
@@ -30,7 +31,14 @@ describe('normalizeVatRate — ставка из хранилища или фо�
   })
 })
 
-describe('vatLabel', () => {
+describe('vatLabel / vatRateText', () => {
+  it('столбец «Налог»: ставка с запятой или «Без НДС»', () => {
+    expect(vatRateText(20)).toBe('20%')
+    expect(vatRateText(7.5)).toBe('7,5%')
+    expect(vatRateText(0)).toBe('0%')
+    expect(vatRateText(null)).toBe('Без НДС')
+  })
+
   it('подписи для людей', () => {
     expect(vatLabel(null)).toBe('Без НДС')
     expect(vatLabel(20)).toBe('НДС 20%')
@@ -146,28 +154,26 @@ describe('vatTotals — итоги как у портала', () => {
 })
 
 describe('lineAmounts — столбцы строки «Сумма налога» и «Сумма», как в товарной части счёта', () => {
-  it('замер 2026-09-28: каждая строка одна в счёте #56 — сумма счёта и налог портала', () => {
-    // [цена без НДС, количество, ставка, сумма без налога, налог, сумма] — налог и сумма — ответ
-    // портала (taxValue, opportunity); сумма без налога — подстрока расчёта предпросмотра.
-    const measured: Array<[number, number, number | null, number, number, number]> = [
-      [170, 1, 20, 170, 34, 204],
-      [170, 5.5, 20, 935, 187, 1122],
+  it('замер 2026-09-28: каждая строка одна в счёте #56 — налог и сумма счёта портала', () => {
+    // [цена без НДС, количество, ставка, налог, сумма] — ответ портала (taxValue, opportunity).
+    const measured: Array<[number, number, number | null, number, number]> = [
+      [170, 1, 20, 34, 204],
+      [170, 5.5, 20, 187, 1122],
       // Режим «сумма × 1» даёт те же суммы, что и «цена часа × часы».
-      [935, 1, 20, 935, 187, 1122],
+      [935, 1, 20, 187, 1122],
       // Граница половины копейки: налог 0,825 → 0,83, а 4,13 + 0,83 ≠ 4,95 — так же у портала.
-      [2.75, 1.5, 20, 4.13, 0.83, 4.95],
-      [123.45, 5.5, 20, 678.98, 135.8, 814.77],
-      [170, 1.25, null, 212.5, 0, 212.5],
-      [33.33, 0.3333, 20, 11.11, 2.22, 13.33],
-      [10.19, 5.5, 20, 56.05, 11.21, 67.25]
+      [2.75, 1.5, 20, 0.83, 4.95],
+      [123.45, 5.5, 20, 135.8, 814.77],
+      [170, 1.25, null, 0, 212.5],
+      [33.33, 0.3333, 20, 2.22, 13.33],
+      [10.19, 5.5, 20, 11.21, 67.25]
     ]
-    for (const [price, quantity, taxRate, net, vat, total] of measured) {
-      expect(lineAmounts({ price, quantity, taxRate })).toEqual({ net, vat, total })
+    for (const [price, quantity, taxRate, vat, total] of measured) {
+      expect(lineAmounts({ price, quantity, taxRate })).toEqual({ vat, total })
     }
   })
 
-  it('налог и «Сумма» по строкам сходятся с итогом портала, без налога — на копейки нет', () => {
-    // Те же восемь строк одним счётом: портал вернул 3560,80 и 558,06 (замер 2026-09-28).
+  it('те же восемь строк одним счётом (замер: 3560,80 и 558,06) — столбцы сходятся с итогом', () => {
     const lines = [
       { price: 170, quantity: 1, taxRate: 20 }, { price: 170, quantity: 5.5, taxRate: 20 },
       { price: 935, quantity: 1, taxRate: 20 }, { price: 2.75, quantity: 1.5, taxRate: 20 },
@@ -179,8 +185,6 @@ describe('lineAmounts — столбцы строки «Сумма налога�
     const amounts = lines.map(lineAmounts)
     expect(columnDrift(amounts.map(a => a.vat), totals.vat)).toBe(0)
     expect(columnDrift(amounts.map(a => a.total), totals.total)).toBe(0)
-    // Без налога: по строкам 3002,77, у портала 3560,80 − 558,06 = 3002,74.
-    expect(columnDrift(amounts.map(a => a.net), totals.net)).toBe(0.03)
   })
 
   it('столбец «Сумма» тоже может разойтись: итог — одно округление, строки — каждая своё', () => {

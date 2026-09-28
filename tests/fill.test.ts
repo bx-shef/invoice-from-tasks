@@ -248,29 +248,37 @@ describe('общие правила', () => {
   })
 })
 
-describe('незакрытые задачи — предупреждение, не стоп', () => {
-  it('задача не завершена — строки есть, ошибок нет, предупреждение со статусом и ссылкой на задачу', () => {
+describe('незакрытые задачи — отдельный список, не стоп', () => {
+  it('задача не завершена — строки есть, ошибок нет, задача со статусом в openTasks', () => {
     for (const mode of ['task', 'time'] as const) {
       const res = buildRows(input({ mode, tasks: [{ ...task, status: 3 }] }))
       expect(res.rows.length).toBeGreaterThan(0)
       expect(res.errors).toEqual([])
-      expect(res.warnings).toContainEqual({ taskId: 10, message: 'не закрыта (выполняется) — время в ней ещё может добавиться' })
+      expect(res.openTasks).toEqual([{ taskId: 10, status: 'выполняется' }])
     }
   })
 
-  it('по предупреждению на каждую незакрытую задачу; завершённая и без статуса — молчат', () => {
+  it('в списке — каждая незакрытая задача по порядку; завершённая и без статуса — нет', () => {
     const tasks: TaskInfo[] = [{ ...task, status: 2 }, { ...task, id: 11, status: 5 }, { ...task, id: 12, status: null }, { ...task, id: 13, status: 4 }]
-    const open = buildRows(input({ mode: 'time', tasks })).warnings.filter(w => w.message.startsWith('не закрыта'))
-    expect(open.map(w => [w.taskId, w.message])).toEqual([
-      [10, 'не закрыта (ждёт выполнения) — время в ней ещё может добавиться'],
-      [13, 'не закрыта (ждёт контроля) — время в ней ещё может добавиться']
+    expect(buildRows(input({ mode: 'time', tasks })).openTasks).toEqual([
+      { taskId: 10, status: 'ждёт выполнения' },
+      { taskId: 13, status: 'ждёт контроля' }
     ])
   })
 
-  it('задача с ошибкой тоже получает предупреждение — человек увидит всё сразу', () => {
+  it('в общий список предупреждений не попадают: их бывает много, а предупреждения о суммах важнее', () => {
+    const res = buildRows(input({ tasks: [{ ...task, status: 3 }] }))
+    expect(res.warnings.some(w => w.message.includes('выполняется'))).toBe(false)
+  })
+
+  it('задача с ошибкой тоже в списке — человек увидит всё сразу', () => {
     const res = buildRows(input({ tasks: [{ ...task, status: 6, responsibleId: null }] }))
     expect(res.errors.length).toBeGreaterThan(0)
-    expect(res.warnings).toContainEqual({ taskId: 10, message: 'не закрыта (отложена) — время в ней ещё может добавиться' })
+    expect(res.openTasks).toEqual([{ taskId: 10, status: 'отложена' }])
+  })
+
+  it('все задачи закрыты — список пуст', () => {
+    expect(buildRows(input()).openTasks).toEqual([])
   })
 })
 

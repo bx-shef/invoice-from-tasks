@@ -165,9 +165,9 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     if (conversion) expect(warnings[0]).toContain('проверьте курс')
     expect(warnings.some(w => w.includes('менялась за время задачи'))).toBe(v.mode === 'task' && v.src.source === 'deal')
     expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
-    // Незакрытые задачи — предупреждение по каждой, завершённая молчит; строки при этом есть.
-    const open = built.warnings.filter(w => w.message.startsWith('не закрыта')).map(w => w.taskId).sort()
-    expect(open).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
+    // Незакрытые задачи — отдельным списком, завершённая («сервер») в нём не значится; строки есть.
+    expect(built.openTasks.map(t => t.taskId).sort()).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
+    expect(built.openTasks.map(t => t.status)).not.toContain('завершена')
   })
 
   it('источник «сделка» у счёта без сделки — остановка до чтения задач', () => {
@@ -243,8 +243,8 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     })
 
     it('столбцы строки предпросмотра («Сумма налога», «Сумма») — ровно то, что портал насчитает этой строке', async () => {
-      // Строка в счёте одна — её налог и сумма и есть taxValue и opportunity счёта: так портал
-      // сверяет построчные суммы, которых отдельными полями в productrow.list нет.
+      // Строка в счёте одна — её налог и сумма и есть taxValue и opportunity счёта: отдельных полей
+      // «сумма налога» и «сумма» строки в productrow.list нет, другого способа спросить портал нет.
       const settings = { ...settingsFor(variant), rounding: 0 as const }
       const built = buildRows({ mode: 'time', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: null, vatRate: VAT_RATE })
       expect(built.rows.length).toBeGreaterThan(0)
@@ -257,6 +257,12 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
         const amounts = lineAmounts(rows[i]!)
         expect([tax.opportunity, tax.taxValue], `${rows[i]!.price} × ${rows[i]!.quantity}`).toEqual([amounts.total, amounts.vat])
       }
+      // Все строки одним счётом: налог счёта — ровно сумма столбца «Сумма налога», итог — vatTotals.
+      const { method, params } = replaceRowsCall(fx!.invoices.base, toProductRows(rows, settings))
+      await portal.call(method, params)
+      const tax = await taxOf(fx!.invoices.base)
+      expect(tax.taxValue).toBe(roundMoney(rows.reduce((sum, r) => sum + lineAmounts(r).vat, 0)))
+      expect(tax.opportunity).toBe(vatTotals(rows).total)
     })
 
     it('«Добавить» с ошибкой посередине: портал останавливается, итог — «добавлено 1 из 3»', async () => {

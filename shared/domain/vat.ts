@@ -37,9 +37,14 @@ export function normalizeVatRate(value: unknown): VatRate | undefined {
   return Math.round(n * 100) / 100
 }
 
+/** Ставка для столбца «Налог»: «20%», «7,5%», «Без НДС». */
+export function vatRateText(rate: VatRate): string {
+  return rate === null ? 'Без НДС' : `${String(rate).replace('.', ',')}%`
+}
+
 /** Подпись ставки для людей: «НДС 20%», «Без НДС». */
 export function vatLabel(rate: VatRate): string {
-  return rate === null ? 'Без НДС' : `НДС ${String(rate).replace('.', ',')}%`
+  return rate === null ? 'Без НДС' : `НДС ${vatRateText(rate)}`
 }
 
 /**
@@ -100,17 +105,23 @@ function lineVat(line: VatLine): number {
   return line.taxRate === null ? 0 : roundMoney(line.price * line.quantity * line.taxRate / 100)
 }
 
+/** Суммы строки в столбцах товарной части: «Сумма налога» и «Сумма» (с налогом). */
+export interface LineAmounts {
+  vat: number
+  total: number
+}
+
 /**
- * Суммы одной строки — столбцы «Сумма налога» и «Сумма» (с налогом) товарной части счёта, каждая
- * до копеек; `net` — сумма без налога (подстрока расчёта). Замер 2026-09-28 на тестовом портале:
- * восемь строк, каждая одна в счёте, — сумма счёта и налог совпали с `total` и `vat` до копейки
- * (170 × 1 при 20% — 204 и 34; 170 × 5,5 и 935 × 1 — 1122 и 187; 2,75 × 1,5 — 4,95 и 0,83;
- * «Без НДС» 170 × 1,25 — 212,5 и 0), tests/vat.test.ts. У строки на границе копейки
- * `net + vat` может разойтись с `total` на копейку (4,13 + 0,83 ≠ 4,95) — так же и у портала.
+ * Суммы одной строки — столбцы «Сумма налога» и «Сумма» товарной части счёта, каждая до копеек.
+ * Сумма без налога — `DraftRow.sum` (fill.ts), здесь её не пересчитываем. Замер 2026-09-28 на
+ * тестовом портале: восемь строк, каждая одна в счёте, — налог и сумма счёта совпали до копейки
+ * (170 × 1 при 20% — 34 и 204; 170 × 5,5 и 935 × 1 — 187 и 1122; 2,75 × 1,5 — 0,83 и 4,95;
+ * «Без НДС» 170 × 1,25 — 0 и 212,5), те же строки одним счётом — 558,06 и 3560,80
+ * (tests/vat.test.ts). У строки на границе копейки «без налога + налог» может разойтись с «Суммой»
+ * на копейку (4,13 + 0,83 ≠ 4,95) — так же и у портала.
  */
-export function lineAmounts(line: VatLine): VatTotals {
-  const net = roundMoney(line.price * line.quantity)
-  return { net, vat: lineVat(line), total: roundMoney(grossPrice(line.price, line.taxRate) * line.quantity) }
+export function lineAmounts(line: VatLine): LineAmounts {
+  return { vat: lineVat(line), total: roundMoney(grossPrice(line.price, line.taxRate) * line.quantity) }
 }
 
 /**
@@ -132,9 +143,10 @@ export function vatTotals(lines: readonly VatLine[]): VatTotals {
 }
 
 /**
- * На сколько сумма столбца (каждая строка округлена до копеек) расходится с итогом портала —
- * «Сумма без налога» (итог минус налог по строкам) или «Общая сумма» (одно округление). Копейки
- * неизбежны: предпросмотр показывает цифры портала и объясняет разницу, а не прячет её.
+ * На сколько сумма столбца (каждая строка округлена до копеек) расходится с итогом портала.
+ * Для столбца «Сумма» против «Общей суммы» (итог портал округляет один раз) копейки неизбежны:
+ * предпросмотр показывает цифры портала и объясняет разницу, а не прячет её. «Сумма налога»
+ * сходится с итогом всегда: налог счёта — сумма налогов строк.
  */
 export function columnDrift(values: readonly number[], total: number): number {
   // `|| 0`: разность мелких двоичных хвостов округляется в −0 — это не расхождение.

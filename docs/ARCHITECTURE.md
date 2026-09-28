@@ -1,6 +1,6 @@
 # Архитектура
 
-> Last reviewed: 2026-09-26
+> Last reviewed: 2026-09-28
 
 Как устроено приложение и почему так. Правила расчёта — `docs/PROCESSING.md`, настройки —
 `docs/SETTINGS.md`, вызовы REST — `docs/REST_METHODS.md`.
@@ -57,7 +57,8 @@ app/utils/         чистые помощники страниц, покрыт�
                    замер места, свежесть токена фрейма (frameToken), параллельные чтения
                    (concurrency), сбор страниц (paging), разбор пакета (b24Batch), итог
                    записи в счёт (writeOutcome), что не настроено на сервере (serverHealth),
-                   названия единиц измерения (measures)
+                   названия единиц измерения (measures), столбцы и подписи предпросмотра
+                   (fillPreview)
 app/composables/   связь с порталом и сервером: useB24 (фрейм, REST v2 и v3), useApi (наш
                    /api), useAppSettings, useInvoiceFill (сценарий счёта), useCatalog
                    (единицы измерения), useUsers, useStorageProbe (замер места)

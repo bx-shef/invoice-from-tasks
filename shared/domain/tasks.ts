@@ -33,7 +33,7 @@ export interface TaskInfo {
   tags: string[]
   /**
    * Код статуса REST v2 (`STATUS`, {@link TASK_STATUS_LABELS}); `null` — портал его не отдал.
-   * Незакрытая задача — предупреждение, а не стоп ({@link openTaskNotice}).
+   * Незакрытая задача — предупреждение, а не стоп ({@link openTaskStatus}).
    */
   status: number | null
 }
@@ -44,9 +44,11 @@ export const TASK_COMPLETED = 5
 /**
  * Названия статусов задачи REST v2 — как в карточке задачи. Замер 2026-09-28 на тестовом портале
  * (tasks.task.add → start → defer → complete → renew): 2 — новая задача и после «Возобновить»,
- * 3 — после «Начать», 6 — после «Отложить», 5 — после «Завершить». 1, 4 и 7 — коды ядра, не
- * замерены: «ждёт контроля» бывает только у задачи с контролем постановщика другим сотрудником,
- * а на тестовом портале сотрудник один. Документация v2 кодов не перечисляет (в v3 статус — строка).
+ * 3 — после «Начать», 6 — после «Отложить», 5 — после «Завершить». У просроченной задачи `status`
+ * тот же (2), а «просрочена» (−1) и «почти просрочена» (−3) приходят в отдельном `subStatus` — его
+ * не читаем. 1, 4 и 7 — коды ядра, не замерены: «ждёт контроля» бывает только у задачи с контролем
+ * постановщика другим сотрудником, а на тестовом портале сотрудник один (проверка — в #2).
+ * Документация v2 кодов не перечисляет (в v3 статус — строка).
  */
 export const TASK_STATUS_LABELS: Readonly<Record<number, string>> = {
   1: 'новая',
@@ -59,13 +61,22 @@ export const TASK_STATUS_LABELS: Readonly<Record<number, string>> = {
 }
 
 /**
- * Предупреждение о незакрытой задаче или `null`. Не стоп (решение владельца 2026-09-28): счёт
- * бывает и до закрытия задачи, но в незакрытую ещё может добавиться время — человек должен это
- * видеть. Статус неизвестен (портал не отдал поле) — молчим: гадать не будем.
+ * Статус незакрытой задачи для предупреждения или `null`. Не стоп (решение владельца 2026-09-28):
+ * счёт бывает и до закрытия задачи, но в незакрытую ещё может добавиться время — человек должен
+ * это видеть. Незнакомый код (и ноль, и отрицательный) — тоже «не закрыта», с кодом: закрыта только
+ * 5. Статус не пришёл (портал не отдал поле) — молчим: гадать не будем.
  */
-export function openTaskNotice(status: number | null): string | null {
+export function openTaskStatus(status: number | null): string | null {
   if (status === null || status === TASK_COMPLETED) return null
-  return `не закрыта (${TASK_STATUS_LABELS[status] ?? `статус ${status}`}) — время в ней ещё может добавиться`
+  return TASK_STATUS_LABELS[status] ?? `статус ${status}`
+}
+
+/** Код статуса: целое число строкой или числом; пусто и мусор — `null` (не «0»). */
+function toStatus(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null
+  if (typeof value === 'string' && !value.trim()) return null
+  const n = Number(value)
+  return Number.isInteger(n) ? n : null
 }
 
 export interface TimeEntry {
@@ -126,7 +137,7 @@ export function parseTask(row: Row): TaskInfo | null {
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
     tags: parseTaskTags(row),
-    status: toInt(pick(row, 'status', 'STATUS'))
+    status: toStatus(pick(row, 'status', 'STATUS'))
   }
 }
 

@@ -1,23 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { crmBindingCodes, listRows, openTaskNotice, parseTask, parseTaskTags, parseTimeEntry, TASK_COMPLETED, tasksBoundTo } from '#shared/domain/tasks'
+import { crmBindingCodes, listRows, openTaskStatus, parseTask, parseTaskTags, parseTimeEntry, TASK_COMPLETED, tasksBoundTo } from '#shared/domain/tasks'
 import { checkInvoice, invoiceChangedSince, parseInvoice, invoiceProblems } from '#shared/domain/invoice'
 import { defaultSettings } from '#shared/domain/settings'
 
-describe('openTaskNotice — незакрытая задача', () => {
+describe('openTaskStatus — незакрытая задача', () => {
   it('завершена или статус неизвестен — молчим', () => {
     expect(TASK_COMPLETED).toBe(5)
-    expect(openTaskNotice(5)).toBeNull()
-    expect(openTaskNotice(null)).toBeNull()
+    expect(openTaskStatus(5)).toBeNull()
+    expect(openTaskStatus(null)).toBeNull()
   })
 
-  it('остальные статусы — предупреждение с названием статуса, как в карточке задачи', () => {
-    expect(openTaskNotice(2)).toBe('не закрыта (ждёт выполнения) — время в ней ещё может добавиться')
-    expect(openTaskNotice(3)).toBe('не закрыта (выполняется) — время в ней ещё может добавиться')
-    expect(openTaskNotice(6)).toBe('не закрыта (отложена) — время в ней ещё может добавиться')
+  it('остальные статусы — название статуса, как в карточке задачи (замер: 2, 3, 6)', () => {
+    expect(openTaskStatus(2)).toBe('ждёт выполнения')
+    expect(openTaskStatus(3)).toBe('выполняется')
+    expect(openTaskStatus(6)).toBe('отложена')
+    expect(openTaskStatus(4)).toBe('ждёт контроля')
   })
 
-  it('незнакомый код — всё равно предупреждение, с кодом: портал мог добавить статус', () => {
-    expect(openTaskNotice(42)).toBe('не закрыта (статус 42) — время в ней ещё может добавиться')
+  it('незнакомый код, ноль и отрицательный — тоже «не закрыта», с кодом: закрыта только 5', () => {
+    expect(openTaskStatus(42)).toBe('статус 42')
+    expect(openTaskStatus(0)).toBe('статус 0')
+    expect(openTaskStatus(-1)).toBe('статус -1')
   })
 })
 
@@ -52,8 +55,16 @@ describe('разбор задач', () => {
   it('статус v2 приходит строкой (замер 2026-09-28: «2» у новой задачи, «5» у завершённой) — числом', () => {
     expect(parseTask({ id: '104', title: 'X', status: '2' })?.status).toBe(2)
     expect(parseTask({ ID: '134', TITLE: 'X', STATUS: '5' })?.status).toBe(TASK_COMPLETED)
+    // Пусто и мусор — «не пришёл», а не «0»: иначе пустая строка дала бы ложное «не закрыта».
     expect(parseTask({ id: '1', title: 'X', status: '' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: '  ' })?.status).toBeNull()
     expect(parseTask({ id: '1', title: 'X', status: 'completed' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: '2.5' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: {} })?.status).toBeNull()
+    // Ноль и отрицательные — код как есть (портал их в `status` не шлёт: «просрочена» −1 — в
+    // `subStatus`, замер 2026-09-28), чтобы не потерять предупреждение.
+    expect(parseTask({ id: '1', title: 'X', status: '-1' })?.status).toBe(-1)
+    expect(parseTask({ id: '1', title: 'X', status: 0 })?.status).toBe(0)
   })
 
   it('теги приходят в том же списке v2 (select TAGS) и разбираются в parseTask', () => {

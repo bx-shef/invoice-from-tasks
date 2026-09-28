@@ -167,6 +167,7 @@ async function consult(promptId: string) {
           :rows="result.rows"
           :errors="result.errors"
           :warnings="result.warnings"
+          :open-tasks="result.openTasks"
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"
