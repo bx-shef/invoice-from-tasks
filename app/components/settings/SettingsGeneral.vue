@@ -3,6 +3,7 @@
 // источник названий строк, единица измерения.
 import { ROUNDING_DIRECTION_LABELS, ROUNDING_DIRECTIONS, ROUNDING_LABELS, ROUNDING_STEPS } from '#shared/domain/time'
 import type { AppSettings } from '#shared/domain/settings'
+import { hourInSumMode, measureItems, measureMissing, type MeasureOption } from '~/utils/measures'
 
 const settings = defineModel<AppSettings>({ required: true })
 
@@ -19,27 +20,38 @@ const priceModeItems = [
   { label: 'Цена часа × часы', value: 'hour', description: 'Цена — ставка часа с наценкой, количество — часы' },
   { label: 'Сумма строки × 1', value: 'sum', description: 'Цена — ставка часа с наценкой × часы, количество — 1' }
 ]
-/** Код ОКЕИ «час»: при количестве 1 он читался бы как «1 час» за всю работу. */
-const HOUR_MEASURE = 356
 const measureHint = computed(() => settings.value.priceMode === 'sum'
   ? 'Количество в строке — 1: выберите единицу вроде «услуга» или «шт»'
-  : 'Например, «час». Не выбрано — портал поставит единицу по умолчанию')
+  : 'Например, «час», если он заведён в справочнике портала. Не выбрано — портал поставит единицу по умолчанию')
 const currencies = ref<Array<{ label: string, value: string }>>([])
-const measures = ref<Array<{ label: string, value: number }>>([])
+/** Справочник единиц; `null` — не прочитан (список покажет только сохранённый код). */
+const measureList = ref<MeasureOption[] | null>(null)
+const measures = computed(() => measureItems(measureList.value, settings.value.measureCode))
+const measureGone = computed(() => measureMissing(measureList.value, settings.value.measureCode))
+const hourWarning = computed(() => hourInSumMode(settings.value.priceMode, settings.value.measureCode, measureList.value))
 
-onMounted(async () => {
+onMounted(() => {
+  // Валюты и единицы — независимо: медленный справочник единиц не держит список валют.
+  void loadCurrencies()
+  void catalog.measures().then(
+    (list) => {
+      measureList.value = list
+    },
+    () => {
+      measureList.value = null
+    }
+  )
+})
+
+async function loadCurrencies() {
   try {
     const list = await b24.call<Array<{ CURRENCY?: unknown, FULL_NAME?: unknown }>>('crm.currency.list')
     currencies.value = (list ?? []).map(c => ({ label: `${c.CURRENCY} — ${c.FULL_NAME ?? ''}`, value: String(c.CURRENCY ?? '') })).filter(c => c.value)
   } catch {
+    // Отказ или битый ответ — список из сохранённой валюты (разбор тоже внутри try).
     currencies.value = settings.value.currency ? [{ label: settings.value.currency, value: settings.value.currency }] : []
   }
-  try {
-    measures.value = (await catalog.measures()).map(m => ({ label: m.label, value: m.code }))
-  } catch {
-    measures.value = []
-  }
-})
+}
 
 const measureModel = computed({
   get: () => settings.value.measureCode ?? 0,
@@ -120,11 +132,19 @@ const measureModel = computed({
         class="w-72"
       />
       <p
-        v-if="settings.priceMode === 'sum' && settings.measureCode === HOUR_MEASURE"
+        v-if="hourWarning"
         class="mt-1 text-sm text-(--ui-color-accent-main-warning)"
         data-testid="settings-measure-warning"
       >
         В режиме «Сумма строки × 1» единица «час» покажет в счёте «1 час» за всю работу
+      </p>
+      <p
+        v-if="measureGone"
+        class="mt-1 text-sm text-(--ui-color-accent-main-warning)"
+        data-testid="settings-measure-missing"
+      >
+        Единицы с этим кодом нет в справочнике портала — в строки счёта портал запишет единицу по
+        умолчанию. Выберите единицу из списка
       </p>
     </B24FormField>
   </div>

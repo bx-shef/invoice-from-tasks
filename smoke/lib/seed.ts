@@ -2,7 +2,7 @@
 // что прогоны не мешают друг другу и старые данные не влияют на расчёт. Ничего не удаляется
 // (решение владельца: тестовые данные остаются для ручного просмотра).
 
-import { listMyCompanies } from './flow'
+import { listMeasures, listMyCompanies } from './flow'
 import type { Portal } from './portal'
 
 /**
@@ -10,6 +10,12 @@ import type { Portal } from './portal'
  * и сотня «моих компаний» от прогонов его бы засорила. Ищется по названию, нет — создаётся.
  */
 export const SMOKE_MY_COMPANY = 'IFT smoke: реквизиты вашей компании'
+
+/**
+ * Своя единица измерения смока — тоже одна на все прогоны (справочник видят люди): у своих единиц
+ * портал отдаёт `symbol`, и строка счёта показывает именно его (замер 2026-09-28). Код — вне ОКЕИ.
+ */
+export const SMOKE_UNIT = { code: 9990, measureTitle: 'IFT smoke: человеко-час', symbol: 'чел.-ч' } as const
 
 /** Дата записи «задним числом» — до смены ставки 01.09 (сценарий «ставка менялась»). */
 export const PAST_DATE = '2026-08-20T10:00:00+03:00'
@@ -29,6 +35,8 @@ export interface SmokeFixture {
   dealId: number
   /** «Реквизиты вашей компании» счетов usd, base и noDeal; у paging их сняли — счёт без реквизитов. */
   myCompanyId: number
+  /** Код своей единицы измерения смока ({@link SMOKE_UNIT}). */
+  unitCode: number
   invoices: {
     /** Счёт в USD из сделки — пересчёт из валюты ставок. */
     usd: number
@@ -74,6 +82,24 @@ async function addTask(portal: Portal, fields: Record<string, unknown>): Promise
   return id
 }
 
+/**
+ * Своя единица смока: есть с этим кодом — берём (другое название — ошибка засева), нет — создаём.
+ * Ищем в полном справочнике своим кодом, а не фильтром портала: непонятый фильтр портал не
+ * отвергает, а отдаёт всё (урок tasks.task.list, docs/REST_METHODS.md).
+ */
+async function smokeUnit(portal: Portal): Promise<number> {
+  const found = (await listMeasures(portal)).find(m => m.code === SMOKE_UNIT.code)
+  // И название, и обозначение: чужая единица с пустым названием могла бы совпасть по запасной подписи.
+  if (found && found.title !== SMOKE_UNIT.measureTitle) {
+    throw new Error(`код единицы ${SMOKE_UNIT.code} в портале занят «${found.title}» — смени SMOKE_UNIT.code`)
+  }
+  if (found && found.symbol !== SMOKE_UNIT.symbol) {
+    throw new Error(`у единицы смока ${SMOKE_UNIT.code} обозначение «${found.symbol}», ждём «${SMOKE_UNIT.symbol}» — верни его в справочнике`)
+  }
+  if (!found) await portal.call('catalog.measure.add', { fields: { ...SMOKE_UNIT, isDefault: 'N' } })
+  return SMOKE_UNIT.code
+}
+
 async function smokeMyCompany(portal: Portal): Promise<number> {
   // Весь список, а не первая страница: иначе на портале с 50+ реквизитами каждый прогон создавал бы новые.
   const found = (await listMyCompanies(portal)).find(c => c.title === SMOKE_MY_COMPANY)
@@ -95,6 +121,7 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
 
   const dealId = await addItem(portal, 2, { title: `${runTag}: сделка`, currencyId: baseCurrency })
   const myCompanyId = await smokeMyCompany(portal)
+  const unitCode = await smokeUnit(portal)
   const invoices = {
     usd: await addItem(portal, 31, { title: `${runTag}: счёт ${foreignCurrency}`, parentId2: dealId, currencyId: foreignCurrency, mycompanyId: myCompanyId }),
     base: await addItem(portal, 31, { title: `${runTag}: счёт ${baseCurrency}`, parentId2: dealId, currencyId: baseCurrency, mycompanyId: myCompanyId }),
@@ -145,5 +172,5 @@ export async function seed(portal: Portal): Promise<SmokeFixture> {
     ownerId: invoices.paging,
     productRows: Array.from({ length: 55 }, (_, i) => ({ productName: `${runTag}: строка ${i + 1}`, price: 1, quantity: 1, sort: (i + 1) * 10 }))
   })
-  return { runTag, userId, dealId, myCompanyId, invoices, tasks, entries, baseCurrency }
+  return { runTag, userId, dealId, myCompanyId, unitCode, invoices, tasks, entries, baseCurrency }
 }

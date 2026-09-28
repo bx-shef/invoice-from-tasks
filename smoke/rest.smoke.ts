@@ -6,11 +6,11 @@ import { parseCurrencies } from '#shared/domain/currency'
 import { normalizeTag } from '#shared/domain/markup'
 import { listRows, parseTask, parseTaskTags } from '#shared/domain/tasks'
 import { parseVatRates } from '#shared/domain/vat'
-import { COMPANY_ENTITY_TYPE_ID, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
+import { COMPANY_ENTITY_TYPE_ID, measureListCall, resultListCall, TASK_SELECT, vatListCall } from '~/utils/invoiceRequests'
 import { collectOffsetPages } from '~/utils/paging'
-import { parseMeasures } from '~/utils/measures'
 import { connectPortal, type Portal } from './lib/portal'
-import { fetchEntries, listMyCompanies, readInvoice } from './lib/flow'
+import { fetchEntries, listMeasures, listMyCompanies, readInvoice } from './lib/flow'
+import { SMOKE_UNIT } from './lib/seed'
 
 const env = inject('smokeEnv')
 const fx = inject('fixture')
@@ -34,11 +34,17 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
     expect(list.length).toBeGreaterThan(1)
   })
 
-  it('catalog.measure.list: у каждой единицы есть подпись (у системных measureTitle — null)', async () => {
-    const res = await portal.call<{ measures?: unknown[] }>('catalog.measure.list', { select: ['code', 'measureTitle', 'symbol', 'symbolIntl', 'symbolLetterIntl'] })
-    const measures = parseMeasures(res?.measures)
+  it('catalog.measure.list: у каждой единицы подпись; единица по умолчанию одна; своя единица — со своим обозначением', async () => {
+    const measures = await listMeasures(portal)
     expect(measures.length).toBeGreaterThan(0)
+    // Листание без повторов и пропусков: одна единица — один раз, всего — сколько сказал портал.
+    expect(new Set(measures.map(m => m.code)).size).toBe(measures.length)
+    const { total } = await portal.callWithTotal(measureListCall(0).method, measureListCall(0).params)
+    expect(measures.length).toBe(total)
     for (const m of measures) expect(m.label).toMatch(/\S/)
+    // По ней портал подставляет единицу строке без кода и вместо кода не из справочника.
+    expect(measures.filter(m => m.isDefault)).toHaveLength(1)
+    expect(measures.find(m => m.code === SMOKE_UNIT.code)?.symbol).toBe(SMOKE_UNIT.symbol)
   })
 
   it('catalog.vat.list: ответ { vats }, у активных ставок — число (варианты вкладки «НДС»)', async () => {

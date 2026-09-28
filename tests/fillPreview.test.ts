@@ -17,6 +17,7 @@ import {
   previewTotals,
   rateBasis,
   taskHref,
+  unitNoticeShown,
   vatCaption,
   type PreviewContext
 } from '~/utils/fillPreview'
@@ -215,6 +216,12 @@ describe('driftNote — когда видимые числа строк не с�
 describe('незакрытые задачи, проблемы, ссылки', () => {
   it('заголовок блока не обещает запись: блок виден и когда записать нельзя', () => {
     expect(OPEN_TASKS_TITLE).toBe('Не все задачи закрыты — время в них ещё может добавиться')
+  })
+
+  it('предупреждение о единице — только когда есть строки', () => {
+    expect(unitNoticeShown('кода нет в справочнике', 2)).toBe('кода нет в справочнике')
+    expect(unitNoticeShown('кода нет в справочнике', 0)).toBeNull()
+    expect(unitNoticeShown(null, 2)).toBeNull()
   })
 
   it('незакрытые задачи — через запятую, у последней запятой нет', () => {

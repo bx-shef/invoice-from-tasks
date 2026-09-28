@@ -3,7 +3,8 @@
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
-import { measureSymbol } from '~/utils/measures'
+import { TimeoutError, withTimeout } from '#shared/utils/timeout'
+import { rowUnit, type MeasureOption, type UnreadReason } from '~/utils/measures'
 import { invoiceIdFromOptions, invoiceIdFromQuery } from '~/utils/placement'
 
 const b24 = useB24()
@@ -11,6 +12,7 @@ const route = useRoute()
 const app = useAppSettings()
 const users = useUsers()
 const fill = useInvoiceFill()
+const catalog = useCatalog()
 const toast = useToast()
 
 const invoiceId = ref<number | null>(null)
@@ -19,6 +21,19 @@ const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
 const consultAnswer = ref<{ title: string, text: string, notSaved?: string } | null>(null)
+/** Справочник единиц; `null` — не прочитан (нет права чтения каталога): единица — из ОКЕИ. */
+const measures = ref<MeasureOption[] | null>(null)
+/**
+ * Пока справочник грузится, «Собрать строки» ждёт (с индикатором): иначе предпросмотр на миг
+ * показал бы единицу из ОКЕИ без предупреждения о подмене, и её успели бы записать (находка
+ * /code-review). Ждём не дольше MEASURES_WAIT: завис портал — собираем с ОКЕИ, а поздний ответ
+ * справочника всё равно обновит предпросмотр.
+ */
+const measuresLoading = ref(true)
+const MEASURES_WAIT = 10_000
+/** Почему справочник не прочитан: не ответил в срок — предпросмотр скажет об этом (rowUnit). */
+const measuresUnread = ref<UnreadReason>('failed')
+const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode, measuresUnread.value))
 
 const sourceItems = [
   { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
@@ -48,12 +63,31 @@ onMounted(async () => {
   origin.value = frame.getTargetOrigin()
   invoiceId.value = invoiceIdFromOptions(frame.placement.options) ?? invoiceIdFromQuery(route.query.id)
   if (!invoiceId.value) return
+  // Справочник единиц — сразу и параллельно с настройками и счётом; ошибка не мешает счёту:
+  // без справочника предпросмотр возьмёт обозначение из ОКЕИ.
+  const measuresLoaded = withTimeout(
+    catalog.measures().then(
+      (list) => {
+        measures.value = list
+      },
+      () => {
+        measures.value = null
+      }
+    ),
+    MEASURES_WAIT,
+    'справочник единиц не ответил'
+  ).catch((e: unknown) => {
+    // Поздний ответ всё равно заполнит measures — тогда пометка «не ответил» уйдёт сама.
+    if (e instanceof TimeoutError) measuresUnread.value = 'timeout'
+  }).finally(() => {
+    measuresLoading.value = false
+  })
   try {
     await app.load()
   } catch {
     return
   }
-  await fill.loadInvoice(invoiceId.value)
+  await Promise.all([fill.loadInvoice(invoiceId.value), measuresLoaded])
 })
 
 async function collect() {
@@ -141,8 +175,8 @@ async function consult(promptId: string) {
               <B24Button
                 color="air-primary"
                 label="Собрать строки"
-                :loading="fill.step.value === 'collecting'"
-                :disabled="busy || !fill.invoice.value"
+                :loading="fill.step.value === 'collecting' || measuresLoading"
+                :disabled="busy || !fill.invoice.value || measuresLoading"
                 data-testid="fill-collect"
                 @click="collect"
               />
@@ -171,7 +205,8 @@ async function consult(promptId: string) {
           :totals="fill.totals.value"
           :vat="fill.vat.value"
           :price-mode="result.priceMode"
-          :unit="measureSymbol(app.settings.value.measureCode)"
+          :unit="unit.symbol"
+          :unit-notice="unit.notice"
           :currency="fill.invoice.value?.currencyId ?? ''"
           :conversion="fill.conversion.value"
           :origin="origin"

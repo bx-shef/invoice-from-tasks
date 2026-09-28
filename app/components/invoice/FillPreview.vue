@@ -18,7 +18,8 @@ import {
   previewContext,
   previewLine,
   previewTotals,
-  taskHref
+  taskHref,
+  unitNoticeShown
 } from '~/utils/fillPreview'
 
 const props = defineProps<{
@@ -33,8 +34,10 @@ const props = defineProps<{
   vat: { rate: VatRate, company: string } | null
   /** Как строки лягут в счёт: цена часа и часы или сумма и 1. */
   priceMode: PriceMode
-  /** Краткое обозначение единицы строк («ч», «шт»); пусто — портал поставит свою. */
+  /** Обозначение единицы строк, как в счёте («ч», «шт», «чел.-ч»); пусто — неизвестно. */
   unit: string
+  /** Единица из настроек не попадёт в счёт как есть (rowUnit) — первым пунктом предупреждений. */
+  unitNotice: string | null
   /** Валюта счёта — в ней цены и суммы. */
   currency: string
   /** Пересчёт цен в валюту счёта; есть — ставка в подстроке подписана «по курсу». */
@@ -51,6 +54,7 @@ const lines = computed(() => {
 const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
+const unitWarning = computed(() => unitNoticeShown(props.unitNotice, props.rows.length))
 const href = (taskId: number) => taskHref(props.origin, taskId)
 /** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
 const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 ? 'pt-3 pb-1' : 'py-1'
@@ -83,12 +87,19 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
     </B24Alert>
 
     <B24Alert
-      v-if="warnings.length"
+      v-if="warnings.length || unitWarning"
       color="air-primary-warning"
       title="Обратите внимание"
+      data-testid="fill-warnings"
     >
       <template #description>
         <ul class="list-disc pl-5">
+          <li
+            v-if="unitWarning"
+            data-testid="fill-unit-notice"
+          >
+            {{ unitWarning }}
+          </li>
           <li
             v-for="(issue, i) in warnings"
             :key="i"

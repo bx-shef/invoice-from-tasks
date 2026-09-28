@@ -11,7 +11,10 @@ import {
   ELAPSED_PAGE,
   invoiceGetCall,
   MAX_ELAPSED_PAGES,
+  MAX_MEASURES,
   MAX_PRODUCT_ROWS,
+  MEASURES_PAGE,
+  measureListCall,
   MY_COMPANIES_PAGE,
   myCompaniesCall,
   productRowListCall,
@@ -20,6 +23,7 @@ import {
   taskListCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
+import { readMeasures, type MeasureOption } from '~/utils/measures'
 import type { Portal } from './portal'
 
 /** Счёт и его позиции как их отдал портал — для полей, которых приложение не разбирает (налог). */
@@ -47,6 +51,14 @@ export async function listMyCompanies(portal: Portal): Promise<MyCompany[]> {
     return (await portal.call<{ items?: unknown[] }>(method, params))?.items ?? []
   }, MY_COMPANIES_PAGE, 500, 'слишком много «моих компаний»')
   return parseMyCompanies(raw)
+}
+
+/** Справочник единиц — тем же кодом листания и разбора, что страница (readMeasures). */
+export async function listMeasures(portal: Portal): Promise<MeasureOption[]> {
+  return readMeasures(async (start) => {
+    const { method, params } = measureListCall(start)
+    return portal.call<unknown>(method, params)
+  }, MEASURES_PAGE, MAX_MEASURES)
 }
 
 export async function fetchTasks(portal: Portal, source: TaskSource, invoice: InvoiceInfo): Promise<TaskInfo[]> {

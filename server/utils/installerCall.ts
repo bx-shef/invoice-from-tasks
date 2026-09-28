@@ -13,21 +13,12 @@
 
 import type { RestCall } from './b24Client'
 import { getPortal, type KeyValue, type PortalRecord } from './tokenStore'
+import { withTimeout } from '#shared/utils/timeout'
 
 /** Сколько ждать вызов токеном установщика; дольше — ошибка, и очередь портала идёт дальше. */
 export const INSTALLER_CALL_TIMEOUT_MS = 60_000
 
 const queues = new Map<string, Promise<void>>()
-
-/** `p` или отказ по истечении `ms`; таймер не держит процесс. */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`installer call timed out after ${ms} ms`)), ms)
-    ;(timer as { unref?: () => void }).unref?.()
-  })
-  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
-}
 
 /**
  * Выполняет `fn` после всех ранее начатых вызовов с тем же ключом. Ошибка или таймаут не
@@ -35,7 +26,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  */
 export function withKeyLock<T>(key: string, fn: () => Promise<T>, timeoutMs = INSTALLER_CALL_TIMEOUT_MS): Promise<T> {
   const prev = queues.get(key) ?? Promise.resolve()
-  const run = prev.then(() => withTimeout(fn(), timeoutMs))
+  const run = prev.then(() => withTimeout(fn(), timeoutMs, `installer call timed out after ${timeoutMs} ms`))
   const tail = run.then(() => undefined, () => undefined)
   queues.set(key, tail)
   void tail.then(() => {

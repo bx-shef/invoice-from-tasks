@@ -21,9 +21,10 @@ import type { RoundingDirection, RoundingStep } from '#shared/domain/time'
 import { roundMoney } from '#shared/domain/money'
 import { grossPrice, lineAmounts, vatForInvoice, vatTotals, type CompanyVat } from '#shared/domain/vat'
 import { addRowCall, replaceRowsCall } from '~/utils/invoiceRequests'
+import { rowUnit } from '~/utils/measures'
 import { describeWrite } from '~/utils/writeOutcome'
 import { connectPortal, type Portal } from './lib/portal'
-import { fetchEntries, fetchTasks, readInvoice, readInvoiceRaw } from './lib/flow'
+import { fetchEntries, fetchTasks, listMeasures, readInvoice, readInvoiceRaw } from './lib/flow'
 
 const env = inject('smokeEnv')
 const fx = inject('fixture')
@@ -262,6 +263,24 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const tax = await taxOf(fx!.invoices.base)
       const totals = vatTotals(rows)
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
+    })
+
+    it('единица строк: предпросмотр (rowUnit) показывает ту, что портал действительно запишет', async () => {
+      const measures = await listMeasures(portal)
+      // «Час» (356) в справочнике тестового портала не заведён — на нём и проверяем подмену.
+      expect(measures.some(m => m.code === 356)).toBe(false)
+      const settings = { ...settingsFor(variant), rounding: 0 as const }
+      const built = buildRows({ mode: 'task', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: null, vatRate: VAT_RATE })
+      for (const code of [fx!.unitCode, null, 356]) {
+        const rows = toProductRows(built.rows.slice(0, 1), { ...settings, measureCode: code })
+        const call = replaceRowsCall(fx!.invoices.base, rows)
+        await portal.call(call.method, call.params)
+        const [row] = (await taxOf(fx!.invoices.base)).rows
+        const expected = rowUnit(measures, code)
+        expect(row?.measureName, `код ${code}`).toBe(expected.symbol)
+        // Предупреждение — только когда единица из настроек в счёт не попадёт.
+        expect(expected.notice !== null, `код ${code}`).toBe(code === 356)
+      }
     })
 
     it('«Добавить» с ошибкой посередине: портал останавливается, итог — «добавлено 1 из 3»', async () => {
