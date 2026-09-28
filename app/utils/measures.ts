@@ -170,13 +170,28 @@ export function measureItems(measures: readonly MeasureOption[] | null, saved: n
 /** Код ОКЕИ «час». */
 export const HOUR_MEASURE = 356
 
+/** Слова, которые сами по себе — час: «час», «часа», «часов», «ч», у системных единиц — латиница. */
+const HOUR_WORDS = new Set(['час', 'часа', 'часов', 'ч', 'h', 'hr', 'hrs', 'hour', 'hours'])
 /**
- * Отдельное слово «час» («Час работы», «человеко-час», «часа», «часов») или обозначение «ч»
- * («ч», «ч.», «чел.-ч», «чел.ч»), а также латиница у системных единиц («h», «hr», «hour»,
- * «man-h»). Слово — не часть другого: «Часть», «Участок», «Часы», «Чашка» — не час; «км/ч» —
- * скорость (перед «ч» — косая черта). Находки /code-review и программиста по PR #26.
+ * Приставки составных единиц рабочего времени: «человеко-час», «нормо-час», «машино-час»,
+ * «чел.-ч», «man-h». Прочие составные — не время: «киловатт-час», «ампер-час» (находка
+ * программиста по PR #26).
  */
-const HOUR_WORD = /(?:^|[\s.-])(?:час(?:а|ов)?|ч\.?|hours?|hrs?|h)(?=$|[\s.,)])/i
+const HOUR_PREFIXES = new Set(['человеко', 'чел', 'нормо', 'машино', 'man'])
+
+/**
+ * Часовая ли единица по названию или обозначению: слово «час» или «ч» отдельно, не после «в»
+ * («километр в час» — скорость), или составное с приставкой рабочего времени. Подстрока — не час:
+ * «Часть», «Участок», «Часы», «км/ч». Разбор по словам, а не регуляркой: так правило читается.
+ */
+export function isHourName(text: string): boolean {
+  const words = text.toLowerCase().split(/\s+/).map(w => w.replace(/[.,;:)]+$/, '')).filter(Boolean)
+  return words.some((word, i) => {
+    if (HOUR_WORDS.has(word)) return words[i - 1] !== 'в' && words[i - 1] !== 'per'
+    const parts = word.split(/[-.]+/).filter(Boolean)
+    return parts.length > 1 && HOUR_WORDS.has(parts.at(-1)!) && parts.slice(0, -1).every(p => HOUR_PREFIXES.has(p))
+  })
+}
 
 /**
  * Единица «час» при «сумма × 1» читалась бы в счёте как «1 час» за всю работу — предупреждаем.
@@ -190,7 +205,7 @@ export function hourInSumMode(priceMode: PriceMode, measureCode: number | null, 
   if (!list) return measureCode === HOUR_MEASURE
   // Кода нет в справочнике — в счёт пойдёт единица по умолчанию, не час (об этом — measureMissing).
   const unit = findMeasure(list, measureCode)
-  return !!unit && (unit.code === HOUR_MEASURE || HOUR_WORD.test(unit.symbol) || HOUR_WORD.test(unit.title))
+  return !!unit && (unit.code === HOUR_MEASURE || isHourName(unit.symbol) || isHourName(unit.title))
 }
 
 /**

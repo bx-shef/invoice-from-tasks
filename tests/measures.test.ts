@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hourInSumMode, MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, readMeasures, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
+import { hourInSumMode, isHourName, MAX_MEASURE_TITLE, measureItems, measureMissing, measureSymbol, readMeasures, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures, rowUnit, type MeasureOption } from '~/utils/measures'
 
 // Ответ catalog.measure.list с тестового портала (замер 2026-09-24): у системных единиц
 // measureTitle и symbol — null, заполнены только международные обозначения.
@@ -234,5 +234,21 @@ describe('readMeasures — весь справочник постранично 
   it('больше потолка — ошибка, а не молча обрезанный справочник', async () => {
     await expect(readMeasures(async start => ({ measures: Array.from({ length: 50 }, (_, i) => unit(start + i + 1)) }), 50, 100))
       .rejects.toThrow('Единиц измерения в портале больше 100')
+  })
+})
+
+describe('isHourName — часовая ли единица по названию или обозначению', () => {
+  it('час: отдельное слово или «ч», составное с приставкой рабочего времени, латиница системных единиц', () => {
+    for (const name of ['ч', 'ч.', 'чел.-ч', 'чел.ч', 'Час работы', 'Час', 'часа', 'Часов', 'IFT smoke: человеко-час',
+      'Человеко-час', 'Нормо-час', 'Машино-час', 'h', 'hr', 'man-h', 'hours']) {
+      expect(isHourName(name), name).toBe(true)
+    }
+  })
+
+  it('не час: подстрока, скорость («в час», «км/ч»), энергия и заряд («киловатт-час», «ампер-час»)', () => {
+    for (const name of ['Часть', 'Участок', 'Запчасть', 'Часы', 'Чашка', 'Мяч', 'Штука', 'км/ч', 'м3/ч',
+      'Километр в час', 'Метр кубический в час', 'Киловатт-час', 'Ампер-час', 'Вольт-ампер-час', 'km per h', 'hat', '']) {
+      expect(isHourName(name), name).toBe(false)
+    }
   })
 })
