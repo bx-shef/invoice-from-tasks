@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  columnDrift,
   grossPrice,
-  netDrift,
+  lineAmounts,
   normalizeVatRate,
   parseMyCompanies,
   parseVatRates,
@@ -116,11 +117,14 @@ describe('vatTotals — итоги как у портала', () => {
     expect(vatTotals(lines)).toEqual({ net: 1655.13, vat: 263.04, total: 1918.17 })
   })
 
-  it('netDrift: строки без НДС (каждая до копеек) против «Без НДС» портала — те же 9 строк дают 2 копейки', () => {
-    // Суммы строк предпросмотра: 255 + 678,98 + 100,03 + 170 × 3 + 0,03 + 11,11 + 100 = 1655,15.
-    const sums = [255, 678.98, 100.03, 170, 170, 170, 0.03, 11.11, 100]
-    expect(netDrift(sums, { net: 1655.13, vat: 263.04, total: 1918.17 })).toBe(0.02)
-    expect(netDrift([140], { net: 140, vat: 28, total: 168 })).toBe(0)
+  it('columnDrift: столбец из строк (каждая до копеек) против итога портала — те же 9 строк', () => {
+    // «Сумма без налога» по строкам: 255 + 678,98 + 100,03 + 170 × 3 + 0,03 + 11,11 + 100 = 1655,15,
+    // у портала — 1655,13: две копейки разницы.
+    const nets = [255, 678.98, 100.03, 170, 170, 170, 0.03, 11.11, 100]
+    expect(columnDrift(nets, 1655.13)).toBe(0.02)
+    expect(columnDrift([140], 140)).toBe(0)
+    // Расхождение вниз — отрицательное: предпросмотр показывает модуль.
+    expect(columnDrift([0.01, 0.01], 0.03)).toBe(-0.01)
   })
 
   it('граница половины копейки — как у портала (замер 2026-09-26, по одной строке в счёте #56)', () => {
@@ -138,6 +142,53 @@ describe('vatTotals — итоги как у портала', () => {
     expect(vatTotals([{ price: 123.45, quantity: 5.5, taxRate: null }, { price: 0.005, quantity: 1, taxRate: null }]))
       .toEqual({ net: 678.98, vat: 0, total: 678.98 })
     expect(vatTotals([])).toEqual({ net: 0, vat: 0, total: 0 })
+  })
+})
+
+describe('lineAmounts — столбцы строки «Сумма налога» и «Сумма», как в товарной части счёта', () => {
+  it('замер 2026-09-28: каждая строка одна в счёте #56 — сумма счёта и налог портала', () => {
+    // [цена без НДС, количество, ставка, сумма без налога, налог, сумма] — налог и сумма — ответ
+    // портала (taxValue, opportunity); сумма без налога — подстрока расчёта предпросмотра.
+    const measured: Array<[number, number, number | null, number, number, number]> = [
+      [170, 1, 20, 170, 34, 204],
+      [170, 5.5, 20, 935, 187, 1122],
+      // Режим «сумма × 1» даёт те же суммы, что и «цена часа × часы».
+      [935, 1, 20, 935, 187, 1122],
+      // Граница половины копейки: налог 0,825 → 0,83, а 4,13 + 0,83 ≠ 4,95 — так же у портала.
+      [2.75, 1.5, 20, 4.13, 0.83, 4.95],
+      [123.45, 5.5, 20, 678.98, 135.8, 814.77],
+      [170, 1.25, null, 212.5, 0, 212.5],
+      [33.33, 0.3333, 20, 11.11, 2.22, 13.33],
+      [10.19, 5.5, 20, 56.05, 11.21, 67.25]
+    ]
+    for (const [price, quantity, taxRate, net, vat, total] of measured) {
+      expect(lineAmounts({ price, quantity, taxRate })).toEqual({ net, vat, total })
+    }
+  })
+
+  it('налог и «Сумма» по строкам сходятся с итогом портала, без налога — на копейки нет', () => {
+    // Те же восемь строк одним счётом: портал вернул 3560,80 и 558,06 (замер 2026-09-28).
+    const lines = [
+      { price: 170, quantity: 1, taxRate: 20 }, { price: 170, quantity: 5.5, taxRate: 20 },
+      { price: 935, quantity: 1, taxRate: 20 }, { price: 2.75, quantity: 1.5, taxRate: 20 },
+      { price: 123.45, quantity: 5.5, taxRate: 20 }, { price: 170, quantity: 1.25, taxRate: null },
+      { price: 33.33, quantity: 0.3333, taxRate: 20 }, { price: 10.19, quantity: 5.5, taxRate: 20 }
+    ]
+    const totals = vatTotals(lines)
+    expect(totals).toMatchObject({ total: 3560.8, vat: 558.06 })
+    const amounts = lines.map(lineAmounts)
+    expect(columnDrift(amounts.map(a => a.vat), totals.vat)).toBe(0)
+    expect(columnDrift(amounts.map(a => a.total), totals.total)).toBe(0)
+    // Без налога: по строкам 3002,77, у портала 3560,80 − 558,06 = 3002,74.
+    expect(columnDrift(amounts.map(a => a.net), totals.net)).toBe(0.03)
+  })
+
+  it('столбец «Сумма» тоже может разойтись: итог — одно округление, строки — каждая своё', () => {
+    // Три строки по 0,01 при 20%: в строке 0,012 → 0,01, в итоге 0,036 → 0,04.
+    const lines = Array.from({ length: 3 }, () => ({ price: 0.01, quantity: 1, taxRate: 20 }))
+    const totals = vatTotals(lines)
+    expect(totals.total).toBe(0.04)
+    expect(columnDrift(lines.map(l => lineAmounts(l).total), totals.total)).toBe(-0.01)
   })
 })
 

@@ -19,7 +19,7 @@ import { defaultSettings, type AppSettings, type PriceMode } from '#shared/domai
 import type { TaskInfo, TimeEntry } from '#shared/domain/tasks'
 import type { RoundingDirection, RoundingStep } from '#shared/domain/time'
 import { roundMoney } from '#shared/domain/money'
-import { grossPrice, vatForInvoice, vatTotals, type CompanyVat } from '#shared/domain/vat'
+import { grossPrice, lineAmounts, vatForInvoice, vatTotals, type CompanyVat } from '#shared/domain/vat'
 import { addRowCall, replaceRowsCall } from '~/utils/invoiceRequests'
 import { describeWrite } from '~/utils/writeOutcome'
 import { connectPortal, type Portal } from './lib/portal'
@@ -44,6 +44,9 @@ function expectedMarkup(kind: keyof typeof MARKUPS, task: SeededTask): number {
   if (kind === 'none') return 0
   return { design: 100, plain: 70, tiny: 70, invoiceSi: 20, invoiceT1f: 70 }[task]
 }
+
+/** Статус задачи по засеву: завершена только «настройка сервера», «звонок» начат. */
+const SEEDED_STATUS: Record<SeededTask, number> = { design: 2, plain: 5, tiny: 3, invoiceSi: 2, invoiceT1f: 2 }
 
 function expectedSeconds(seconds: number, step: RoundingStep, direction: RoundingDirection): number {
   if (step === 0) return seconds
@@ -114,6 +117,10 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     // Регистр тега задаёт портал (тег — общая запись портала), поэтому сравнение — как в markup.ts.
     expect(tasksBySource.get('deal')!.find(t => t.id === fx!.tasks.design)?.tags.map(normalizeTag).sort()).toEqual(['дизайн', 'срочно'])
     expect(entries).toHaveLength(fx!.entries.length)
+    // Коды статусов v2 — те, что замерены (tasks.ts, TASK_STATUS_LABELS): завершённая — 5.
+    for (const t of [...tasksBySource.get('deal')!, ...tasksBySource.get('invoice')!]) {
+      expect(t.status, `задача ${nameOf.get(t.id)}`).toBe(SEEDED_STATUS[nameOf.get(t.id)!])
+    }
   })
 
   it.each(VARIANTS)('$label', (v) => {
@@ -158,6 +165,9 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
     if (conversion) expect(warnings[0]).toContain('проверьте курс')
     expect(warnings.some(w => w.includes('менялась за время задачи'))).toBe(v.mode === 'task' && v.src.source === 'deal')
     expect(warnings.filter(w => w.includes('после округления стало нулём'))).toHaveLength(zeroed)
+    // Незакрытые задачи — предупреждение по каждой, завершённая молчит; строки при этом есть.
+    const open = built.warnings.filter(w => w.message.startsWith('не закрыта')).map(w => w.taskId).sort()
+    expect(open).toEqual(tasks.filter(t => SEEDED_STATUS[nameOf.get(t.id)!] !== 5).map(t => t.id).sort())
   })
 
   it('источник «сделка» у счёта без сделки — остановка до чтения задач', () => {
@@ -230,6 +240,23 @@ describe.skipIf(!env || !fx)('счёт из задач на живом порт�
       const totals = vatTotals([...replaced, ...built.rows])
       expect([tax.opportunity, tax.taxValue]).toEqual([totals.total, totals.vat])
       expect(describeWrite({ mode: 'append', planned: built.rows.length, before: before.rows.length, after: after.rows.length, error: null }).kind).toBe('done')
+    })
+
+    it('столбцы строки предпросмотра («Сумма налога», «Сумма») — ровно то, что портал насчитает этой строке', async () => {
+      // Строка в счёте одна — её налог и сумма и есть taxValue и opportunity счёта: так портал
+      // сверяет построчные суммы, которых отдельными полями в productrow.list нет.
+      const settings = { ...settingsFor(variant), rounding: 0 as const }
+      const built = buildRows({ mode: 'time', tasks: tasksBySource.get('deal')!, entries, rates: ratesFor(fx!.userId), settings, conversion: null, vatRate: VAT_RATE })
+      expect(built.rows.length).toBeGreaterThan(0)
+      // Плюс строка на границе половины копейки: налог 0,825 портал округляет до 0,83 (замер 2026-09-28).
+      const rows = [...built.rows, { ...built.rows[0]!, price: 2.75, quantity: 1.5 }]
+      for (const [i, payload] of toProductRows(rows, settings).entries()) {
+        const { method, params } = replaceRowsCall(fx!.invoices.base, [payload])
+        await portal.call(method, params)
+        const tax = await taxOf(fx!.invoices.base)
+        const amounts = lineAmounts(rows[i]!)
+        expect([tax.opportunity, tax.taxValue], `${rows[i]!.price} × ${rows[i]!.quantity}`).toEqual([amounts.total, amounts.vat])
+      }
     })
 
     it('«Добавить» с ошибкой посередине: портал останавливается, итог — «добавлено 1 из 3»', async () => {

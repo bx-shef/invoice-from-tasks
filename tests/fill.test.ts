@@ -15,7 +15,8 @@ const task: TaskInfo = {
   responsibleId: 7,
   crmBindings: ['D_5'],
   timeSpentInLogs: 5400,
-  tags: []
+  tags: [],
+  status: 5
 }
 
 const entries: TimeEntry[] = [
@@ -244,6 +245,32 @@ describe('общие правила', () => {
     expect(over).toHaveLength(MAX_ROW_NAME)
     expect(over.endsWith('…')).toBe(true)
     expect(clampName('  две\n строки\t ')).toBe('две строки')
+  })
+})
+
+describe('незакрытые задачи — предупреждение, не стоп', () => {
+  it('задача не завершена — строки есть, ошибок нет, предупреждение со статусом и ссылкой на задачу', () => {
+    for (const mode of ['task', 'time'] as const) {
+      const res = buildRows(input({ mode, tasks: [{ ...task, status: 3 }] }))
+      expect(res.rows.length).toBeGreaterThan(0)
+      expect(res.errors).toEqual([])
+      expect(res.warnings).toContainEqual({ taskId: 10, message: 'не закрыта (выполняется) — время в ней ещё может добавиться' })
+    }
+  })
+
+  it('по предупреждению на каждую незакрытую задачу; завершённая и без статуса — молчат', () => {
+    const tasks: TaskInfo[] = [{ ...task, status: 2 }, { ...task, id: 11, status: 5 }, { ...task, id: 12, status: null }, { ...task, id: 13, status: 4 }]
+    const open = buildRows(input({ mode: 'time', tasks })).warnings.filter(w => w.message.startsWith('не закрыта'))
+    expect(open.map(w => [w.taskId, w.message])).toEqual([
+      [10, 'не закрыта (ждёт выполнения) — время в ней ещё может добавиться'],
+      [13, 'не закрыта (ждёт контроля) — время в ней ещё может добавиться']
+    ])
+  })
+
+  it('задача с ошибкой тоже получает предупреждение — человек увидит всё сразу', () => {
+    const res = buildRows(input({ tasks: [{ ...task, status: 6, responsibleId: null }] }))
+    expect(res.errors.length).toBeGreaterThan(0)
+    expect(res.warnings).toContainEqual({ taskId: 10, message: 'не закрыта (отложена) — время в ней ещё может добавиться' })
   })
 })
 

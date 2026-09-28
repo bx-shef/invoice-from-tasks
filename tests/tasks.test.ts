@@ -1,12 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { crmBindingCodes, listRows, parseTask, parseTaskTags, parseTimeEntry, tasksBoundTo } from '#shared/domain/tasks'
+import { crmBindingCodes, listRows, openTaskNotice, parseTask, parseTaskTags, parseTimeEntry, TASK_COMPLETED, tasksBoundTo } from '#shared/domain/tasks'
 import { checkInvoice, invoiceChangedSince, parseInvoice, invoiceProblems } from '#shared/domain/invoice'
 import { defaultSettings } from '#shared/domain/settings'
+
+describe('openTaskNotice — незакрытая задача', () => {
+  it('завершена или статус неизвестен — молчим', () => {
+    expect(TASK_COMPLETED).toBe(5)
+    expect(openTaskNotice(5)).toBeNull()
+    expect(openTaskNotice(null)).toBeNull()
+  })
+
+  it('остальные статусы — предупреждение с названием статуса, как в карточке задачи', () => {
+    expect(openTaskNotice(2)).toBe('не закрыта (ждёт выполнения) — время в ней ещё может добавиться')
+    expect(openTaskNotice(3)).toBe('не закрыта (выполняется) — время в ней ещё может добавиться')
+    expect(openTaskNotice(6)).toBe('не закрыта (отложена) — время в ней ещё может добавиться')
+  })
+
+  it('незнакомый код — всё равно предупреждение, с кодом: портал мог добавить статус', () => {
+    expect(openTaskNotice(42)).toBe('не закрыта (статус 42) — время в ней ещё может добавиться')
+  })
+})
 
 describe('разбор задач', () => {
   it('читает camelCase-ответ tasks.task.list, где числа пришли строками', () => {
     const t = parseTask({ id: '15', title: ' Задача ', responsibleId: '7', ufCrmTask: ['D_5', 'C_2'], timeSpentInLogs: '3600' })
-    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [] })
+    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [], status: null })
   })
 
   it('понимает и UPPER_CASE-ключи', () => {
@@ -28,7 +46,14 @@ describe('разбор задач', () => {
 
   it('живой ответ v2 tasks.task.list (замер): числа строками, timeSpentInLogs при нуле — null', () => {
     const row = { id: '10', title: 'IFT: чужая задача', description: 'Описание', responsibleId: '1', ufCrmTask: ['D_999999'], timeSpentInLogs: null, group: [] }
-    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [] })
+    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [], status: null })
+  })
+
+  it('статус v2 приходит строкой (замер 2026-09-28: «2» у новой задачи, «5» у завершённой) — числом', () => {
+    expect(parseTask({ id: '104', title: 'X', status: '2' })?.status).toBe(2)
+    expect(parseTask({ ID: '134', TITLE: 'X', STATUS: '5' })?.status).toBe(TASK_COMPLETED)
+    expect(parseTask({ id: '1', title: 'X', status: '' })?.status).toBeNull()
+    expect(parseTask({ id: '1', title: 'X', status: 'completed' })?.status).toBeNull()
   })
 
   it('теги приходят в том же списке v2 (select TAGS) и разбираются в parseTask', () => {

@@ -31,6 +31,41 @@ export interface TaskInfo {
    * {@link parseTaskTags}.
    */
   tags: string[]
+  /**
+   * Код статуса REST v2 (`STATUS`, {@link TASK_STATUS_LABELS}); `null` — портал его не отдал.
+   * Незакрытая задача — предупреждение, а не стоп ({@link openTaskNotice}).
+   */
+  status: number | null
+}
+
+/** Статус «завершена» — единственный, при котором задача закрыта. */
+export const TASK_COMPLETED = 5
+
+/**
+ * Названия статусов задачи REST v2 — как в карточке задачи. Замер 2026-09-28 на тестовом портале
+ * (tasks.task.add → start → defer → complete → renew): 2 — новая задача и после «Возобновить»,
+ * 3 — после «Начать», 6 — после «Отложить», 5 — после «Завершить». 1, 4 и 7 — коды ядра, не
+ * замерены: «ждёт контроля» бывает только у задачи с контролем постановщика другим сотрудником,
+ * а на тестовом портале сотрудник один. Документация v2 кодов не перечисляет (в v3 статус — строка).
+ */
+export const TASK_STATUS_LABELS: Readonly<Record<number, string>> = {
+  1: 'новая',
+  2: 'ждёт выполнения',
+  3: 'выполняется',
+  4: 'ждёт контроля',
+  5: 'завершена',
+  6: 'отложена',
+  7: 'отклонена'
+}
+
+/**
+ * Предупреждение о незакрытой задаче или `null`. Не стоп (решение владельца 2026-09-28): счёт
+ * бывает и до закрытия задачи, но в незакрытую ещё может добавиться время — человек должен это
+ * видеть. Статус неизвестен (портал не отдал поле) — молчим: гадать не будем.
+ */
+export function openTaskNotice(status: number | null): string | null {
+  if (status === null || status === TASK_COMPLETED) return null
+  return `не закрыта (${TASK_STATUS_LABELS[status] ?? `статус ${status}`}) — время в ней ещё может добавиться`
 }
 
 export interface TimeEntry {
@@ -90,7 +125,8 @@ export function parseTask(row: Row): TaskInfo | null {
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
-    tags: parseTaskTags(row)
+    tags: parseTaskTags(row),
+    status: toInt(pick(row, 'status', 'STATUS'))
   }
 }
 

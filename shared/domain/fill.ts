@@ -19,7 +19,7 @@ import type { CurrencyConversion } from './currency'
 import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
 import { findRate, type RateEntry } from './rates'
 import type { AppSettings, PriceMode } from './settings'
-import type { TaskInfo, TimeEntry } from './tasks'
+import { openTaskNotice, type TaskInfo, type TimeEntry } from './tasks'
 import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
 import { roundMoney } from './money'
 import { grossPrice, type VatRate } from './vat'
@@ -270,6 +270,11 @@ export function buildRows(input: FillInput): FillResult {
   }
   if (input.mode === 'task') buildTaskRows(input, result)
   else buildTimeRows(input, result)
+  // Незакрытые задачи — предупреждение, не стоп: счёт бывает и до закрытия задачи.
+  for (const task of input.tasks) {
+    const notice = openTaskNotice(task.status)
+    if (notice) result.warnings.push({ taskId: task.id, message: notice })
+  }
   // Пересчёт валюты — первым предупреждением: он касается каждой цены в счёте.
   if (input.conversion && result.rows.length) result.warnings.unshift({ taskId: 0, message: input.conversion.notice })
   return result

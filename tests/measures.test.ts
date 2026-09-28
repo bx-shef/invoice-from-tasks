@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_MEASURE_TITLE, OKEI_NAMES, parseMeasures } from '~/utils/measures'
+import { MAX_MEASURE_TITLE, measureSymbol, OKEI_NAMES, OKEI_SYMBOLS, parseMeasures } from '~/utils/measures'
 
 // Ответ catalog.measure.list с тестового портала (замер 2026-09-24): у системных единиц
 // measureTitle и symbol — null, заполнены только международные обозначения.
@@ -54,5 +54,23 @@ describe('parseMeasures', () => {
 
   it('в справочнике есть час — единица для строк по времени', () => {
     expect(OKEI_NAMES[356]).toBe('Час')
+  })
+})
+
+describe('measureSymbol — единица в столбце «Количество» предпросмотра', () => {
+  it('знакомый код — краткое обозначение, как в счёте', () => {
+    expect(measureSymbol(356)).toBe('ч')
+    expect(measureSymbol(796)).toBe('шт')
+  })
+
+  it('единица не задана или код незнакомый — пусто: портал поставит свою, выдумывать не будем', () => {
+    expect(measureSymbol(null)).toBe('')
+    expect(measureSymbol(undefined)).toBe('')
+    expect(measureSymbol(0)).toBe('')
+    expect(measureSymbol(5002)).toBe('')
+  })
+
+  it('у каждого кода с названием есть обозначение', () => {
+    expect(Object.keys(OKEI_SYMBOLS).sort()).toEqual(Object.keys(OKEI_NAMES).sort())
   })
 })

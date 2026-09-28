@@ -85,21 +85,46 @@ export interface VatTotals {
   total: number
 }
 
+/** Строка счёта для расчёта: цена без НДС, количество, ставка. */
+export interface VatLine {
+  price: number
+  quantity: number
+  taxRate: VatRate
+}
+
+/**
+ * Налог строки до копеек — от цены без НДС: разность «с НДС − без НДС» в double теряет половину
+ * копейки (2,75 × 1,5 при 20%: 0,82499… вместо 0,825), а портал на этой строке дал 0,83 (замер).
+ */
+function lineVat(line: VatLine): number {
+  return line.taxRate === null ? 0 : roundMoney(line.price * line.quantity * line.taxRate / 100)
+}
+
+/**
+ * Суммы одной строки — столбцы «Сумма налога» и «Сумма» (с налогом) товарной части счёта, каждая
+ * до копеек; `net` — сумма без налога (подстрока расчёта). Замер 2026-09-28 на тестовом портале:
+ * восемь строк, каждая одна в счёте, — сумма счёта и налог совпали с `total` и `vat` до копейки
+ * (170 × 1 при 20% — 204 и 34; 170 × 5,5 и 935 × 1 — 1122 и 187; 2,75 × 1,5 — 4,95 и 0,83;
+ * «Без НДС» 170 × 1,25 — 212,5 и 0), tests/vat.test.ts. У строки на границе копейки
+ * `net + vat` может разойтись с `total` на копейку (4,13 + 0,83 ≠ 4,95) — так же и у портала.
+ */
+export function lineAmounts(line: VatLine): VatTotals {
+  const net = roundMoney(line.price * line.quantity)
+  return { net, vat: lineVat(line), total: roundMoney(grossPrice(line.price, line.taxRate) * line.quantity) }
+}
+
 /**
  * Итоги как у портала (замер 2026-09-26: счёт из девяти строк с разными ставками, количествами и
  * копейками и восемь строк на границе половины копейки — сумма и налог совпали до копейки,
  * tests/vat.test.ts): итог — сумма «цена с НДС × количество» по всем строкам, округлённая один
  * раз; НДС — по строкам, каждая округлена до копеек; без НДС — разница.
  */
-export function vatTotals(lines: ReadonlyArray<{ price: number, quantity: number, taxRate: VatRate }>): VatTotals {
+export function vatTotals(lines: readonly VatLine[]): VatTotals {
   let gross = 0
   let vat = 0
   for (const line of lines) {
-    const lineGross = grossPrice(line.price, line.taxRate) * line.quantity
-    gross += lineGross
-    // Налог строки — от цены без НДС: разность «с НДС − без НДС» в double теряет половину копейки
-    // (2,75 × 1,5 при 20%: 0,82499… вместо 0,825), а портал на этой строке дал 0,83 (замер).
-    if (line.taxRate !== null) vat += roundMoney(line.price * line.quantity * line.taxRate / 100)
+    gross += grossPrice(line.price, line.taxRate) * line.quantity
+    vat += lineVat(line)
   }
   const total = roundMoney(gross)
   const tax = roundMoney(vat)
@@ -107,12 +132,13 @@ export function vatTotals(lines: ReadonlyArray<{ price: number, quantity: number
 }
 
 /**
- * На сколько сумма строк без НДС (каждая округлена до копеек) расходится с «Без НДС» портала
- * (итог минус налог по строкам). Копейки неизбежны: портал округляет налог по строкам, а итог —
- * одной суммой; предпросмотр показывает цифры портала и объясняет разницу, а не прячет её.
+ * На сколько сумма столбца (каждая строка округлена до копеек) расходится с итогом портала —
+ * «Сумма без налога» (итог минус налог по строкам) или «Общая сумма» (одно округление). Копейки
+ * неизбежны: предпросмотр показывает цифры портала и объясняет разницу, а не прячет её.
  */
-export function netDrift(rowSums: readonly number[], totals: VatTotals): number {
-  return roundMoney(rowSums.reduce((sum, v) => sum + v, 0) - totals.net)
+export function columnDrift(values: readonly number[], total: number): number {
+  // `|| 0`: разность мелких двоичных хвостов округляется в −0 — это не расхождение.
+  return roundMoney(values.reduce((sum, v) => sum + v, 0) - total) || 0
 }
 
 /** Ставка НДС портала для выбора в настройках. */
