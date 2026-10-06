@@ -11,7 +11,8 @@ import { isAccessCode, parseHookValue } from '#shared/domain/appFieldTypes'
 import {
   batchCommand,
   clientTaskIdFor,
-  documentPdfUrl,
+  documentEntries,
+  documentPdfCheck,
   latestDocuments,
   pdfFileName,
   invoiceBindingCodes,
@@ -332,8 +333,20 @@ export async function loadPublicDocument(req: PublicRequest & { documentId: numb
   // старую версию перебором ID (находка ревью).
   const shown = await readLatestDocuments(call, settings.publicPage.templates, invoice.id)
   if (!shown.some(d => d.id === req.documentId)) return { status: 404, body: { error: 'Документ недоступен' } }
-  const doc = documentPdfUrl(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), settings.publicPage.templates, invoice.id, new URL(access.origin).hostname)
-  if (!doc) return { status: 404, body: { error: 'Документ недоступен' } }
+  // Машинная ссылка — из списка (`select: ['*']` отдаёт `pdfUrlMachine`, документация), иначе —
+  // из document.get. Отказ проверки — в журнал с причиной (без ссылки: в ней токен).
+  const host = new URL(access.origin).hostname
+  const templates = settings.publicPage.templates
+  const listed = documentEntries(await orNull(call('crm.documentgenerator.document.list', { ...documentListParams(invoice.id), select: ['*'] })))
+    .find(d => Number(d.id) === req.documentId)
+  let check = documentPdfCheck(listed ?? null, templates, invoice.id, host)
+  if (!check.ok) {
+    const fromGet = documentPdfCheck(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), templates, invoice.id, host)
+    if (!fromGet.ok) console.warn(`[public] document ${req.documentId} of invoice ${invoice.id}: list — ${check.reason}; get — ${fromGet.reason}`)
+    check = fromGet
+  }
+  if (!check.ok) return { status: 404, body: { error: 'Документ недоступен' } }
+  const doc = check
   const pdf = await deps.fetchPdf(doc.url)
   // Сигнатура PDF: портал при ошибке отдаёт JSON или HTML — клиенту такой «PDF» не нужен.
   if (pdf.byteLength < 5 || new TextDecoder().decode(pdf.subarray(0, 5)) !== '%PDF-') throw new Error('document is not a PDF')
