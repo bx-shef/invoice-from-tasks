@@ -380,8 +380,11 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
  */
 export function withTaskId(name: string, taskId: number, clientTaskId?: string | null): string {
   const prefix = clientTaskId ? `[${taskId}-${clientTaskId}]` : `[${taskId}]`
+  // Приставка этой задачи уже стоит — в любом виде («[102]», «[102-456]», «[102-старый]»): заменяем,
+  // а не добавляем вторую — иначе «[102-456] [102] …» (находка /code-review).
+  const own = new RegExp(`^\\[${taskId}(?:-[A-Za-z0-9_]{1,30})?\\] ?`)
   // Обрезка — в обеих ветках: функция экспортирована, и сырое название длиннее предела тоже придёт.
-  return clampName(name.startsWith(prefix) ? name : `${prefix} ${name}`)
+  return clampName(`${prefix} ${name.replace(own, '')}`)
 }
 
 /**

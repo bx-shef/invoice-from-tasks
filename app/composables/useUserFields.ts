@@ -2,35 +2,47 @@
 // создание полей приложения кнопкой (#34). Параметры — app/utils/userFieldRequests.ts, разбор —
 // shared/domain/userFields.ts. Создавать UF может только администратор — вкладка только для него.
 
-import { missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
+import { fieldNames, missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
 import { collectOffsetPages } from '~/utils/paging'
 import { MAX_USER_FIELDS, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
 
-export type FieldLists = Record<FieldEntity, UserFieldOption[]>
+/** Поля для выбора и коды ВСЕХ UF сущности (для «поле уже есть», missingAppFields). */
+export interface FieldList {
+  options: UserFieldOption[]
+  names: string[]
+}
+export type FieldLists = Record<FieldEntity, FieldList>
 
 export function useUserFields() {
   const b24 = useB24()
 
-  /** Строковые и числовые UF одной сущности, постранично. */
-  async function list(entity: FieldEntity): Promise<UserFieldOption[]> {
+  /** UF одной сущности, постранично. */
+  async function list(entity: FieldEntity): Promise<FieldList> {
+    let firstOfPrev = ''
     const raw = await collectOffsetPages(
       async (start) => {
         const { method, params } = userFieldListCall(entity, start)
         const res = await b24.call<unknown>(method, params)
-        return Array.isArray(res) ? res : []
+        const page = Array.isArray(res) ? res : []
+        // Старый метод мог бы не понять `start` и отдавать ту же страницу — тогда конец списка
+        // (`total` у task.item.userfield.getlist всегда 0, документация), а не круг до потолка.
+        const first = String((page[0] as Record<string, unknown> | undefined)?.FIELD_NAME ?? '')
+        if (start > 0 && first && first === firstOfPrev) return []
+        firstOfPrev = first
+        return page
       },
       USER_FIELDS_PAGE,
       MAX_USER_FIELDS,
       `пользовательских полей больше ${MAX_USER_FIELDS} — список не показываем`
     )
-    return parseUserFields(raw)
+    return { options: parseUserFields(raw), names: fieldNames(raw) }
   }
 
   /** Все три списка; сбой одного не прячет другие — его ошибка в `errors`. */
   async function listAll(): Promise<{ lists: FieldLists, errors: string[] }> {
     const entities: FieldEntity[] = ['task', 'company', 'contact']
     const results = await Promise.allSettled(entities.map(list))
-    const lists: FieldLists = { task: [], company: [], contact: [] }
+    const lists: FieldLists = { task: { options: [], names: [] }, company: { options: [], names: [] }, contact: { options: [], names: [] } }
     const errors: string[] = []
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') lists[entities[i]!] = r.value
@@ -45,9 +57,9 @@ export function useUserFields() {
    */
   async function createMissing(lists: FieldLists): Promise<AppFieldSpec[]> {
     const missing = missingAppFields({
-      task: lists.task.map(f => f.name),
-      company: lists.company.map(f => f.name),
-      contact: lists.contact.map(f => f.name)
+      task: lists.task.names,
+      company: lists.company.names,
+      contact: lists.contact.names
     })
     for (const spec of missing) {
       const { method, params } = userFieldAddCall(spec)

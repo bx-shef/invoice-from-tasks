@@ -17,7 +17,9 @@ export function userFieldListCall(entity: FieldEntity, start: number): RestCall 
     // ORDER и FILTER обязательны (документация метода); пустой фильтр — все поля.
     return { method: 'task.item.userfield.getlist', params: { ORDER: { SORT: 'ASC' }, FILTER: {}, start } }
   }
-  return { method: `crm.${entity}.userfield.list`, params: { order: { SORT: 'ASC' }, filter: {}, start } }
+  // LANG — иначе портал не отдаёт подписи полей, и в списке были бы голые коды (документация
+  // crm.*.userfield.list: подписи — по языку из фильтра).
+  return { method: `crm.${entity}.userfield.list`, params: { order: { SORT: 'ASC' }, filter: { LANG: 'ru' }, start } }
 }
 
 /**

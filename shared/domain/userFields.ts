@@ -25,6 +25,12 @@ export function camelFieldKey(fieldName: string): string {
   return fieldName.toLowerCase().replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())
 }
 
+/**
+ * Типы UF, из которых читаем ID задачи клиента и домен. `double` нет: портал отдаёт его как
+ * «456.0000», и номер задачи молча терялся бы (находка /code-review).
+ */
+export const TEXT_FIELD_TYPES = ['string', 'integer', 'url'] as const
+
 /** Поле для выпадающего списка настроек. */
 export interface UserFieldOption {
   name: string
@@ -64,9 +70,6 @@ export function parseUserFields(raw: unknown, types: readonly string[] = TEXT_FI
   return [...out.values()].sort((a, b) => a.label.localeCompare(b.label, 'ru'))
 }
 
-/** Типы UF, из которых читаем ID задачи клиента и домен. */
-export const TEXT_FIELD_TYPES = ['string', 'integer', 'double', 'url'] as const
-
 /** Приставка подписей полей приложения — по ней их видно в портале (просьба владельца, #34). */
 export const APP_FIELD_LABEL_PREFIX = '[sh::invoice-from-task]'
 
@@ -86,15 +89,26 @@ export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'contact', name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' }
 ]
 
-/** Каких полей приложения нет в портале — их и создаёт кнопка; есть — не трогаем. */
+/**
+ * Каких полей приложения нет в портале — их и создаёт кнопка; есть — не трогаем. `existing` —
+ * коды ВСЕХ UF сущности (`fieldNames`), а не только подходящих для выбора: поле приложения,
+ * изменённое в портале на другой тип, всё равно «есть» — повторное создание дало бы ошибку.
+ */
 export function missingAppFields(existing: Record<AppFieldSpec['entity'], readonly string[]>): AppFieldSpec[] {
   return APP_FIELDS.filter(f => !existing[f.entity].includes(f.name))
+}
+
+/** Коды всех UF из ответа списка — для проверки «поле уже есть» (любой тип). */
+export function fieldNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map(item => normalizeFieldName((item as Record<string, unknown> | null)?.FIELD_NAME)).filter(Boolean)
 }
 
 /** ID задачи клиента из значения UF: строка или число, без пробелов; пусто или мусор — `null`. */
 export function clientTaskIdOf(value: unknown): string | null {
   const v = typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' ? value.trim() : ''
-  // Номер задачи клиента — его ID в портале клиента, но бывает и с приставкой («CL-12»): пропускаем
-  // латиницу, цифры, `-` и `_`, не длиннее 30 — в название строки счёта не попадёт ничего чужого.
-  return /^[A-Za-z0-9_-]{1,30}$/.test(v) ? v : null
+  // Номер задачи клиента — его ID в портале клиента, бывает и с приставкой («CL_12»): пропускаем
+  // латиницу, цифры и `_`, не длиннее 30 — в название строки счёта не попадёт ничего чужого.
+  // `-` нет: это разделитель в «[102-456]», с ним «[102-12-5]» не разобрать (находка /code-review).
+  return /^[A-Za-z0-9_]{1,30}$/.test(v) ? v : null
 }

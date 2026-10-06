@@ -30,7 +30,7 @@ async function load() {
 onMounted(load)
 
 function itemsFor(entity: keyof FieldLists, saved: string) {
-  const list: UserFieldOption[] | null = lists.value ? lists.value[entity] : null
+  const list: UserFieldOption[] | null = lists.value ? lists.value[entity].options : null
   return fieldItems(list, saved)
 }
 
