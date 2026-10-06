@@ -7,6 +7,7 @@ import { parseExistingRows } from './invoice'
 import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, TASK_COMPLETED, TASK_STATUS_LABELS, taskPath } from './tasks'
 import { camelFieldKey, CLIENT_HOOK_FIELD, clientTaskIdOf } from './userFields'
 import { isAccessCode } from './appFieldTypes'
+import type { ApprovalComment, ApprovalMark } from './approval'
 
 /** Ссылка на задачу и её номер у клиента — из приставки названия строки «[123-456] …» (fill.ts). */
 export function rowTaskRef(name: string): { taskId: number, clientTaskId: string | null } | null {
@@ -30,6 +31,8 @@ export interface PublicInvoiceItem {
   myCompanyId: number | null
   /** Сделка счёта (`parentId2`) — задачи сделки тоже относятся к счёту. */
   dealId: number | null
+  /** Ответственный за счёт — на него дело с комментарием клиента (режим согласования). */
+  assignedById: number | null
 }
 
 function itemOf(result: unknown): Record<string, unknown> | null {
@@ -57,7 +60,8 @@ export function parsePublicInvoice(result: unknown): PublicInvoiceItem | null {
     companyId: posInt(o.companyId),
     contactIds: [...new Set(contacts.map(posInt).filter((v): v is number => v !== null))],
     myCompanyId: posInt(o.mycompanyId),
-    dealId: posInt(o.parentId2)
+    dealId: posInt(o.parentId2),
+    assignedById: posInt(o.assignedById)
   }
 }
 
@@ -302,6 +306,8 @@ export interface PublicInvoiceView {
   myCompany: string | null
   rows: PublicRow[]
   tasks: PublicTask[]
+  /** Режим согласования: комментарии клиента и ответы. Не в стадии согласования — нет. */
+  approval?: { comments: ApprovalComment[], mark: ApprovalMark } | null
 }
 
 /** ID задач из строк счёта — без дублей, не больше `max` (у каждой — свои запросы в портал). */

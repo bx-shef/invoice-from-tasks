@@ -20,6 +20,10 @@ export function qrInvoiceId(file: unknown): number | null {
   return m ? Number(m[1]) : null
 }
 
+/** Типы полей счёта для отметки согласования: галка и дата. */
+export const APPROVED_FIELD_TYPES = ['boolean'] as const
+export const APPROVED_AT_FIELD_TYPES = ['date', 'datetime'] as const
+
 /** Типы полей счёта для ссылок: строка и ссылка. */
 export const LINK_FIELD_TYPES = ['string', 'url'] as const
 
@@ -34,7 +38,7 @@ export interface InvoiceFieldOption {
  * Поля счёта для выбора (ответ crm.item.fields: `{ fields: { ufCrm…: { type, title, upperName,
  * isMultiple, isReadOnly } } }`): только свои UF типа строка или ссылка, не множественные.
  */
-export function parseInvoiceLinkFields(result: unknown): InvoiceFieldOption[] {
+export function parseInvoiceLinkFields(result: unknown, types: readonly string[] = LINK_FIELD_TYPES): InvoiceFieldOption[] {
   const fields = (result as { fields?: unknown } | null)?.fields
   if (!fields || typeof fields !== 'object') return []
   const out: InvoiceFieldOption[] = []
@@ -43,7 +47,7 @@ export function parseInvoiceLinkFields(result: unknown): InvoiceFieldOption[] {
     const f = value as Record<string, unknown>
     const name = normalizeFieldName(f.upperName)
     const type = typeof f.type === 'string' ? f.type : ''
-    if (!name.startsWith('UF_') || !(LINK_FIELD_TYPES as readonly string[]).includes(type)) continue
+    if (!name.startsWith('UF_') || !types.includes(type)) continue
     if (f.isMultiple === true || f.isReadOnly === true) continue
     const title = typeof f.title === 'string' && f.title.trim() ? f.title.trim() : name
     out.push({ name, label: title, type })

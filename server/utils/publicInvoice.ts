@@ -31,8 +31,9 @@ import {
   type PublicInvoiceView,
   type PublicTask
 } from '#shared/domain/publicInvoice'
+import { APPROVED_TITLE, approvalMark, approvalUpdates, cleanComment, commentListParams, commentsFrom, commentTodoParams, noteText, type ApprovalComment } from '#shared/domain/approval'
 import { parseSettings, SETTINGS_KEY, type AppSettings } from '#shared/domain/settings'
-import { ACCESS_CODE_FIELD } from '#shared/domain/userFields'
+import { ACCESS_CODE_FIELD, camelFieldKey } from '#shared/domain/userFields'
 import { V3_PREFIX, type RestCall } from './b24Client'
 import { readOption } from './options'
 import type { WindowLimit } from './rateLimit'
@@ -77,8 +78,13 @@ export interface PublicDeps {
   allowAttempt: (ipKey: string, portalKey: string) => boolean
   /** Исчерпан ли лимит неверных кодов счёта (без учёта попытки). */
   locked: (invoiceKey: string) => boolean
-  /** Учесть неверный код счёта. */
-  fail: (invoiceKey: string) => void
+  /** Учесть неверный код счёта; возвращает, сколько неверных кодов у счёта в окне. */
+  fail: (invoiceKey: string) => number
+  /**
+   * Написать в чат проблем портала (настройки → `problemChat`). Не задано — уведомлений нет.
+   * `key` — для ограничения частоты: одно сообщение на ключ в окне (publicContext).
+   */
+  notify?: (call: RestCall, key: string, text: string) => Promise<void>
   cache: { get: (key: string) => PublicInvoiceView | undefined, set: (key: string, view: PublicInvoiceView) => void }
   /**
    * Задачи клиента его вебхуком (этап 4): значение поля «Вебхук клиента» → расшифровка и чтение.
@@ -103,10 +109,26 @@ export function codeEquals(a: string, b: string): boolean {
 
 /** Подходит ли код хоть одному клиенту счёта (компании или любому контакту — решение владельца). */
 export function matchesClient(code: string, clients: PublicClient[]): boolean {
+  return matchedClient(code, clients) !== null
+}
+
+/** Чей код подошёл (первый из совпавших) — автор комментария; никто — `null`. */
+export function matchedClient(code: string, clients: PublicClient[]): PublicClient | null {
   // Со всеми, без раннего выхода: время ответа не зависит от того, чей код подошёл.
-  let ok = false
-  for (const c of clients) if (c.accessCode && codeEquals(code, c.accessCode)) ok = true
-  return ok
+  let found: PublicClient | null = null
+  for (const c of clients) if (c.accessCode && codeEquals(code, c.accessCode) && !found) found = c
+  return found
+}
+
+/** Сколько неверных кодов на счёт — повод написать в чат проблем (и ещё раз — при блокировке). */
+export const PROBLEM_FAILS_NOTICE = 5
+
+/** Текст в чат проблем о неверных кодах счёта; не порог — `null`. */
+export function failNotice(count: number, invoiceId: number, invoiceTitle: string, ip: string): string | null {
+  const name = invoiceTitle ? `«${invoiceTitle}» (#${invoiceId})` : `#${invoiceId}`
+  if (count >= PUBLIC_FAILS_PER_INVOICE.max) return `[b]Расшифровка счёта ${name} закрыта на час[/b]\nНеверных кодов доступа — ${count} за час. Последняя попытка — с адреса ${ip}. Клиент с верным кодом тоже не войдёт, пока не пройдёт час.`
+  if (count === PROBLEM_FAILS_NOTICE) return `[b]Неверные коды к расшифровке счёта ${name}[/b]\n${count} неверных кодов доступа за час. Последняя попытка — с адреса ${ip}. Если это не клиент — проверьте, у кого есть ссылка; код можно сменить в карточке компании или контакта.`
+  return null
 }
 
 /**
@@ -186,6 +208,12 @@ export interface PublicAccess {
   invoice: PublicInvoiceItem
   clients: PublicClient[]
   settings: AppSettings
+  /** Счёт в стадии согласования: клиент может писать комментарии. */
+  approval: boolean
+  /** Чей код подошёл: название компании или контакта. */
+  author: string
+  /** Счёт как отдал crm.item.get (`item`) — UF отметки согласования. */
+  raw: Record<string, unknown>
 }
 
 /**
@@ -207,10 +235,22 @@ export async function verifyPublicAccess(req: PublicRequest, deps: PublicDeps): 
   const portal = await deps.portal(req.domain)
   if (!portal) return notFound()
   const { call } = portal
+  // Неверный код при известном портале: на пороге — сообщение в чат проблем (сбой чата вход не ломает).
+  const failAndNotify = (invoice: PublicInvoiceItem | null): PublicResult => {
+    const count = deps.fail(invoiceKey)
+    const text = failNotice(count, req.invoiceId, invoice?.title ?? '', req.ip)
+    if (text && deps.notify) {
+      void deps.notify(call, `${invoiceKey}:${count >= PUBLIC_FAILS_PER_INVOICE.max ? 'lock' : 'fails'}`, text).catch((e: unknown) => {
+        console.warn(`[public] problem chat: ${e instanceof Error ? e.message : String(e)}`)
+      })
+    }
+    return { status: 404, body: { error: NOT_FOUND } }
+  }
 
   // До кода — два запроса: счёт и один пакет клиентов. Настройки — после (они нужны только дальше).
-  const invoice = parsePublicInvoice(await orNull(call('crm.item.get', { entityTypeId: 31, id: req.invoiceId })))
-  if (!invoice) return notFound()
+  const rawInvoice = await orNull(call('crm.item.get', { entityTypeId: 31, id: req.invoiceId }))
+  const invoice = parsePublicInvoice(rawInvoice)
+  if (!invoice) return failAndNotify(null)
   const cmd: Record<string, string> = {}
   if (invoice.companyId) cmd.company = batchCommand('crm.item.get', { entityTypeId: 4, id: invoice.companyId })
   for (const [i, id] of invoice.contactIds.slice(0, MAX_PUBLIC_CONTACTS).entries()) {
@@ -220,14 +260,18 @@ export async function verifyPublicAccess(req: PublicRequest, deps: PublicDeps): 
   const clients = Object.entries(got)
     .map(([key, value]) => parsePublicClient(key === 'company' ? 'company' : 'contact', value, ACCESS_CODE_FIELD))
     .filter((c): c is PublicClient => c !== null)
-  if (!matchesClient(req.code, clients)) return notFound()
+  const matched = matchedClient(req.code, clients)
+  if (!matched) return failAndNotify(invoice)
 
   // Код верный — только теперь говорим о стадии: иначе по ответу узнавали бы, есть ли счёт.
   const settings = parseSettings(await readOption(call, SETTINGS_KEY))
-  if (!settings.publicPage.stages.includes(invoice.stageId)) {
+  const approval = !!settings.publicPage.approvalStage && settings.publicPage.approvalStage === invoice.stageId
+  if (!approval && !settings.publicPage.stages.includes(invoice.stageId)) {
     return { status: 200, body: { state: 'closed', text: settings.publicPage.closedText } }
   }
-  return { call, origin: portal.origin, invoice, clients, settings }
+  const item = (rawInvoice as { item?: unknown } | null)?.item
+  const raw = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+  return { call, origin: portal.origin, invoice, clients, settings, approval, author: matched.title, raw }
 }
 
 function isResult(v: PublicAccess | PublicResult): v is PublicResult {
@@ -240,8 +284,16 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
   const { call, invoice, clients, settings } = access
   const portal = { origin: access.origin }
   const cacheKey = `${req.domain}:${invoice.id}`
+  // Комментарии — всегда свежие (не из кеша): клиент только что написал или менеджер ответил.
+  const withApproval = async (view: PublicInvoiceView): Promise<PublicResult> => ({
+    status: 200,
+    body: {
+      state: 'open',
+      invoice: { ...view, approval: access.approval ? { comments: await readComments(call, invoice.id), mark: approvalMark(access.raw, settings.publicPage, camelFieldKey) } : null }
+    }
+  })
   const cached = deps.cache.get(cacheKey)
-  if (cached) return { status: 200, body: { state: 'open', invoice: cached } }
+  if (cached) return withApproval(cached)
 
   const { task: clientTaskField, taskDomain } = settings.clientFields
 
@@ -286,7 +338,61 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     documents
   }
   deps.cache.set(cacheKey, view)
-  return { status: 200, body: { state: 'open', invoice: view } }
+  return withApproval(view)
+}
+
+/**
+ * Комментарии клиента и ответы (режим согласования): дела-todo счёта с приставкой, по последним —
+ * заметки одним пакетом. Сбой портала — пусто и строка в журнале: расшифровка важнее.
+ */
+export async function readComments(call: RestCall, invoiceId: number): Promise<ApprovalComment[]> {
+  try {
+    const raw = await call('crm.activity.list', commentListParams(invoiceId))
+    const comments = commentsFrom(Array.isArray(raw) ? raw : (raw as { result?: unknown } | null)?.result ?? raw)
+    // Нет заметки — у команды ошибка «не найдено», ключа в ответе нет: ответа ещё нет.
+    const notes = await batch(call, Object.fromEntries(comments.map(c => [`n${c.id}`, batchCommand('crm.timeline.note.get', { ownerTypeId: 31, ownerId: invoiceId, itemType: 2, itemId: c.id })])))
+    return comments.map(c => ({ ...c, answer: noteText(notes[`n${c.id}`]) }))
+  } catch (e) {
+    console.warn(`[public] comments of invoice ${invoiceId}: ${e instanceof Error ? e.message : String(e)}`)
+    return []
+  }
+}
+
+/** Комментариев на счёт — 20 в час: клиенту хватит, а таймлайн не завалят. */
+export const PUBLIC_COMMENTS_PER_INVOICE: WindowLimit = { max: 20, windowMs: 60 * 60_000 }
+
+export interface CommentDeps extends PublicDeps {
+  /** Учесть комментарий в лимите счёта; `false` — исчерпано. */
+  allowComment: (invoiceKey: string) => boolean
+  now: () => Date
+}
+
+export type CommentResult = { status: 200, body: { ok: true } } | { status: 400 | 403 | 404 | 429 | 503, body: { error: string } } | PublicResult
+
+/**
+ * Комментарий клиента (режим согласования): та же проверка доступа, что у страницы; счёт — в стадии
+ * согласования; дело — на ответственного за счёт, срок +1 час. Пишет сервер токеном установщика —
+ * у клиента нет фрейма (решение владельца). Сбой записи — в чат проблем.
+ */
+export async function postPublicComment(req: PublicRequest & { text: unknown }, deps: CommentDeps): Promise<CommentResult> {
+  const text = cleanComment(req.text)
+  if (!text) return { status: 400, body: { error: 'Комментарий пустой или длиннее 2000 символов' } }
+  const access = await verifyPublicAccess(req, deps)
+  if (isResult(access)) return access.status === 200 ? { status: 403, body: { error: 'Счёт сейчас не на согласовании' } } : access
+  if (!access.approval) return { status: 403, body: { error: 'Счёт сейчас не на согласовании' } }
+  const { call, invoice } = access
+  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много комментариев — попробуйте через час' } }
+  try {
+    await call('crm.activity.todo.add', commentTodoParams(invoice.id, invoice.assignedById, access.author, text, deps.now()))
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e)
+    console.error(`[public] comment to invoice ${invoice.id} failed: ${reason}`)
+    if (deps.notify) {
+      void deps.notify(call, `pub-comment-fail:${req.domain}:${invoice.id}`, `[b]Комментарий клиента к счёту «${invoice.title}» (#${invoice.id}) не записан[/b]\nПортал ответил: ${reason}. Клиент видит ошибку и может повторить; свяжитесь с ним.`).catch(() => {})
+    }
+    return { status: 503, body: { error: 'Не удалось отправить комментарий — попробуйте позже' } }
+  }
+  return { status: 200, body: { ok: true } }
 }
 
 /** Документы счёта (этап 5): новые первыми, фильтр по счёту — `entityTypeId` + `entityId` (документация метода). */
@@ -356,4 +462,35 @@ export async function loadPublicDocument(req: PublicRequest & { documentId: numb
   const file = fileKindOf(pdf)
   if (!file || (kind === 'pdf') !== (file.type === 'application/pdf')) throw new Error(`document ${kind} has unexpected content`)
   return { status: 200, pdf, contentType: file.type, fileName: pdfFileName(doc.title, req.documentId).replace(/\.pdf$/, `.${file.ext}`) }
+}
+
+/**
+ * Кнопка «Согласовать» (режим согласования): галка и момент — в поля счёта из настроек, дело
+ * «Счёт согласован клиентом» — ответственному. Уже согласовано — ничего не пишем. Пишет сервер
+ * токеном установщика (решение владельца, как и комментарии).
+ */
+export async function postPublicApprove(req: PublicRequest, deps: CommentDeps): Promise<CommentResult> {
+  const access = await verifyPublicAccess(req, deps)
+  if (isResult(access)) return access.status === 200 ? { status: 403, body: { error: 'Счёт сейчас не на согласовании' } } : access
+  if (!access.approval) return { status: 403, body: { error: 'Счёт сейчас не на согласовании' } }
+  const { call, invoice, settings } = access
+  const mark = approvalMark(access.raw, settings.publicPage, camelFieldKey)
+  if (!mark.enabled) return { status: 403, body: { error: 'Согласование со страницы не настроено' } }
+  if (mark.approved) return { status: 200, body: { ok: true } }
+  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много действий — попробуйте через час' } }
+  const now = deps.now()
+  try {
+    await call('crm.item.update', { entityTypeId: 31, id: invoice.id, fields: approvalUpdates(settings.publicPage, camelFieldKey, now) })
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e)
+    console.error(`[public] approve of invoice ${invoice.id} failed: ${reason}`)
+    if (deps.notify) {
+      void deps.notify(call, `pub-approve-fail:${req.domain}:${invoice.id}`, `[b]Согласование счёта «${invoice.title}» (#${invoice.id}) не записано[/b]\nКлиент нажал «Согласовать», портал ответил: ${reason}. Проверьте поля согласования в настройках приложения.`).catch(() => {})
+    }
+    return { status: 503, body: { error: 'Не удалось отметить согласование — попробуйте позже' } }
+  }
+  // Дело — чтобы ответственный узнал сразу; его сбой согласование не отменяет.
+  await call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, 'Клиент нажал «Согласовать» на странице расшифровки счёта.', now), title: access.author ? `${APPROVED_TITLE}: ${access.author}` : APPROVED_TITLE })
+    .catch((e: unknown) => console.warn(`[public] approve todo of invoice ${invoice.id}: ${e instanceof Error ? e.message : String(e)}`))
+  return { status: 200, body: { ok: true } }
 }

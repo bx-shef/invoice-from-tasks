@@ -8,9 +8,14 @@ import { invoiceLinkUpdates, parseInvoiceLinkFields, publicInvoiceUrl, publicQrU
 export function useInvoiceLinks() {
   const b24 = useB24()
 
+  /** Все поля счёта (crm.item.fields) — настройки разбирают их по типам (parseInvoiceLinkFields). */
+  async function rawFields(): Promise<unknown> {
+    return b24.call<unknown>('crm.item.fields', { entityTypeId: INVOICE_ENTITY_TYPE_ID })
+  }
+
   /** Поля счёта типа строка или ссылка — для выбора в настройках. */
   async function fields(): Promise<InvoiceFieldOption[]> {
-    return parseInvoiceLinkFields(await b24.call<unknown>('crm.item.fields', { entityTypeId: INVOICE_ENTITY_TYPE_ID }))
+    return parseInvoiceLinkFields(await rawFields())
   }
 
   /**
@@ -29,5 +34,5 @@ export function useInvoiceLinks() {
     return count
   }
 
-  return { fields, sync }
+  return { fields, rawFields, sync }
 }

@@ -15,7 +15,7 @@ describe('приставка строки', () => {
 describe('счёт и клиенты', () => {
   it('счёт: стадия, дата, клиент', () => {
     expect(parsePublicInvoice({ item: { id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', begindate: '2026-10-01T03:00:00+03:00', currencyId: 'BYN', opportunity: '120.5', companyId: 3, contactIds: [7, 7, 0], mycompanyId: 1 } }))
-      .toEqual({ id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1, dealId: null })
+      .toEqual({ id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1, dealId: null, assignedById: null })
     expect(parsePublicInvoice({ item: {} })).toBeNull()
   })
 
@@ -97,10 +97,10 @@ describe('привязка задачи к счёту', () => {
 
 describe('настройки publicPage', () => {
   it('по умолчанию — ни одной стадии и фраза по умолчанию; мусор отбрасывается', () => {
-    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '' })
+    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '', approvalStage: '', approvedField: '', approvedAtField: '' })
     expect(parseSettings({ publicPage: { stages: ['DT31_1:N', 'DT31_1:N', 'bad stage', 5], closedText: '  ', templates: [3, '4', 3, 0, 'x'] } }).publicPage)
-      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT, templates: [3, 4], linkField: '', qrField: '' })
-    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните', templates: [7], linkField: 'UF_CRM_SMART_INVOICE_LINK', qrField: 'UF_CRM_SMART_INVOICE_QR' } }
+      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT, templates: [3, 4], linkField: '', qrField: '', approvalStage: '', approvedField: '', approvedAtField: '' })
+    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните', templates: [7], linkField: 'UF_CRM_SMART_INVOICE_LINK', qrField: 'UF_CRM_SMART_INVOICE_QR', approvalStage: 'DT31_1:S', approvedField: 'UF_CRM_SMART_INVOICE_OK', approvedAtField: 'UF_CRM_SMART_INVOICE_OK_AT' } }
     expect(parseSettings(serializeSettings(s)).publicPage).toEqual(s.publicPage)
   })
 })
