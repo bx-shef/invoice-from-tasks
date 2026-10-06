@@ -19,6 +19,7 @@ import {
   rowTaskIds,
   stageName,
   taskBoundTo,
+  type ClientTaskView,
   type PublicClient,
   type PublicInvoiceView,
   type PublicTask
@@ -72,6 +73,11 @@ export interface PublicDeps {
   /** Учесть неверный код счёта. */
   fail: (invoiceKey: string) => void
   cache: { get: (key: string) => PublicInvoiceView | undefined, set: (key: string, view: PublicInvoiceView) => void }
+  /**
+   * Задачи клиента его вебхуком (этап 4): значение поля «Вебхук клиента» → расшифровка и чтение.
+   * `null` — вебхук не открылся (чужой портал, ключ, домен вне списка). Не задано — этап выключен.
+   */
+  clientTasks?: (hookValue: string, portalDomain: string, ids: number[]) => Promise<{ host: string, tasks: Map<number, ClientTaskView> } | null>
 }
 
 export interface PublicRequest {
@@ -131,6 +137,34 @@ async function readRows(call: RestCall, invoiceId: number): Promise<{ rows: unkn
     if (page.length < 50) return { rows: out, truncated: false }
   }
   return { rows: out, truncated: true }
+}
+
+/**
+ * Задачи клиента (этап 4): вебхуки — из полей компании и контактов счёта, задача ищется по
+ * номеру и домену из своей задачи (`clientTaskUrl`) — вебхук берётся только того портала, чей
+ * домен указан в задаче. Сбой портала клиента не роняет страницу: остаётся ссылка.
+ */
+export async function attachClientTasks(tasks: PublicTask[], clients: PublicClient[], portalDomain: string, deps: Pick<PublicDeps, 'clientTasks'>): Promise<void> {
+  if (!deps.clientTasks) return
+  const wanted = new Map<string, number[]>()
+  for (const t of tasks) {
+    if (!t.clientTaskUrl || !t.clientTaskId || !/^\d+$/.test(t.clientTaskId)) continue
+    const host = new URL(t.clientTaskUrl).hostname
+    wanted.set(host, [...(wanted.get(host) ?? []), Number(t.clientTaskId)])
+  }
+  if (!wanted.size) return
+  const done = new Set<string>()
+  for (const hook of new Set(clients.map(c => c.hook).filter((v): v is string => !!v))) {
+    const host = hook.split('|')[1] ?? ''
+    const ids = wanted.get(host)
+    if (!ids || done.has(host)) continue
+    const got = await deps.clientTasks(hook, portalDomain, ids).catch(() => null)
+    if (!got || got.host !== host) continue
+    done.add(host)
+    for (const t of tasks) {
+      if (t.clientTaskUrl && new URL(t.clientTaskUrl).hostname === host) t.clientTask = got.tasks.get(Number(t.clientTaskId)) ?? null
+    }
+  }
 }
 
 export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): Promise<PublicResult> {
@@ -195,6 +229,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
     if (task) tasks.push(task)
   }
+  await attachClientTasks(tasks, clients, req.domain, deps)
   const view: PublicInvoiceView = {
     truncated: rowsRead.truncated,
     title: invoice.title,

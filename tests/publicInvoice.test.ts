@@ -21,7 +21,7 @@ describe('счёт и клиенты', () => {
 
   it('клиент: код только похожий на код; домен — хост без схемы', () => {
     const c = parsePublicClient('contact', { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: 'ABCDEFGHJK' } }, 'UF_CRM_SH_IFT_ACCESS_CODE')
-    expect(c).toEqual({ kind: 'contact', id: 7, title: 'Иван Петров', accessCode: 'ABCDEFGHJK' })
+    expect(c).toEqual({ kind: 'contact', id: 7, title: 'Иван Петров', accessCode: 'ABCDEFGHJK', hook: null })
     expect(parsePublicClient('company', { item: { id: 3, title: 'А', ufCrmShIftAccessCode: 'short' } }, 'UF_CRM_SH_IFT_ACCESS_CODE')?.accessCode).toBeNull()
     expect(clientDomainOf('https://Client.bitrix24.ru/')).toBe('client.bitrix24.ru')
     expect(clientDomainOf('not a domain')).toBeNull()

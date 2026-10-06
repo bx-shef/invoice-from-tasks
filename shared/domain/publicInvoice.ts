@@ -4,8 +4,8 @@
 // исключение из «права CRM не расширяем», решение владельца в #34).
 
 import { parseExistingRows } from './invoice'
-import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, taskPath } from './tasks'
-import { camelFieldKey, clientTaskIdOf } from './userFields'
+import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, TASK_COMPLETED, TASK_STATUS_LABELS, taskPath } from './tasks'
+import { camelFieldKey, CLIENT_HOOK_FIELD, clientTaskIdOf } from './userFields'
 import { isAccessCode } from './appFieldTypes'
 
 /** Ссылка на задачу и её номер у клиента — из приставки названия строки «[123-456] …» (fill.ts). */
@@ -84,12 +84,14 @@ export function taskBoundTo(taskRaw: unknown, codes: string[]): boolean {
   return bound.some(b => wanted.has(b))
 }
 
-/** Компания или контакт клиента: подпись и код доступа из UF. */
+/** Компания или контакт клиента: подпись, код доступа и вебхук портала клиента (зашифрованный) из UF. */
 export interface PublicClient {
   kind: 'company' | 'contact'
   id: number
   title: string
   accessCode: string | null
+  /** Значение поля «Вебхук клиента» как есть (`ift1|домен|шифротекст`); расшифровывает сервер. */
+  hook?: string | null
 }
 
 /** Домен портала клиента из UF: только имя хоста, без схемы и пути. */
@@ -112,7 +114,8 @@ export function parsePublicClient(kind: PublicClient['kind'], result: unknown, c
     kind,
     id,
     title,
-    accessCode: isAccessCode(code) ? code : null
+    accessCode: isAccessCode(code) ? code : null,
+    hook: typeof o[camelFieldKey(CLIENT_HOOK_FIELD)] === 'string' && o[camelFieldKey(CLIENT_HOOK_FIELD)] ? String(o[camelFieldKey(CLIENT_HOOK_FIELD)]) : null
   }
 }
 
@@ -126,6 +129,69 @@ export interface PublicTask {
   /** Номер задачи у клиента и ссылка на неё в его портале (если известен домен). */
   clientTaskId: string | null
   clientTaskUrl: string | null
+  /** Задача в портале клиента, прочитанная его вебхуком (этап 4); `null` — вебхука нет или не прочиталась. */
+  clientTask?: ClientTaskView | null
+}
+
+/** Задача клиента для страницы: постановщик со стороны клиента, состояние, дата принятия. */
+export interface ClientTaskView {
+  title: string
+  description: string
+  results: string[]
+  creatorName: string
+  /** Аватар постановщика — только https-адрес; иначе `null`. */
+  creatorIcon: string | null
+  /** Состояние по-русски: «принята» (завершена), «требует принятия» (ждёт контроля), «поставлена» … */
+  state: string
+  /** Дата принятия (`closedDate` завершённой задачи), `YYYY-MM-DD`; не принята — `null`. */
+  acceptedAt: string | null
+}
+
+/**
+ * Состояние задачи клиента словами владельца (#34): завершена — «принята», ждёт контроля —
+ * «требует принятия», новая или ждёт выполнения — «поставлена», остальное — как в карточке.
+ */
+export function clientTaskState(status: number | null): string {
+  if (status === TASK_COMPLETED) return 'принята'
+  if (status === 4) return 'требует принятия'
+  if (status === 1 || status === 2) return 'поставлена'
+  return status !== null ? (TASK_STATUS_LABELS[status] ?? `статус ${status}`) : 'неизвестно'
+}
+
+/** https-адрес картинки из ответа чужого портала; другое (javascript:, data:, http:) — `null`. */
+export function httpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const u = new URL(value)
+    return u.protocol === 'https:' && !u.username && !u.password ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Задача клиента из tasks.task.get его вебхуком (замер 2026-10-06: `{ task: { title, status,
+ * closedDate, creator: { name, icon } } }`). Ответ чужого портала — недоверенный: текст без HTML
+ * и с пределами, картинка — только https.
+ */
+export function parseClientTask(raw: unknown, results: unknown): ClientTaskView | null {
+  const t = raw && typeof raw === 'object' && 'task' in raw ? (raw as { task: unknown }).task : raw
+  const o = t && typeof t === 'object' ? t as Record<string, unknown> : null
+  if (!o || !posInt(o.id ?? o.ID)) return null
+  const creator = o.creator && typeof o.creator === 'object' ? o.creator as Record<string, unknown> : {}
+  const statusNum = Number(o.status ?? o.STATUS)
+  const status = Number.isInteger(statusNum) && statusNum > 0 ? statusNum : null
+  const closed = typeof o.closedDate === 'string' ? o.closedDate.slice(0, 10) : ''
+  const list = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
+  return {
+    title: plainText(o.title ?? o.TITLE).slice(0, 500),
+    description: plainText(o.description ?? o.DESCRIPTION),
+    results: (Array.isArray(list) ? list : []).map(r => plainText((r as Record<string, unknown> | null)?.text)).filter(Boolean).slice(0, 20),
+    creatorName: plainText(creator.name).slice(0, 200),
+    creatorIcon: httpsUrl(creator.icon),
+    state: clientTaskState(status),
+    acceptedAt: status === TASK_COMPLETED && /^\d{4}-\d{2}-\d{2}$/.test(closed) ? closed : null
+  }
 }
 
 /** Предел текста задачи на странице — описание бывает огромным. */

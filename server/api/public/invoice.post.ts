@@ -5,6 +5,8 @@
 import { getPortalByDomain } from '../../utils/tokenStore'
 import { clientIp, installerCallFor, portalStore } from '../../utils/requestContext'
 import { isAllowedPortalHost, parseSelfHostedHosts } from '../../utils/b24Host'
+import { openClientHook } from '../../utils/clientHook'
+import { readClientTasks } from '../../utils/clientPortal'
 import { loadPublicInvoice, PUBLIC_404_FLOOR_MS, PUBLIC_CACHE_MS, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL } from '../../utils/publicInvoice'
 import { SlidingWindow } from '../../utils/rateLimit'
 import { ipBucketKey } from '../../utils/requestLimits'
@@ -39,6 +41,16 @@ export default defineEventHandler(async (event) => {
         if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value!)
         cache.set(key, { at: Date.now(), view })
       }
+    },
+    // Вебхук расшифровывается только здесь: привязан к нашему порталу (AAD) и снова проверен SSRF-гардом.
+    clientTasks: async (hookValue, portalDomain, ids) => {
+      let hook: { url: string, host: string }
+      try {
+        hook = openClientHook(hookValue, portalDomain)
+      } catch {
+        return null
+      }
+      return { host: hook.host, tasks: await readClientTasks(fetch, hook.url, ids) }
     },
     portal: async (d) => {
       // SSRF-гард: в портал идём только по разрешённым доменам, и только если он нас установил.
