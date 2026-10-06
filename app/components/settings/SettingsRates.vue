@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// Ставки часа: «сотрудник — ставка — с даты».
+// Ставки часа: «сотрудник — ставка — с даты», по желанию — для клиента (компании или контакта).
 // Сохраняются отдельно от прочих настроек: их меняют и назначенные не-администраторы.
 import { MAX_RATE, validateRates, type RateEntry } from '#shared/domain/rates'
 import { formatUsage } from '#shared/domain/storageBudget'
 
 const app = useAppSettings()
 const users = useUsers()
+const clients = useRateClients()
 const toast = useToast()
 
 const draft = ref<RateEntry[]>(app.rates.value.map(r => ({ ...r })))
@@ -16,7 +17,10 @@ const usage = computed(() => app.usageWith({ rates: draft.value }))
 const currency = computed(() => app.settings.value.currency || 'валюта не выбрана')
 
 onMounted(async () => {
-  await users.load(draft.value.map(r => r.userId))
+  await Promise.all([
+    users.load(draft.value.map(r => r.userId)),
+    clients.load(draft.value.flatMap(r => r.client ? [r.client] : []))
+  ])
 })
 
 function today(): string {
@@ -27,6 +31,19 @@ async function addRow() {
   const userId = await users.pickOne()
   if (!userId) return
   draft.value.push({ userId, rate: 0, from: today() })
+}
+
+async function pickClient(row: RateEntry) {
+  try {
+    const code = await clients.pickOne()
+    if (code) row.client = code
+  } catch (e) {
+    toast.add({ title: 'Не удалось выбрать клиента', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
+  }
+}
+
+function clearClient(row: RateEntry) {
+  delete row.client
 }
 
 function removeRow(index: number) {
@@ -54,8 +71,12 @@ async function save() {
   <div class="space-y-4">
     <p class="text-sm opacity-80">
       Ставка за час без наценки, в валюте ставок ({{ currency }}). Действует с указанной даты до следующей
-      ставки того же сотрудника. Счёт считается по ставке на дату записи времени; счёт в другой валюте
+      ставки того же сотрудника для того же клиента (или следующей общей). Счёт считается по ставке на дату записи времени; счёт в другой валюте
       пересчитывается по курсу портала.
+    </p>
+    <p class="text-sm opacity-80">
+      Для отдельного клиента ставку можно задать иначе: выберите у строки компанию или контакт. В счёте
+      этого клиента она важнее общей — сначала ставка для компании счёта, затем для контакта, затем общая. Нет клиента у счёта — общая, с предупреждением.
     </p>
 
     <div class="overflow-x-auto">
@@ -64,6 +85,9 @@ async function save() {
           <tr class="text-left opacity-70">
             <th class="py-2 pr-3 font-medium">
               Сотрудник
+            </th>
+            <th class="py-2 pr-3 font-medium">
+              Клиент
             </th>
             <th class="py-2 pr-3 font-medium">
               Ставка
@@ -82,6 +106,26 @@ async function save() {
             <tr class="align-top border-t border-(--ui-color-divider-less)">
               <td class="py-2 pr-3">
                 {{ users.label(row.userId) }}
+              </td>
+              <td class="py-2 pr-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span :class="row.client ? '' : 'opacity-70'">{{ row.client ? clients.label(row.client) : 'Все клиенты' }}</span>
+                  <B24Button
+                    size="xs"
+                    color="air-tertiary"
+                    :label="row.client ? 'Сменить' : 'Выбрать'"
+                    :aria-label="`Клиент ставки — ${users.label(row.userId)}`"
+                    @click="pickClient(row)"
+                  />
+                  <B24Button
+                    v-if="row.client"
+                    size="xs"
+                    color="air-tertiary"
+                    label="Для всех"
+                    :aria-label="`Сделать ставку общей — ${users.label(row.userId)}`"
+                    @click="clearClient(row)"
+                  />
+                </div>
               </td>
               <td class="py-2 pr-3 w-36">
                 <B24InputNumber
@@ -110,7 +154,7 @@ async function save() {
             </tr>
             <tr v-if="rowIssues(index).length">
               <td
-                colspan="4"
+                colspan="5"
                 class="pb-2 text-sm text-(--ui-color-accent-main-alert)"
               >
                 {{ rowIssues(index).join('; ') }}
@@ -119,7 +163,7 @@ async function save() {
           </template>
           <tr v-if="!draft.length">
             <td
-              colspan="4"
+              colspan="5"
               class="py-4 opacity-70"
             >
               Ставок пока нет

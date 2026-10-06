@@ -7,6 +7,7 @@
 //   ставку ОТВЕТСТВЕННОГО, действующую на дату последней записи времени; если за период задачи
 //   ставка менялась — предупреждение;
 // • тип 2 «время» — одна строка на запись времени; ставка того, кто списал время, на дату записи;
+// • ставка клиента (компании, затем контакта счёта) важнее общей ставки сотрудника (rates.ts);
 // • дата записи — дата её создания (tasks.ts);
 // • наценка — по тегам задачи, первое совпадение, иначе «на всё» (markup.ts);
 // • валюта счёта ≠ валюте ставок — цены пересчитываются по курсу портала (currency.ts);
@@ -17,7 +18,7 @@
 
 import type { CurrencyConversion } from './currency'
 import { applyMarkup, resolveMarkup, type MarkupSource } from './markup'
-import { findRate, type RateEntry } from './rates'
+import { clientKey, findRate, type RateEntry } from './rates'
 import type { AppSettings, PriceMode } from './settings'
 import { openTaskStatus, type TaskInfo, type TimeEntry } from './tasks'
 import { formatDuration, formatRuDate, roundSeconds, secondsToHours } from './time'
@@ -38,6 +39,8 @@ export interface FillInput {
   tasks: TaskInfo[]
   entries: TimeEntry[]
   rates: RateEntry[]
+  /** Клиенты счёта для ставок клиента (invoiceClients): компания, затем контакты. */
+  clients?: readonly string[]
   settings: AppSettings
   /** Пересчёт в валюту счёта; `null`/нет — валюты совпадают. */
   conversion?: CurrencyConversion | null
@@ -178,7 +181,8 @@ function priceFor(input: FillInput, task: TaskInfo, rate: RateEntry): Pick<Draft
 }
 
 function rateLabel(rate: RateEntry | null): string {
-  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}` : 'нет ставки'
+  const who = rate?.client ? (rate.client.startsWith('CO_') ? ' (ставка компании)' : ' (ставка контакта)') : ''
+  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}${who}` : 'нет ставки'
 }
 
 /**
@@ -189,11 +193,12 @@ function rateLabel(rate: RateEntry | null): string {
 function rateChangeWarning(input: FillInput, userId: number, dates: string[], applied: RateEntry): string | null {
   const versions = new Map<string, RateEntry | null>()
   for (const date of dates) {
-    const rate = findRate(input.rates, userId, date)
-    versions.set(rate ? rate.from : '', rate)
+    const rate = findRate(input.rates, userId, date, input.clients)
+    // Ключ — клиент и дата: ставка клиента и общая с одной даты — разные версии.
+    versions.set(rate ? `${clientKey(rate)}|${rate.from}` : '', rate)
   }
   if (versions.size < 2) return null
-  const chain = [...versions.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, r]) => rateLabel(r))
+  const chain = [...versions.values()].sort((a, b) => (a?.from ?? '').localeCompare(b?.from ?? '')).map(rateLabel)
   return `ставка ${userLabel(input, userId)} менялась за время задачи: ${chain.join(' → ')}; применена ${applied.rate} — на дату последней записи`
 }
 
@@ -231,7 +236,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     if (total > 0 && !lastDate) problems.push('у записей времени нет даты — не на что выбрать ставку')
     let rate: RateEntry | null = null
     if (task.responsibleId !== null && lastDate) {
-      rate = findRate(input.rates, task.responsibleId, lastDate)
+      rate = findRate(input.rates, task.responsibleId, lastDate, input.clients)
       if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(lastDate)}`)
     }
     if (problems.length || !rate || task.responsibleId === null || !lastDate) {
@@ -284,7 +289,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
       if (!entry.date) problems.push('у записи времени нет даты')
       let rate: RateEntry | null = null
       if (entry.userId !== null && entry.date) {
-        rate = findRate(input.rates, entry.userId, entry.date)
+        rate = findRate(input.rates, entry.userId, entry.date, input.clients)
         if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${formatRuDate(entry.date)}`)
       }
       if (problems.length || !rate || entry.userId === null || !entry.date) {
@@ -333,6 +338,14 @@ export function buildRows(input: FillInput): FillResult {
     if (status) result.openTasks.push({ taskId: task.id, status })
   }
   result.outliers = timeOutliers(result.rows)
+  // Клиента у счёта нет (или не прочитался), а у сотрудников строк есть ставки клиентов —
+  // предупреждение: иначе общая ставка вместо клиентской прошла бы молча.
+  if (!input.clients?.length) {
+    const users = new Set(result.rows.map(r => r.userId))
+    if (input.rates.some(r => r.client && users.has(r.userId))) {
+      result.warnings.push({ taskId: 0, message: 'у счёта не указан клиент (компания или контакт) — применены общие ставки, ставки клиентов не учтены' })
+    }
+  }
   // Пересчёт валюты — первым предупреждением: он касается каждой цены в счёте.
   if (input.conversion && result.rows.length) result.warnings.unshift({ taskId: 0, message: input.conversion.notice })
   return result

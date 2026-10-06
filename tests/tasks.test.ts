@@ -146,10 +146,14 @@ describe('разбор записей времени', () => {
 describe('счёт', () => {
   it('читает crm.item.get и связь со сделкой', () => {
     const inv = parseInvoice({ item: { id: 8, title: 'Счёт №8', currencyId: 'rub', parentId2: '5', mycompanyId: '20', opportunity: '1000' } })
-    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, myCompanyId: 20, opportunity: 1000 })
+    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, myCompanyId: 20, companyId: null, contactIds: [], opportunity: 1000 })
     // Реквизиты не выбраны — портал отдаёт 0 (замер 2026-09-26).
     expect(parseInvoice({ item: { id: 8, mycompanyId: 0 } })?.myCompanyId).toBeNull()
     expect(parseInvoice({ item: { id: 8 } })?.myCompanyId).toBeNull()
+    // Клиент: компания и контакты; `contactIds` важнее устаревшего `contactId`, нули и дубли — прочь.
+    expect(parseInvoice({ item: { id: 8, companyId: '12', contactIds: [5, '6', 0, 5], contactId: 9 } }))
+      .toMatchObject({ companyId: 12, contactIds: [5, 6] })
+    expect(parseInvoice({ item: { id: 8, companyId: 0, contactId: '9' } })).toMatchObject({ companyId: null, contactIds: [9] })
   })
 
   it('нет сделки или валюты ставок — останавливаемся до чтения задач; другая валюта счёта — не стоп', () => {
@@ -186,6 +190,8 @@ describe('счёт: одна проверка и сверка перед зап�
 
   it('invoiceChangedSince: реквизиты, валюта, сделка — повод собрать заново; прочее — нет', () => {
     expect(invoiceChangedSince(base, { ...base, title: 'Новое название', opportunity: 999 })).toBeNull()
+    expect(invoiceChangedSince(base, { ...base, companyId: 3 })).toMatch(/клиент/)
+    expect(invoiceChangedSince(base, { ...base, contactIds: [4] })).toMatch(/клиент/)
     expect(invoiceChangedSince(base, { ...base, myCompanyId: 22 })).toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании» — соберите строки заново')
     expect(invoiceChangedSince(base, { ...base, myCompanyId: null, currencyId: 'USD', dealId: null }))
       .toBe('После сбора строк в счёте изменились: «Реквизиты вашей компании», валюта, сделка — соберите строки заново')
