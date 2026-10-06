@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Установка приложения в портал. Порядок — как в эталоне client-bank-alfa-by:
-// проверить права → встройка → подписка на события → installFinish.
+// проверить права → встройка → типы полей приложения → подписка на события → installFinish.
+// Типы полей («Код доступа», «Вебхук клиента», #34) регистрируются, если их нет; сами ПОЛЯ при
+// установке не создаются — только кнопкой в настройках (решение владельца).
 // ⚠ event.bind ДО installFinish: иначе ONAPPINSTALL (токены для записи ставок) не придёт.
 // ⚠ Встройка не видна в интерфейсе, пока установка не завершена (документация встройки).
 // ⚠ После installFinish портал перезагружает страницу — показывать что-то после него бесполезно
@@ -8,7 +10,8 @@
 // Страницу можно открыть и после установки (смена адреса сервера): тогда встройка и подписки
 // обновляются, а installFinish не вызывается — вне режима установки SDK на нём падает.
 
-import { eventBindCalls, missingScopes, placementBindCall, staleEventHandlers, stalePlacements } from '~/utils/install'
+import { absoluteHandler, eventBindCalls, missingScopes, placementBindCall, staleEventHandlers, stalePlacements } from '~/utils/install'
+import { fieldTypeCalls } from '#shared/domain/appFieldTypes'
 
 type StepState = 'wait' | 'run' | 'ok' | 'warn' | 'fail'
 interface Step {
@@ -23,6 +26,7 @@ const config = useRuntimeConfig()
 const steps = ref<Step[]>([
   { key: 'scope', label: 'Проверка прав приложения', state: 'wait' },
   { key: 'placement', label: 'Пункт «Заполнить из задач» в карточке счёта', state: 'wait' },
+  { key: 'fieldTypes', label: 'Типы полей «Код доступа» и «Вебхук клиента»', state: 'wait' },
   { key: 'events', label: 'Подписка на события установки и удаления', state: 'wait' },
   { key: 'finish', label: 'Завершение установки', state: 'wait' }
 ])
@@ -55,6 +59,20 @@ async function runInstall() {
     await b24.call('placement.unbind', stale).catch(() => undefined)
   }
   mark('placement', 'ok', bind ? undefined : 'уже был зарегистрирован')
+
+  // Сбой типов полей — не повод срывать установку счёта из задач: без типов не работают поля «Код
+  // доступа» и «Вебхук клиента» (кнопка «Создать поля» их не создаст, публичной страницы не будет).
+  // Повторное открытие установки (эта же страница) зарегистрирует их ещё раз.
+  mark('fieldTypes', 'run')
+  try {
+    const types = await b24.call<unknown[]>('userfieldtype.list')
+    if (!absoluteHandler(siteUrl, '/')) throw new Error('у приложения нет https-адреса (NUXT_PUBLIC_SITE_URL)')
+    const calls = fieldTypeCalls(types, path => absoluteHandler(siteUrl, path))
+    for (const call of calls) await b24.call(call.method, call.params)
+    mark('fieldTypes', 'ok', calls.length ? undefined : 'уже были зарегистрированы')
+  } catch (e) {
+    mark('fieldTypes', 'warn', `не зарегистрированы: ${e instanceof Error ? e.message : String(e)} — откройте установку ещё раз`)
+  }
 
   mark('events', 'run')
   const existing = await b24.call<unknown[]>('event.get')

@@ -3,6 +3,8 @@
 // в настройках; поля приложения создаются ТОЛЬКО кнопкой в настройках (решение владельца, #34) —
 // при установке и удалении приложение UF не трогает.
 
+import { ACCESS_CODE_TYPE, CLIENT_HOOK_TYPE } from './appFieldTypes'
+
 /** Код UF: `UF_` и заглавные латиница, цифры, `_`; предел — 50 символов (документация crm.*.userfield.add). */
 const FIELD_NAME_RE = /^UF_[A-Z0-9_]{1,47}$/
 
@@ -79,14 +81,25 @@ export interface AppFieldSpec {
   /** Полный код с приставкой `UF_` (у CRM — `UF_CRM_`: её добавляет портал). */
   name: string
   label: string
-  type: 'string'
+  /**
+   * Тип: `string` — системный; иначе короткий код своего типа приложения (appFieldTypes.ts) —
+   * полный `rest_<ID приложения>_<код>` строится при создании (`fullTypeId`).
+   */
+  type: 'string' | typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE
 }
+
+/** Коды полей своих типов у компании и контакта — одинаковые: публичная страница ищет по ним. */
+export const ACCESS_CODE_FIELD = 'UF_CRM_SH_IFT_ACCESS_CODE'
+export const CLIENT_HOOK_FIELD = 'UF_CRM_SH_IFT_CLIENT_HOOK'
 
 /** Поля, которые создаёт кнопка «Создать поля». */
 export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'task', name: 'UF_SH_IFT_CLIENT_TASK', label: `${APP_FIELD_LABEL_PREFIX} ID Клиентской задачи`, type: 'string' },
-  { entity: 'company', name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
-  { entity: 'contact', name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' }
+  ...(['company', 'contact'] as const).flatMap((entity): AppFieldSpec[] => [
+    { entity, name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
+    { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
+    { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
+  ])
 ]
 
 /**

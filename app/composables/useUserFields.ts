@@ -4,7 +4,7 @@
 
 import { fieldNames, missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
 import { collectOffsetPages } from '~/utils/paging'
-import { MAX_USER_FIELDS, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
+import { MAX_USER_FIELDS, needsAppId, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
 
 /** Поля для выбора и коды ВСЕХ UF сущности (для «поле уже есть», missingAppFields). */
 export interface FieldList {
@@ -61,8 +61,17 @@ export function useUserFields() {
       company: lists.company.names,
       contact: lists.contact.names
     })
+    // Поля своих типов — с полным кодом `rest_<ID приложения>_<код>`: ID — из app.info, и проверяем
+    // его ДО первой записи. Строковые поля — первыми: незарегистрированный тип (портал, где
+    // установку не открывали после обновления) не должен оставить их несозданными (находка /code-review).
+    let appId: number | undefined
+    if (missing.some(needsAppId)) {
+      appId = Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID)
+      if (!Number.isInteger(appId) || appId <= 0) throw new Error('портал не вернул ID приложения (app.info) — поля не созданы')
+    }
+    missing.sort((a, b) => Number(needsAppId(a)) - Number(needsAppId(b)))
     for (const spec of missing) {
-      const { method, params } = userFieldAddCall(spec)
+      const { method, params } = userFieldAddCall(spec, appId)
       await b24.call(method, params)
     }
     return missing

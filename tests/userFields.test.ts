@@ -94,12 +94,14 @@ describe('поля приложения', () => {
   it('«поле уже есть» — по всем кодам, любого типа', () => {
     const raw = [{ FIELD_NAME: 'UF_SH_IFT_CLIENT_TASK', USER_TYPE_ID: 'integer', MULTIPLE: 'Y' }, { FIELD_NAME: 'x' }, null]
     expect(fieldNames(raw)).toEqual(['UF_SH_IFT_CLIENT_TASK'])
-    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [] }).map(f => f.entity)).toEqual(['company', 'contact'])
+    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [] }).every(f => f.entity !== 'task')).toBe(true)
   })
 
   it('создаём только отсутствующие', () => {
     expect(missingAppFields({ task: [], company: [], contact: [] })).toEqual(APP_FIELDS)
-    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: ['UF_CRM_SH_IFT_CLIENT_DOMAIN'], contact: [] }).map(f => f.entity)).toEqual(['contact'])
+    const all = ['UF_CRM_SH_IFT_CLIENT_DOMAIN', 'UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_SH_IFT_CLIENT_HOOK']
+    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: all, contact: all.slice(1) }))
+      .toEqual([{ entity: 'contact', name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: '[sh::invoice-from-task] Домен Битрикс24 клиента', type: 'string' }])
   })
 
   it('подписи с приставкой приложения; CRM — без UF_CRM_ в коде', () => {
