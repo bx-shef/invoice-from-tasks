@@ -177,10 +177,10 @@ export function useInvoiceFill() {
     const rows: Record<string, unknown>[] = []
     for (const code of codes) {
       // Теги приходят в этом же списке (TASK_SELECT → TAGS), отдельных запросов нет.
-      const { method, params } = taskListCall(code)
+      const { method, params } = taskListCall(code, settings.value.clientFields.task)
       rows.push(...await b24.callList<Record<string, unknown>>(method, params, { ...TASK_LIST_OPTIONS }))
     }
-    return tasksBoundTo(rows, codes)
+    return tasksBoundTo(rows, codes, settings.value.clientFields.task)
   }
 
   /**

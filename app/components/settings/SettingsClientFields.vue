@@ -1,0 +1,135 @@
+<script setup lang="ts">
+// Поля клиента (#34): UF задачи с ID задачи клиента (идёт в название строки «[123-456] Задача») и
+// UF компании и контакта с доменом портала клиента (для публичной страницы счёта). Поля
+// приложения создаются только здесь, кнопкой — при установке и удалении приложение UF не трогает.
+import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
+import type { AppSettings } from '#shared/domain/settings'
+import { fieldItems, withAppFields } from '~/utils/clientFieldSettings'
+import type { FieldLists } from '~/composables/useUserFields'
+
+const settings = defineModel<AppSettings>({ required: true })
+
+const userFields = useUserFields()
+const toast = useToast()
+
+/** `null` — списки не прочитаны: в пунктах только сохранённые коды, без пометки «нет в портале». */
+const lists = ref<FieldLists | null>(null)
+const loadErrors = ref<string[]>([])
+const loading = ref(true)
+const creating = ref(false)
+
+async function load() {
+  loading.value = true
+  const res = await userFields.listAll()
+  // Хоть один список не прочитался — не помечаем поля «нет в портале» (сбой ≠ поля нет).
+  lists.value = res.errors.length ? null : res.lists
+  loadErrors.value = res.errors
+  loading.value = false
+}
+
+onMounted(load)
+
+function itemsFor(entity: keyof FieldLists, saved: string) {
+  const list: UserFieldOption[] | null = lists.value ? lists.value[entity].options : null
+  return fieldItems(list, saved)
+}
+
+async function createFields() {
+  if (!lists.value) return
+  creating.value = true
+  try {
+    const created = await userFields.createMissing(lists.value)
+    settings.value.clientFields = withAppFields(settings.value.clientFields)
+    toast.add({
+      title: created.length ? `Создано полей: ${created.length}` : 'Поля приложения уже есть',
+      description: 'Поля выбраны в настройках — сохраните настройки',
+      color: 'air-primary-success'
+    })
+  } catch (e) {
+    toast.add({ title: 'Не удалось создать поля', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
+  } finally {
+    creating.value = false
+    await load()
+  }
+}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <p class="text-sm opacity-80">
+      Выберите поля, где хранятся данные клиента. Если таких полей нет, создайте поля приложения
+      кнопкой ниже — при установке приложение поля не создаёт и при удалении не стирает.
+    </p>
+
+    <B24Alert
+      v-if="loadErrors.length"
+      color="air-primary-alert"
+      title="Не удалось прочитать список полей"
+      :description="loadErrors.join('; ')"
+    />
+
+    <B24FormField
+      label="ID задачи клиента — поле задачи"
+      description="Номер задачи в портале клиента. При включённом «ID задачи в названии» строка счёта будет «[123-456] Задача»: 123 — ваша задача, 456 — задача клиента"
+    >
+      <B24SelectMenu
+        v-model="settings.clientFields.task"
+        :items="itemsFor('task', settings.clientFields.task)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="client-field-task"
+      />
+    </B24FormField>
+
+    <B24FormField
+      label="Домен Битрикс24 клиента — поле компании"
+      description="Например, client.bitrix24.ru — для публичной страницы счёта"
+    >
+      <B24SelectMenu
+        v-model="settings.clientFields.companyDomain"
+        :items="itemsFor('company', settings.clientFields.companyDomain)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="client-field-company-domain"
+      />
+    </B24FormField>
+
+    <B24FormField
+      label="Домен Битрикс24 клиента — поле контакта"
+      description="Для счетов на контакт без компании"
+    >
+      <B24SelectMenu
+        v-model="settings.clientFields.contactDomain"
+        :items="itemsFor('contact', settings.clientFields.contactDomain)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="client-field-contact-domain"
+      />
+    </B24FormField>
+
+    <div class="space-y-2">
+      <B24Button
+        color="air-secondary"
+        label="Создать поля приложения"
+        :loading="creating"
+        :disabled="creating || loading || !lists"
+        data-testid="client-fields-create"
+        @click="createFields"
+      />
+      <ul class="text-sm opacity-70 list-disc pl-5">
+        <li
+          v-for="f in APP_FIELDS"
+          :key="`${f.entity}-${f.name}`"
+        >
+          {{ f.entity === 'task' ? 'Задача' : f.entity === 'company' ? 'Компания' : 'Контакт' }}: «{{ f.label }}» ({{ f.name }})
+        </li>
+      </ul>
+    </div>
+  </div>
+</template>

@@ -57,10 +57,12 @@ export function productRowListCall(invoiceId: number, start: number): RestCall {
 
 /**
  * Задачи с кодом привязки: tasks.task.list. ⚠ Фильтр ОБЪЕКТОМ — форма REST v2; массив (форма v3)
- * портал отвергает с 400 (замер 2026-09-24).
+ * портал отвергает с 400 (замер 2026-09-24). `clientTaskField` — UF с ID задачи клиента из
+ * настроек (#34): добавляется в `select`, иначе портал его не отдаст.
  */
-export function taskListCall(code: string): RestCall {
-  return { method: 'tasks.task.list', params: { filter: { UF_CRM_TASK: code }, select: TASK_SELECT } }
+export function taskListCall(code: string, clientTaskField = ''): RestCall {
+  const select = clientTaskField ? [...TASK_SELECT, clientTaskField] : TASK_SELECT
+  return { method: 'tasks.task.list', params: { filter: { UF_CRM_TASK: code }, select } }
 }
 
 /** Страница записей времени: task.elapseditem.getlist, параметры ПОЗИЦИОННЫЕ (документация). */

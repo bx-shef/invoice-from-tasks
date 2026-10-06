@@ -123,7 +123,7 @@ const measureModel = computed({
         v-model="settings.taskIdInName"
         class="mt-3"
         label="Добавлять ID задачи в начало названия: «[102] Сверстать лендинг»"
-        description="Строки счёта легко сверить с задачами; клиент тоже увидит номер"
+        description="Строки счёта легко сверить с задачами; клиент тоже увидит номер. С полем «ID задачи клиента» (вкладка «Поля клиента») — «[102-456] Сверстать лендинг»"
         data-testid="settings-task-id-in-name"
       />
     </B24FormField>

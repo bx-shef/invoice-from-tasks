@@ -6,6 +6,7 @@
 import { isRoundingDirection, isRoundingStep, type RoundingDirection, type RoundingStep } from './time'
 import { cleanTag, MAX_TAG_LENGTH, normalizePercent, normalizeTag, type MarkupSettings, type TagMarkupRule } from './markup'
 import { MAX_COMPANY_TITLE, normalizeVatRate, type CompanyVat } from './vat'
+import { normalizeFieldName } from './userFields'
 
 /** Ключ общих настроек в app.option. Суффикс версии — на случай несовместимой смены формата. */
 export const SETTINGS_KEY = 'ift_settings_v1'
@@ -58,6 +59,15 @@ export interface AppSettings {
    */
   taskIdInName: boolean
   /**
+   * Поля клиента (#34): код UF задачи с ID задачи клиента — в название строки он идёт вторым:
+   * «[123-456] Задача»; код UF компании и контакта с доменом портала клиента. `''` — не выбрано.
+   */
+  clientFields: {
+    task: string
+    companyDomain: string
+    contactDomain: string
+  }
+  /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
    * — это просто сброс в `null`, и улучшение системного промпта доходит до всех порталов.
    */
@@ -90,6 +100,7 @@ export function defaultSettings(): AppSettings {
     vat: [],
     naming: 'plain',
     taskIdInName: false,
+    clientFields: { task: '', companyDomain: '', contactDomain: '' },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -184,6 +195,7 @@ export function parseSettings(raw: unknown): AppSettings {
   const d = defaultSettings()
   const markup = asObject(o.markup)
   const prompts = asObject(o.prompts)
+  const clientFields = asObject(o.clientFields)
   // ⚠ Без обрезки до проверки: `text(…, 3)` превращал «RUBLES» в «RUB» и пропускал мусор как валюту.
   const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : ''
   return {
@@ -202,6 +214,11 @@ export function parseSettings(raw: unknown): AppSettings {
     vat: parseCompanyVat(o.vat),
     naming: o.naming === 'ai' ? 'ai' : 'plain',
     taskIdInName: o.taskIdInName === true,
+    clientFields: {
+      task: normalizeFieldName(clientFields.task),
+      companyDomain: normalizeFieldName(clientFields.companyDomain),
+      contactDomain: normalizeFieldName(clientFields.contactDomain)
+    },
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
       timeBlock: nullablePrompt(prompts.timeBlock)

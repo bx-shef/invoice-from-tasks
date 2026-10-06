@@ -54,6 +54,8 @@ export interface DraftRow {
   /** Ключ строки: `t<taskId>` (тип 1) или `e<entryId>` (тип 2). По нему приходят имена от BitrixGPT. */
   key: string
   taskId: number
+  /** ID задачи клиента (UF из настроек) — вторым в «[123-456]» названия. */
+  clientTaskId?: string | null
   entryId?: number
   userId: number
   name: string
@@ -255,6 +257,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     result.rows.push({
       key: `t${task.id}`,
       taskId: task.id,
+      clientTaskId: task.clientTaskId,
       userId: task.responsibleId,
       name: clampName(task.title),
       seconds: total,
@@ -306,6 +309,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
       result.rows.push({
         key: `e${entry.id}`,
         taskId: task.id,
+        clientTaskId: task.clientTaskId,
         entryId: entry.id,
         userId: entry.userId,
         name: clampName(entry.comment),
@@ -369,14 +373,18 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
 }
 
 /**
- * Название строки с ID задачи в начале: «[102] Сверстать лендинг»; длиннее предела — обрезка.
- * Название уже начинается с «[102]» (так иногда называют задачи) — второй раз не добавляем,
+ * Название строки с ID задачи в начале: «[102] Сверстать лендинг», с ID задачи клиента —
+ * «[102-456] Сверстать лендинг» (#34); длиннее предела — обрезка.
+ * Название уже начинается с этой приставки (так иногда называют задачи) — второй раз не добавляем,
  * иначе клиент увидел бы «[102] [102] …» (находка программиста панели).
  */
-export function withTaskId(name: string, taskId: number): string {
-  const prefix = `[${taskId}]`
+export function withTaskId(name: string, taskId: number, clientTaskId?: string | null): string {
+  const prefix = clientTaskId ? `[${taskId}-${clientTaskId}]` : `[${taskId}]`
+  // Приставка этой задачи уже стоит — в любом виде («[102]», «[102-456]», «[102-старый]»): заменяем,
+  // а не добавляем вторую — иначе «[102-456] [102] …» (находка /code-review).
+  const own = new RegExp(`^\\[${taskId}(?:-[A-Za-z0-9_]{1,30})?\\] ?`)
   // Обрезка — в обеих ветках: функция экспортирована, и сырое название длиннее предела тоже придёт.
-  return clampName(name.startsWith(prefix) ? name : `${prefix} ${name}`)
+  return clampName(`${prefix} ${name.replace(own, '')}`)
 }
 
 /**
@@ -384,7 +392,7 @@ export function withTaskId(name: string, taskId: number): string {
  * последним шагом, после названий от BitrixGPT: предпросмотр и счёт показывают одно и то же.
  */
 export function applyTaskIds(rows: DraftRow[], enabled: boolean): DraftRow[] {
-  return enabled ? rows.map(row => ({ ...row, name: withTaskId(row.name, row.taskId) })) : rows
+  return enabled ? rows.map(row => ({ ...row, name: withTaskId(row.name, row.taskId, row.clientTaskId) })) : rows
 }
 
 /**
