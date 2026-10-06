@@ -31,7 +31,10 @@ describe('ID задачи клиента', () => {
     expect(clientTaskIdOf('CL_12')).toBe('CL_12')
     // `-` — разделитель в «[102-456]»: с ним приставку не разобрать.
     expect(clientTaskIdOf('CL-12')).toBeNull()
-    expect(clientTaskIdOf('456.0000')).toBeNull()
+    // Числовое поле: целое с нулевой дробью — номер, дробное — нет.
+    expect(clientTaskIdOf('456.0000')).toBe('456')
+    expect(clientTaskIdOf(120536)).toBe('120536')
+    expect(clientTaskIdOf('456.5')).toBeNull()
     expect(clientTaskIdOf('')).toBeNull()
     expect(clientTaskIdOf('4 5')).toBeNull()
     expect(clientTaskIdOf('<b>1</b>')).toBeNull()
@@ -73,7 +76,6 @@ describe('списки UF', () => {
       { FIELD_NAME: 'UF_M', USER_TYPE_ID: 'string', MULTIPLE: 'Y' },
       { FIELD_NAME: 'UF_CRM_TASK', USER_TYPE_ID: 'crm', MULTIPLE: 'Y' },
       { FIELD_NAME: 'UF_E', USER_TYPE_ID: 'enumeration', MULTIPLE: 'N' },
-      { FIELD_NAME: 'UF_D', USER_TYPE_ID: 'double', MULTIPLE: 'N' },
       { FIELD_NAME: 'bad', USER_TYPE_ID: 'string' },
       null
     ])

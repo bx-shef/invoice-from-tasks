@@ -27,6 +27,24 @@ export function fullTypeId(appId: number, code: string): string {
   return `rest_${appId}_${code}`
 }
 
+/**
+ * Полные коды зарегистрированных типов из userfieldtype.list: код → `rest_<…>_<код>`. Если портал
+ * отдал короткий код — строим полный по ID приложения (`appId`); нет и его — типа в ответе нет.
+ */
+export function registeredTypeIds(existing: unknown, appId: number | null): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const item of Array.isArray(existing) ? existing : []) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const raw = String(o.USER_TYPE_ID ?? o.userTypeId ?? '').toLowerCase()
+    const code = shortCode(raw)
+    if (!APP_FIELD_TYPES.some(t => t.code === code)) continue
+    if (/^rest_\d+_/.test(raw)) out.set(code, raw)
+    else if (appId && appId > 0) out.set(code, fullTypeId(appId, code))
+  }
+  return out
+}
+
 /** Короткий код из записи userfieldtype.list: портал может отдать и полный `rest_<id>_<код>`. */
 function shortCode(value: unknown): string {
   return String(value ?? '').toLowerCase().replace(/^rest_\d+_/, '')
