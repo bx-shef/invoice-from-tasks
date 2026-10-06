@@ -84,13 +84,12 @@ export function taskBoundTo(taskRaw: unknown, codes: string[]): boolean {
   return bound.some(b => wanted.has(b))
 }
 
-/** Компания или контакт клиента: подпись, код доступа и домен портала клиента из UF. */
+/** Компания или контакт клиента: подпись и код доступа из UF. */
 export interface PublicClient {
   kind: 'company' | 'contact'
   id: number
   title: string
   accessCode: string | null
-  domain: string | null
 }
 
 /** Домен портала клиента из UF: только имя хоста, без схемы и пути. */
@@ -100,11 +99,8 @@ export function clientDomainOf(value: unknown): string | null {
   return /^[a-z0-9.-]{3,253}$/.test(v) && v.includes('.') ? v : null
 }
 
-/**
- * Разбор компании или контакта (crm.item.get 4 / 3). `codeField` — поле кода доступа,
- * `domainField` — поле домена из настроек (`''` — не выбрано).
- */
-export function parsePublicClient(kind: PublicClient['kind'], result: unknown, codeField: string, domainField: string): PublicClient | null {
+/** Разбор компании или контакта (crm.item.get 4 / 3). `codeField` — поле кода доступа. */
+export function parsePublicClient(kind: PublicClient['kind'], result: unknown, codeField: string): PublicClient | null {
   const o = itemOf(result)
   const id = posInt(o?.id)
   if (!o || !id) return null
@@ -116,8 +112,7 @@ export function parsePublicClient(kind: PublicClient['kind'], result: unknown, c
     kind,
     id,
     title,
-    accessCode: isAccessCode(code) ? code : null,
-    domain: domainField ? clientDomainOf(o[camelFieldKey(domainField)]) : null
+    accessCode: isAccessCode(code) ? code : null
   }
 }
 
@@ -151,11 +146,13 @@ export function plainText(value: unknown): string {
     .slice(0, MAX_PUBLIC_TEXT)
 }
 
-export function parsePublicTask(result: unknown, portalOrigin: string, clientTaskId: string | null, clientDomain: string | null, results: unknown): PublicTask | null {
+/** @param taskDomainField поле задачи с доменом портала клиента (настройка `clientFields.taskDomain`) */
+export function parsePublicTask(result: unknown, portalOrigin: string, clientTaskId: string | null, results: unknown, taskDomainField = ''): PublicTask | null {
   const raw = result && typeof result === 'object' && 'task' in result ? (result as { task: unknown }).task : result
   const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null
   const id = posInt(o?.id ?? o?.ID)
   if (!o || !id) return null
+  const clientDomain = taskDomainField ? clientDomainOf(o[camelFieldKey(taskDomainField)] ?? o[taskDomainField]) : null
   const list = Array.isArray(results) ? results : []
   return {
     id,

@@ -60,12 +60,12 @@ export interface AppSettings {
   taskIdInName: boolean
   /**
    * Поля клиента (#34): код UF задачи с ID задачи клиента — в название строки он идёт вторым:
-   * «[123-456] Задача»; код UF компании и контакта с доменом портала клиента. `''` — не выбрано.
+   * «[123-456] Задача»; код UF задачи с доменом портала клиента (у владельца — `UF_SOURCE_DOMAIN`;
+   * поля домена у компании и контакта убраны по решению владельца 2026-10-06). `''` — не выбрано.
    */
   clientFields: {
     task: string
-    companyDomain: string
-    contactDomain: string
+    taskDomain: string
   }
   /**
    * Публичная страница счёта (#34): в каких стадиях (`stageId` счёта, например `DT31_1:N`) клиент
@@ -118,7 +118,7 @@ export function defaultSettings(): AppSettings {
     vat: [],
     naming: 'plain',
     taskIdInName: false,
-    clientFields: { task: '', companyDomain: '', contactDomain: '' },
+    clientFields: { task: '', taskDomain: '' },
     publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
@@ -237,8 +237,7 @@ export function parseSettings(raw: unknown): AppSettings {
     taskIdInName: o.taskIdInName === true,
     clientFields: {
       task: normalizeFieldName(clientFields.task),
-      companyDomain: normalizeFieldName(clientFields.companyDomain),
-      contactDomain: normalizeFieldName(clientFields.contactDomain)
+      taskDomain: normalizeFieldName(clientFields.taskDomain)
     },
     publicPage: {
       stages: Array.isArray(publicPage.stages)

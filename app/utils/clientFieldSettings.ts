@@ -1,7 +1,7 @@
 // Выбор полей клиента в настройках (#34): пункты выпадающего списка и подстановка созданных полей.
 // Чистые функции для SettingsClientFields.vue.
 
-import { APP_FIELDS, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
+import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
 
 /** Пункт списка: «Подпись (UF_CODE)»; `value: ''` — «Не выбрано». */
@@ -24,11 +24,10 @@ export function fieldItems(fields: UserFieldOption[] | null, saved: string): Fie
   return items
 }
 
-/** Какой ключ настроек заполняет поле приложения. */
-const SETTING_OF: Record<AppFieldSpec['entity'], keyof AppSettings['clientFields']> = {
-  task: 'task',
-  company: 'companyDomain',
-  contact: 'contactDomain'
+/** Какой ключ настроек заполняет поле приложения (по коду поля). */
+const SETTING_OF: Record<string, keyof AppSettings['clientFields']> = {
+  UF_SH_IFT_CLIENT_TASK: 'task',
+  UF_SH_IFT_CLIENT_DOMAIN: 'taskDomain'
 }
 
 /**
@@ -37,10 +36,10 @@ const SETTING_OF: Record<AppFieldSpec['entity'], keyof AppSettings['clientFields
  */
 export function withAppFields(fields: AppSettings['clientFields']): AppSettings['clientFields'] {
   const next = { ...fields }
-  // Только строковые поля: поля своих типов (код доступа, вебхук) в настройки не выбираются.
-  for (const spec of APP_FIELDS.filter(f => f.type === 'string')) {
-    const key = SETTING_OF[spec.entity]
-    if (!next[key]) next[key] = spec.name
+  // Поля своих типов (код доступа, вебхук) в настройки не выбираются — только поля задачи.
+  for (const spec of APP_FIELDS) {
+    const key = SETTING_OF[spec.name]
+    if (key && !next[key]) next[key] = spec.name
   }
   return next
 }

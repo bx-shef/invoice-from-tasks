@@ -20,9 +20,10 @@ describe('счёт и клиенты', () => {
   })
 
   it('клиент: код только похожий на код; домен — хост без схемы', () => {
-    const c = parsePublicClient('contact', { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: 'ABCDEFGHJK', ufCrmDomain: 'https://Client.bitrix24.ru/' } }, 'UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_DOMAIN')
-    expect(c).toEqual({ kind: 'contact', id: 7, title: 'Иван Петров', accessCode: 'ABCDEFGHJK', domain: 'client.bitrix24.ru' })
-    expect(parsePublicClient('company', { item: { id: 3, title: 'А', ufCrmShIftAccessCode: 'short' } }, 'UF_CRM_SH_IFT_ACCESS_CODE', '')?.accessCode).toBeNull()
+    const c = parsePublicClient('contact', { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: 'ABCDEFGHJK' } }, 'UF_CRM_SH_IFT_ACCESS_CODE')
+    expect(c).toEqual({ kind: 'contact', id: 7, title: 'Иван Петров', accessCode: 'ABCDEFGHJK' })
+    expect(parsePublicClient('company', { item: { id: 3, title: 'А', ufCrmShIftAccessCode: 'short' } }, 'UF_CRM_SH_IFT_ACCESS_CODE')?.accessCode).toBeNull()
+    expect(clientDomainOf('https://Client.bitrix24.ru/')).toBe('client.bitrix24.ru')
     expect(clientDomainOf('not a domain')).toBeNull()
     expect(clientDomainOf('a.b/c?x')).toBe('a.b')
   })
@@ -54,7 +55,7 @@ describe('строки и задачи', () => {
   })
 
   it('задача: текст без BB-кода, ссылки на нашу и клиентскую задачу', () => {
-    const t = parsePublicTask({ task: { id: '10', title: 'Лендинг', description: '[B]Сделать[/B] [URL=https://x]макет[/URL]' } }, 'https://my.bitrix24.by', '77', 'client.bitrix24.ru', [{ text: 'Готово' }, { text: '' }])
+    const t = parsePublicTask({ task: { id: '10', title: 'Лендинг', description: '[B]Сделать[/B] [URL=https://x]макет[/URL]', ufSourceDomain: 'client.bitrix24.ru' } }, 'https://my.bitrix24.by', '77', [{ text: 'Готово' }, { text: '' }], 'UF_SOURCE_DOMAIN')
     expect(t).toEqual({
       id: 10,
       title: 'Лендинг',
@@ -64,7 +65,12 @@ describe('строки и задачи', () => {
       clientTaskId: '77',
       clientTaskUrl: 'https://client.bitrix24.ru/company/personal/user/0/tasks/task/view/77/'
     })
-    expect(parsePublicTask({ task: { id: 10 } }, 'https://m', 'CL_1', 'c.ru', null)?.clientTaskUrl).toBeNull()
+    // Нечисловой номер или нет домена в задаче (пусто, поле не выбрано) — без ссылки, только номер.
+    expect(parsePublicTask({ task: { id: 10, ufSourceDomain: 'c.ru' } }, 'https://m', 'CL_1', null, 'UF_SOURCE_DOMAIN')?.clientTaskUrl).toBeNull()
+    expect(parsePublicTask({ task: { id: 10, ufSourceDomain: '' } }, 'https://m', '7', null, 'UF_SOURCE_DOMAIN')?.clientTaskUrl).toBeNull()
+    expect(parsePublicTask({ task: { id: 10, ufSourceDomain: 'c.ru' } }, 'https://m', '7', null)?.clientTaskUrl).toBeNull()
+    expect(parsePublicTask({ task: { id: 10, ufSourceDomain: 'portal.standartno.by' } }, 'https://m', '120536', null, 'UF_SOURCE_DOMAIN')?.clientTaskUrl)
+      .toBe('https://portal.standartno.by/company/personal/user/0/tasks/task/view/120536/')
     expect(plainText('<script>x</script>')).toBe('<script>x</script>')
     // Имя тега целиком: «[important]» и «[list of changes]» — текст; таблицы — теги.
     expect(plainText('Сделано [important], см. [list of changes] [TABLE][TR][TD]x[/TD][/TR][/TABLE] [USER=1]Иван[/USER]')).toBe('Сделано [important], см. [list of changes] x Иван')

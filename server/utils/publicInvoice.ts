@@ -157,9 +157,8 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     cmd[`contact${i}`] = batchCommand('crm.item.get', { entityTypeId: 3, id })
   }
   const got = await batch(call, cmd)
-  const raw = Object.entries(got)
-  const clients = raw
-    .map(([key, value]) => parsePublicClient(key === 'company' ? 'company' : 'contact', value, ACCESS_CODE_FIELD, ''))
+  const clients = Object.entries(got)
+    .map(([key, value]) => parsePublicClient(key === 'company' ? 'company' : 'contact', value, ACCESS_CODE_FIELD))
     .filter((c): c is PublicClient => c !== null)
   if (!matchesClient(req.code, clients)) return notFound()
 
@@ -172,14 +171,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
   const cached = deps.cache.get(cacheKey)
   if (cached) return { status: 200, body: { state: 'open', invoice: cached } }
 
-  const { companyDomain, contactDomain, task: clientTaskField } = settings.clientFields
-  // Домены клиента — по полям из настроек (тот же ответ пакета, разбор с полем домена).
-  const withDomains = raw
-    .map(([key, value]) => key === 'company'
-      ? parsePublicClient('company', value, ACCESS_CODE_FIELD, companyDomain)
-      : parsePublicClient('contact', value, ACCESS_CODE_FIELD, contactDomain))
-    .filter((c): c is PublicClient => c !== null)
-  const clientDomain = withDomains.find(c => c.kind === 'company' && c.domain)?.domain ?? withDomains.find(c => c.domain)?.domain ?? null
+  const { task: clientTaskField, taskDomain } = settings.clientFields
 
   const [stages, myCompany, rowsRead] = await Promise.all([
     orNull(call('crm.status.list', { filter: { STATUS_ID: invoice.stageId } })),
@@ -190,7 +182,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
 
   // Задачи — одним пакетом; показываем только привязанные к этому счёту или его сделке.
   const codes = invoiceBindingCodes(invoice)
-  const select = ['ID', 'TITLE', 'DESCRIPTION', 'UF_CRM_TASK', ...(clientTaskField ? [clientTaskField] : [])]
+  const select = ['ID', 'TITLE', 'DESCRIPTION', 'UF_CRM_TASK', ...[clientTaskField, taskDomain].filter(Boolean)]
   const ids = rowTaskIds(list, MAX_PUBLIC_TASKS)
   const taskRaw = await batch(call, Object.fromEntries(ids.map(id => [`t${id}`, batchCommand('tasks.task.get', { taskId: id, select })])))
   const tasks: PublicTask[] = []
@@ -200,7 +192,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     // Результаты — только в REST v3 (пакета v3 у SDK сервера нет): по запросу на задачу.
     const results = await orNull(call(`${V3_PREFIX}tasks.task.result.list`, { filter: [['taskId', '=', id]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: 20 } }))
     const resultList = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
-    const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), clientDomain, resultList)
+    const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
     if (task) tasks.push(task)
   }
   const view: PublicInvoiceView = {
@@ -212,7 +204,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     total: invoice.opportunity,
     company: clients.find(c => c.kind === 'company')?.title || null,
     contacts: clients.filter(c => c.kind === 'contact').map(c => c.title).filter(Boolean),
-    myCompany: parsePublicClient('company', myCompany, ACCESS_CODE_FIELD, '')?.title || null,
+    myCompany: parsePublicClient('company', myCompany, ACCESS_CODE_FIELD)?.title || null,
     rows: list,
     tasks
   }

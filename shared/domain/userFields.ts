@@ -96,8 +96,8 @@ export const CLIENT_HOOK_FIELD = 'UF_CRM_SH_IFT_CLIENT_HOOK'
 /** Поля, которые создаёт кнопка «Создать поля». */
 export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'task', name: 'UF_SH_IFT_CLIENT_TASK', label: `${APP_FIELD_LABEL_PREFIX} ID Клиентской задачи`, type: 'string' },
+  { entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
   ...(['company', 'contact'] as const).flatMap((entity): AppFieldSpec[] => [
-    { entity, name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
     { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
     { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
   ])

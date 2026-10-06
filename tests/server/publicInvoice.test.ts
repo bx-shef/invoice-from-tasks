@@ -10,7 +10,7 @@ interface Over { stage?: string, stages?: string[], companyCode?: string | null,
 
 /** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
 function portal(over: Over = {}) {
-  const settings = JSON.stringify({ publicPage: { stages: over.stages ?? ['DT31_1:N'], closedText: 'Обратитесь к менеджеру' }, clientFields: { task: '', companyDomain: 'UF_CRM_DOMAIN', contactDomain: '' } })
+  const settings = JSON.stringify({ publicPage: { stages: over.stages ?? ['DT31_1:N'], closedText: 'Обратитесь к менеджеру' }, clientFields: { task: '', taskDomain: 'UF_SOURCE_DOMAIN' } })
   const calls: string[] = []
   const item = (entityTypeId: number, id: number): unknown => {
     if (entityTypeId === 31) {
@@ -18,12 +18,12 @@ function portal(over: Over = {}) {
       if (id !== 5) throw new Error('crm.item.get: NOT_FOUND')
       return { item: { id: 5, title: 'Счёт №5', stageId: over.stage ?? 'DT31_1:N', begindate: '2026-10-01', currencyId: 'BYN', opportunity: 130, companyId: 3, contactIds: [7], mycompanyId: 1, parentId2: 9 } }
     }
-    if (entityTypeId === 4 && id === 3) return { item: { id: 3, title: 'ООО Клиент', ufCrmShIftAccessCode: over.companyCode === undefined ? CODE : over.companyCode, ufCrmDomain: 'client.bitrix24.ru' } }
+    if (entityTypeId === 4 && id === 3) return { item: { id: 3, title: 'ООО Клиент', ufCrmShIftAccessCode: over.companyCode === undefined ? CODE : over.companyCode } }
     if (entityTypeId === 4 && id === 1) return { item: { id: 1, title: 'Мы' } }
     if (entityTypeId === 3) return { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: over.contactCode ?? null } }
     throw new Error('NOT_FOUND')
   }
-  const task = (id: number) => ({ task: { id, title: 'Лендинг', description: 'Описание', ufCrmTask: over.taskBinding ?? ['D_9'] } })
+  const task = (id: number) => ({ task: { id, title: 'Лендинг', description: 'Описание', ufCrmTask: over.taskBinding ?? ['D_9'], ufSourceDomain: 'client.bitrix24.ru' } })
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push(method)
     if (method === 'crm.item.get') return item(Number(params.entityTypeId), Number(params.id))
