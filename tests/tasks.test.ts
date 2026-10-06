@@ -27,7 +27,7 @@ describe('openTaskStatus — незакрытая задача', () => {
 describe('разбор задач', () => {
   it('читает camelCase-ответ tasks.task.list, где числа пришли строками', () => {
     const t = parseTask({ id: '15', title: ' Задача ', responsibleId: '7', ufCrmTask: ['D_5', 'C_2'], timeSpentInLogs: '3600' })
-    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [], status: null })
+    expect(t).toEqual({ id: 15, title: 'Задача', description: '', responsibleId: 7, clientTaskId: null, crmBindings: ['D_5', 'C_2'], timeSpentInLogs: 3600, tags: [], status: null })
   })
 
   it('понимает и UPPER_CASE-ключи', () => {
@@ -49,7 +49,7 @@ describe('разбор задач', () => {
 
   it('живой ответ v2 tasks.task.list (замер): числа строками, timeSpentInLogs при нуле — null', () => {
     const row = { id: '10', title: 'IFT: чужая задача', description: 'Описание', responsibleId: '1', ufCrmTask: ['D_999999'], timeSpentInLogs: null, group: [] }
-    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [], status: null })
+    expect(parseTask(row)).toEqual({ id: 10, title: 'IFT: чужая задача', description: 'Описание', responsibleId: 1, clientTaskId: null, crmBindings: ['D_999999'], timeSpentInLogs: 0, tags: [], status: null })
   })
 
   it('статус v2 приходит строкой (замер 2026-09-28: «2» у новой задачи, «5» у завершённой) — числом', () => {

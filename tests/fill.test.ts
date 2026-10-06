@@ -13,6 +13,7 @@ const task: TaskInfo = {
   title: 'Сверстать лендинг',
   description: 'Макет в Figma',
   responsibleId: 7,
+  clientTaskId: null,
   crmBindings: ['D_5'],
   timeSpentInLogs: 5400,
   tags: [],
@@ -516,5 +517,23 @@ describe('ставка клиента', () => {
   it('тип 2: у каждого сотрудника — своя ставка клиента или общая', () => {
     const { rows } = buildRows(input({ mode: 'time', rates, clients: ['CO_3', 'C_4'] }))
     expect(rows.map(r => r.baseRate)).toEqual([500, 60])
+  })
+})
+
+describe('ID задачи клиента в названии строки (#34)', () => {
+  it('«[мой-клиента]»; без ID клиента — «[мой]»; приставка не дублируется', () => {
+    expect(withTaskId('Задача 1', 123, '456')).toBe('[123-456] Задача 1')
+    expect(withTaskId('Задача 1', 123, null)).toBe('[123] Задача 1')
+    expect(withTaskId('[123-456] Задача 1', 123, '456')).toBe('[123-456] Задача 1')
+  })
+
+  it('ID клиента из задачи доходит до строки обоих типов и до названия по настройке', () => {
+    const clientTask = { ...task, clientTaskId: '456' }
+    for (const mode of ['task', 'time'] as const) {
+      const built = buildRows(input({ mode, tasks: [clientTask] }))
+      expect(built.rows.every(r => r.clientTaskId === '456')).toBe(true)
+      expect(finishRows(built, null, true).rows.every(r => r.name.startsWith('[10-456] '))).toBe(true)
+      expect(finishRows(built, null, false).rows.some(r => r.name.startsWith('['))).toBe(false)
+    }
   })
 })

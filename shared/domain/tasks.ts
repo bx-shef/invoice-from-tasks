@@ -8,6 +8,7 @@
 
 import { MAX_TAG_LENGTH } from './markup'
 import { portalDate } from './time'
+import { camelFieldKey, clientTaskIdOf } from './userFields'
 
 /** CRM-тип счёта (новые счета). */
 export const INVOICE_ENTITY_TYPE_ID = 31
@@ -21,6 +22,8 @@ export interface TaskInfo {
   title: string
   description: string
   responsibleId: number | null
+  /** ID задачи клиента из UF, выбранного в настройках (`clientFields.task`); нет — `null`. */
+  clientTaskId: string | null
   /** Привязки к CRM из UF_CRM_TASK: `D_12`, `SI_5`, … */
   crmBindings: string[]
   /** Затраченное время по журналу (секунды), как его считает портал. */
@@ -128,8 +131,12 @@ export function listRows(result: unknown, ...keys: string[]): Row[] {
   return []
 }
 
-/** Задача из ответа tasks.task.list / tasks.task.get (элемент массива `tasks`). */
-export function parseTask(row: Row): TaskInfo | null {
+/**
+ * Задача из ответа tasks.task.list / tasks.task.get (элемент массива `tasks`).
+ *
+ * @param clientTaskField код UF с ID задачи клиента (`clientFields.task`); `''` — не читаем
+ */
+export function parseTask(row: Row, clientTaskField = ''): TaskInfo | null {
   const id = toInt(pick(row, 'id', 'ID'))
   if (id === null) return null
   return {
@@ -137,6 +144,7 @@ export function parseTask(row: Row): TaskInfo | null {
     title: toText(pick(row, 'title', 'TITLE')).trim(),
     description: toText(pick(row, 'description', 'DESCRIPTION')),
     responsibleId: toInt(pick(row, 'responsibleId', 'RESPONSIBLE_ID')),
+    clientTaskId: clientTaskField ? clientTaskIdOf(pick(row, camelFieldKey(clientTaskField), clientTaskField)) : null,
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
     tags: parseTaskTags(row),
@@ -207,10 +215,10 @@ export function hasCrmBinding(task: TaskInfo, codes: string[]): boolean {
 }
 
 /** Задачи из ответа списка, оставляя только действительно привязанные и без дублей. */
-export function tasksBoundTo(rows: Row[], codes: string[]): TaskInfo[] {
+export function tasksBoundTo(rows: Row[], codes: string[], clientTaskField = ''): TaskInfo[] {
   const byId = new Map<number, TaskInfo>()
   for (const row of rows) {
-    const task = parseTask(row)
+    const task = parseTask(row, clientTaskField)
     if (task && hasCrmBinding(task, codes)) byId.set(task.id, task)
   }
   return [...byId.values()].sort((a, b) => a.id - b.id)

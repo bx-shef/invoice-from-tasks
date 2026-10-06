@@ -68,7 +68,7 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
 
   it('tasks.task.list: фильтр объектом, теги в том же списке (select TAGS)', async () => {
     const res = await portal.call<{ tasks?: unknown[] }>('tasks.task.list', { filter: { UF_CRM_TASK: `D_${fx!.dealId}` }, select: TASK_SELECT })
-    const tasks = listRows(res, 'tasks').map(parseTask)
+    const tasks = listRows(res, 'tasks').map(row => parseTask(row))
     expect(tasks.map(t => t?.id).sort()).toEqual([fx!.tasks.design, fx!.tasks.plain, fx!.tasks.tiny].sort())
     // ⚠ Тег — одна запись на весь портал: уже существующий «дизайн» (любой регистр) портал подставляет
     // вместо «Дизайн» из запроса (замер 2026-09-24). Поэтому теги сравниваются без учёта регистра.
