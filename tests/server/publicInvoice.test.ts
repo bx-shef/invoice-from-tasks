@@ -6,7 +6,7 @@ import { SlidingWindow } from '../../server/utils/rateLimit'
 
 const CODE = 'ABCDEFGHJK'
 
-interface Over { docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
+interface Over { listUrl?: string, docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
 
 /** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
 function portal(over: Over = {}) {
@@ -45,7 +45,7 @@ function portal(over: Over = {}) {
     if (method === 'v3:tasks.task.result.list') return [{ text: 'Готово' }]
     if (method === 'crm.documentgenerator.document.list' && over.docsError) throw new Error(over.docsError)
     if (method === 'crm.documentgenerator.document.list') return { documents: [
-      { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
+      { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5', ...(over.listUrl ? { pdfUrlMachine: over.listUrl } : {}) },
       { id: '60', title: 'Старый счёт', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
       { id: '62', title: 'Акт', templateId: '4', pdfId: '1', entityTypeId: '31', entityId: '5' }
     ] }
@@ -260,6 +260,24 @@ describe('документы (этап 5)', () => {
   it('сбой списка документов страницу не роняет — блок пуст', async () => {
     const r = await loadPublicInvoice(req(), deps(portal({ templates: [3], docsError: 'documentgenerator: OPERATION_TIME_LIMIT' })))
     expect(r.status === 200 && r.body.state === 'open' && r.body.invoice.documents).toEqual([])
+  })
+
+  it('машинная ссылка из списка (select *) — без document.get; иначе — запасной get', async () => {
+    const p = portal({ templates: [3], listUrl: 'https://my.bitrix24.by/rest/getPdf.json?auth=L' })
+    const { d, fetchPdf } = docDeps(p)
+    expect((await loadPublicDocument({ ...req(), documentId: 61 }, d)).status).toBe(200)
+    expect(fetchPdf).toHaveBeenCalledWith('https://my.bitrix24.by/rest/getPdf.json?auth=L')
+    expect(p.calls).not.toContain('crm.documentgenerator.document.get')
+  })
+
+  it('обе проверки не прошли — 404 и причина в журнале без ссылки с токеном', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { d } = docDeps(portal({ templates: [3], listUrl: 'https://evil.example/x?auth=SECRET', doc: { id: 61, templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5, pdfUrlMachine: 'https://evil.example/x?auth=SECRET' } }))
+    expect((await loadPublicDocument({ ...req(), documentId: 61 }, d)).status).toBe(404)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]![0])).toMatch(/host https:\/\/evil\.example, portal my\.bitrix24\.by/)
+    expect(String(warn.mock.calls[0]![0])).not.toContain('SECRET')
+    warn.mockRestore()
   })
 
   it('портал вернул не PDF — ошибка (обработчик отдаст 503)', async () => {

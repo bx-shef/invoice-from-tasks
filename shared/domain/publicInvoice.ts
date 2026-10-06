@@ -340,6 +340,10 @@ export function batchCommand(method: string, params: Record<string, unknown>): s
 }
 
 /** Список документов (crm.documentgenerator.document.list → `{ documents: [...] }`). */
+export function documentEntries(raw: unknown): Record<string, unknown>[] {
+  return documentList(raw)
+}
+
 function documentList(raw: unknown): Record<string, unknown>[] {
   const list = raw && typeof raw === 'object' && 'documents' in raw ? (raw as { documents: unknown }).documents : raw
   return (Array.isArray(list) ? list : []).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
@@ -368,21 +372,33 @@ export function latestDocuments(raw: unknown, templates: number[], invoiceId: nu
  * токеном из ссылки; на другой хост не ходим — SSRF). Иначе `null`.
  */
 export function documentPdfUrl(raw: unknown, templates: number[], invoiceId: number, portalHost: string): { url: string, title: string } | null {
+  const r = documentPdfCheck(raw, templates, invoiceId, portalHost)
+  return r.ok ? { url: r.url, title: r.title } : null
+}
+
+/**
+ * То же с причиной отказа — для журнала (без самой ссылки: в ней токен). На живом портале
+ * (2026-10-06, счёт 145) скачивание отказывало, а причину было не узнать (находка владельца).
+ */
+export function documentPdfCheck(raw: unknown, templates: number[], invoiceId: number, portalHost: string): { ok: true, url: string, title: string } | { ok: false, reason: string } {
   const d = raw && typeof raw === 'object' && 'document' in raw ? (raw as { document: unknown }).document : raw
   const o = d && typeof d === 'object' ? d as Record<string, unknown> : null
-  if (!o) return null
+  if (!o) return { ok: false, reason: 'no document' }
   const templateId = posInt(o.templateId)
-  if (!templateId || !templates.includes(templateId) || !posInt(o.pdfId)) return null
-  if (Number(o.entityTypeId) !== INVOICE_ENTITY_TYPE_ID || Number(o.entityId) !== invoiceId) return null
-  if (typeof o.pdfUrlMachine !== 'string') return null
+  if (!templateId || !templates.includes(templateId)) return { ok: false, reason: `template ${String(o.templateId)} not allowed` }
+  if (!posInt(o.pdfId)) return { ok: false, reason: 'no pdfId' }
+  if (Number(o.entityTypeId) !== INVOICE_ENTITY_TYPE_ID || Number(o.entityId) !== invoiceId) return { ok: false, reason: `entity ${String(o.entityTypeId)}/${String(o.entityId)}` }
+  if (typeof o.pdfUrlMachine !== 'string' || !o.pdfUrlMachine) return { ok: false, reason: 'no pdfUrlMachine' }
   let u: URL
   try {
     u = new URL(o.pdfUrlMachine)
   } catch {
-    return null
+    return { ok: false, reason: 'pdfUrlMachine not a URL' }
   }
-  if (u.protocol !== 'https:' || u.hostname !== portalHost || u.username || u.password || u.port) return null
-  return { url: u.toString(), title: plainText(o.title).slice(0, 200) }
+  if (u.protocol !== 'https:' || u.hostname !== portalHost || u.username || u.password || u.port) {
+    return { ok: false, reason: `pdfUrlMachine host ${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}, portal ${portalHost}` }
+  }
+  return { ok: true, url: u.toString(), title: plainText(o.title).slice(0, 200) }
 }
 
 /** Имя файла для Content-Disposition: только безопасные символы, расширение .pdf. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { documentPdfUrl, latestDocuments, pdfFileName, clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
+import { documentPdfCheck, documentPdfUrl, latestDocuments, pdfFileName, clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
 import { DEFAULT_CLOSED_TEXT, defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { invoiceStageEntities, publicInvoiceUrl, stageItems, stageOptions, templateItems, templateOptions } from '~/utils/invoiceStages'
 
@@ -141,6 +141,16 @@ describe('документы — разбор', () => {
       expect(documentPdfUrl({ document: { ...base, pdfUrlMachine: url } }, [3], 5, 'my.by'), url).toBeNull()
     }
     expect(documentPdfUrl({ document: { ...base, pdfId: 0, pdfUrlMachine: 'https://my.by/x' } }, [3], 5, 'my.by')).toBeNull()
+  })
+
+  it('причины отказа — для журнала', () => {
+    const base = { templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5 }
+    expect(documentPdfCheck(null, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no document' })
+    expect(documentPdfCheck({ ...base, templateId: 4 }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'template 4 not allowed' })
+    expect(documentPdfCheck({ ...base, pdfId: 0 }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no pdfId' })
+    expect(documentPdfCheck({ ...base, entityTypeId: 'SMART_INVOICE' }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'entity SMART_INVOICE/5' })
+    expect(documentPdfCheck(base, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no pdfUrlMachine' })
+    expect(documentPdfCheck({ ...base, pdfUrlMachine: 'https://cdn.my.by:8443/x' }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'pdfUrlMachine host https://cdn.my.by:8443, portal my.by' })
   })
 
   it('имя файла — без опасных символов', () => {
