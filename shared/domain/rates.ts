@@ -1,4 +1,5 @@
-// Ставки часа сотрудников: «сотрудник — ставка — начиная с даты». Хранятся в app.option
+// Ставки часа сотрудников: «сотрудник — ставка — начиная с даты», по желанию — для одного
+// клиента (компании или контакта CRM): у клиента сотрудник может стоить иначе. Хранятся в app.option
 // отдельным ключом (docs/SETTINGS.md), поэтому формат хранения компактный — место ограничено.
 
 import { isIsoDate } from './time'
@@ -11,13 +12,31 @@ export interface RateEntry {
   rate: number
   /** Дата начала действия, `YYYY-MM-DD`, включительно. */
   from: string
+  /**
+   * Клиент, для которого ставка: `CO_<id>` — компания, `C_<id>` — контакт (коды диалога выбора
+   * CRM). Нет — общая ставка сотрудника, действует для всех остальных клиентов.
+   */
+  client?: string
+}
+
+/** Код клиента ставки: компания `CO_<id>` или контакт `C_<id>`. */
+const CLIENT_RE = /^(CO|C)_[1-9]\d{0,9}$/
+
+export function isRateClient(value: unknown): value is string {
+  return typeof value === 'string' && CLIENT_RE.test(value)
+}
+
+/** Ключ клиента для разбора: `undefined` и пустая строка — общая ставка. */
+function clientKey(e: Pick<RateEntry, 'client'>): string {
+  return e.client ?? ''
 }
 
 /**
- * Кортеж хранения: `[userId, rate, from]`. Четвёртый элемент (товар каталога) был до #3 —
- * при разборе он молча отбрасывается, так что старые записи читаются без миграции.
+ * Кортеж хранения: `[userId, rate, from]` или `[userId, rate, from, client]` для ставки клиента.
+ * До #3 четвёртым элементом был товар каталога (число) — при разборе он молча отбрасывается,
+ * так что старые записи читаются без миграции и становятся общими ставками.
  */
-export type StoredRate = [number, number, string]
+export type StoredRate = [number, number, string] | [number, number, string, string]
 
 /** Верхняя граница ставки — защита от опечатки «лишний ноль» и от мусора в хранилище. */
 export const MAX_RATE = 1_000_000
@@ -60,7 +79,8 @@ export function coerceRateEntries(raw: unknown): RateEntry[] | null {
   if (raw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return null
   return raw.map((item) => {
     const o = item as Record<string, unknown>
-    return { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? '') }
+    const client = o.client === undefined || o.client === null || o.client === '' ? undefined : String(o.client)
+    return { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? ''), ...(client ? { client } : {}) }
   })
 }
 
@@ -85,19 +105,24 @@ export function parseRates(raw: unknown): RateEntry[] {
     const rate = normalizeRate(item[1])
     const from = item[2]
     if (userId === null || rate === null || !isIsoDate(from)) continue
-    byKey.set(`${userId}|${from}`, { userId, rate, from })
+    // Число четвёртым элементом — товар каталога до #3: общая ставка. Битый код клиента —
+    // запись отбрасывается: превратить её в общую значило бы выставлять всем чужую цену.
+    const client = typeof item[3] === 'string' ? item[3] : undefined
+    if (client !== undefined && !isRateClient(client)) continue
+    const entry: RateEntry = { userId, rate, from, ...(client ? { client } : {}) }
+    byKey.set(`${userId}|${clientKey(entry)}|${from}`, entry)
   }
   return sortRates([...byKey.values()])
 }
 
-/** Порядок для хранения и показа: по сотруднику, затем по дате. Детерминирован — диффы читаемы. */
+/** Порядок для хранения и показа: по сотруднику, клиенту (общие первыми), дате. Детерминирован — диффы читаемы. */
 export function sortRates(entries: RateEntry[]): RateEntry[] {
-  return [...entries].sort((a, b) => a.userId - b.userId || a.from.localeCompare(b.from))
+  return [...entries].sort((a, b) => a.userId - b.userId || clientKey(a).localeCompare(clientKey(b)) || a.from.localeCompare(b.from))
 }
 
 /** Сериализация в компактный JSON. Порядок стабильный, лишних ключей нет. */
 export function serializeRates(entries: RateEntry[]): string {
-  const tuples: StoredRate[] = sortRates(entries).map(e => [e.userId, e.rate, e.from])
+  const tuples: StoredRate[] = sortRates(entries).map(e => e.client ? [e.userId, e.rate, e.from, e.client] : [e.userId, e.rate, e.from])
   return JSON.stringify(tuples)
 }
 
@@ -118,9 +143,10 @@ export function validateRates(entries: RateEntry[]): RateIssue[] {
     if (positiveInt(e.userId) === null) issues.push({ index, message: 'Не выбран сотрудник' })
     if (normalizeRate(e.rate) === null) issues.push({ index, message: `Ставка должна быть больше 0 и не больше ${MAX_RATE}` })
     if (!isIsoDate(e.from)) issues.push({ index, message: 'Дата начала должна быть в формате ГГГГ-ММ-ДД' })
-    const key = `${e.userId}|${e.from}`
+    if (e.client !== undefined && !isRateClient(e.client)) issues.push({ index, message: 'Клиент указан неверно — выберите компанию или контакт заново' })
+    const key = `${e.userId}|${clientKey(e)}|${e.from}`
     const prev = seen.get(key)
-    if (prev !== undefined) issues.push({ index, message: `Дубль: у этого сотрудника уже есть ставка с этой даты (строка ${prev + 1})` })
+    if (prev !== undefined) issues.push({ index, message: `Дубль: у этого сотрудника уже есть ставка ${e.client ? 'для этого клиента ' : ''}с этой даты (строка ${prev + 1})` })
     else seen.set(key, index)
   })
   if (entries.length > MAX_RATE_ENTRIES) {
@@ -129,17 +155,36 @@ export function validateRates(entries: RateEntry[]): RateIssue[] {
   return issues
 }
 
+/** Ставка сотрудника из одного набора (клиент или общие): версия с наибольшей `from`, не позже `date`. */
+function findIn(entries: RateEntry[], userId: number, date: string, client: string): RateEntry | null {
+  let best: RateEntry | null = null
+  for (const e of entries) {
+    if (e.userId !== userId || clientKey(e) !== client || e.from > date) continue
+    if (!best || e.from > best.from) best = e
+  }
+  return best
+}
+
 /**
- * Ставка сотрудника, действующая на дату: версия с наибольшей `from`, не позже `date`.
+ * Ставка сотрудника, действующая на дату. Сначала ставки клиентов счёта по порядку `clients`
+ * (компания, затем контакт — {@link invoiceClients}), у первого клиента со ставкой на эту дату
+ * она и берётся; нет — общая ставка сотрудника.
  *
  * @param date `YYYY-MM-DD` в часовом поясе портала (см. `portalDate`)
  * @returns версия ставки или `null`, если на эту дату у сотрудника ставки нет
  */
-export function findRate(entries: RateEntry[], userId: number, date: string): RateEntry | null {
-  let best: RateEntry | null = null
-  for (const e of entries) {
-    if (e.userId !== userId || e.from > date) continue
-    if (!best || e.from > best.from) best = e
+export function findRate(entries: RateEntry[], userId: number, date: string, clients: readonly string[] = []): RateEntry | null {
+  for (const client of clients) {
+    const rate = findIn(entries, userId, date, client)
+    if (rate) return rate
   }
-  return best
+  return findIn(entries, userId, date, '')
+}
+
+/** Клиенты счёта в порядке выбора ставки: компания, затем контакт. */
+export function invoiceClients(invoice: { companyId: number | null, contactId: number | null }): string[] {
+  return [
+    ...(invoice.companyId ? [`CO_${invoice.companyId}`] : []),
+    ...(invoice.contactId ? [`C_${invoice.contactId}`] : [])
+  ]
 }

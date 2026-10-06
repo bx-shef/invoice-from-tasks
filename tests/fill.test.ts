@@ -487,3 +487,17 @@ describe('задачи со временем заметно больше обы�
     expect(res.warnings.some(w => w.taskId === 12)).toBe(false)
   })
 })
+
+describe('ставка клиента', () => {
+  const rates = [...input().rates, { userId: 7, rate: 500, from: '2026-01-01', client: 'CO_3' }, { userId: 9, rate: 60, from: '2026-01-01', client: 'C_4' }]
+
+  it('тип 1: ставка клиента счёта вместо общей, у чужого клиента — общая', () => {
+    expect(buildRows(input({ rates, clients: ['CO_3'] })).rows[0]).toMatchObject({ baseRate: 500, price: 500 })
+    expect(buildRows(input({ rates, clients: ['CO_8'] })).rows[0]).toMatchObject({ baseRate: 200 })
+  })
+
+  it('тип 2: у каждого сотрудника — своя ставка клиента или общая', () => {
+    const { rows } = buildRows(input({ mode: 'time', rates, clients: ['CO_3', 'C_4'] }))
+    expect(rows.map(r => r.baseRate)).toEqual([500, 60])
+  })
+})

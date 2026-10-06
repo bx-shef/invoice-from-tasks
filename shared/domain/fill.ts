@@ -7,6 +7,7 @@
 //   ставку ОТВЕТСТВЕННОГО, действующую на дату последней записи времени; если за период задачи
 //   ставка менялась — предупреждение;
 // • тип 2 «время» — одна строка на запись времени; ставка того, кто списал время, на дату записи;
+// • ставка клиента (компании, затем контакта счёта) важнее общей ставки сотрудника (rates.ts);
 // • дата записи — дата её создания (tasks.ts);
 // • наценка — по тегам задачи, первое совпадение, иначе «на всё» (markup.ts);
 // • валюта счёта ≠ валюте ставок — цены пересчитываются по курсу портала (currency.ts);
@@ -38,6 +39,8 @@ export interface FillInput {
   tasks: TaskInfo[]
   entries: TimeEntry[]
   rates: RateEntry[]
+  /** Клиенты счёта для ставок клиента (invoiceClients): компания, затем контакт. */
+  clients?: readonly string[]
   settings: AppSettings
   /** Пересчёт в валюту счёта; `null`/нет — валюты совпадают. */
   conversion?: CurrencyConversion | null
@@ -178,7 +181,7 @@ function priceFor(input: FillInput, task: TaskInfo, rate: RateEntry): Pick<Draft
 }
 
 function rateLabel(rate: RateEntry | null): string {
-  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}` : 'нет ставки'
+  return rate ? `${rate.rate} с ${formatRuDate(rate.from)}${rate.client ? ' (ставка клиента)' : ''}` : 'нет ставки'
 }
 
 /**
@@ -189,7 +192,7 @@ function rateLabel(rate: RateEntry | null): string {
 function rateChangeWarning(input: FillInput, userId: number, dates: string[], applied: RateEntry): string | null {
   const versions = new Map<string, RateEntry | null>()
   for (const date of dates) {
-    const rate = findRate(input.rates, userId, date)
+    const rate = findRate(input.rates, userId, date, input.clients)
     versions.set(rate ? rate.from : '', rate)
   }
   if (versions.size < 2) return null
@@ -231,7 +234,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     if (total > 0 && !lastDate) problems.push('у записей времени нет даты — не на что выбрать ставку')
     let rate: RateEntry | null = null
     if (task.responsibleId !== null && lastDate) {
-      rate = findRate(input.rates, task.responsibleId, lastDate)
+      rate = findRate(input.rates, task.responsibleId, lastDate, input.clients)
       if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(lastDate)}`)
     }
     if (problems.length || !rate || task.responsibleId === null || !lastDate) {
@@ -284,7 +287,7 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
       if (!entry.date) problems.push('у записи времени нет даты')
       let rate: RateEntry | null = null
       if (entry.userId !== null && entry.date) {
-        rate = findRate(input.rates, entry.userId, entry.date)
+        rate = findRate(input.rates, entry.userId, entry.date, input.clients)
         if (!rate) problems.push(`нет ставки для ${userLabel(input, entry.userId)} на ${formatRuDate(entry.date)}`)
       }
       if (problems.length || !rate || entry.userId === null || !entry.date) {

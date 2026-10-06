@@ -37,6 +37,7 @@ import {
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
 import { writeBlocker, type InvoiceCheck, type WriteBlock } from '~/utils/writeConfirm'
+import { invoiceClients } from '#shared/domain/rates'
 import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
@@ -287,6 +288,7 @@ export function useInvoiceFill() {
         tasks: tasks.value,
         entries,
         rates: rates.value,
+        clients: invoiceClients(inv),
         settings: settings.value,
         conversion: conversion.value,
         vatRate: vatChoice.rate,

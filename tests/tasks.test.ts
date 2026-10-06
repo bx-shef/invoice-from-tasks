@@ -146,7 +146,7 @@ describe('разбор записей времени', () => {
 describe('счёт', () => {
   it('читает crm.item.get и связь со сделкой', () => {
     const inv = parseInvoice({ item: { id: 8, title: 'Счёт №8', currencyId: 'rub', parentId2: '5', mycompanyId: '20', opportunity: '1000' } })
-    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, myCompanyId: 20, opportunity: 1000 })
+    expect(inv).toEqual({ id: 8, title: 'Счёт №8', currencyId: 'RUB', dealId: 5, myCompanyId: 20, companyId: null, contactId: null, opportunity: 1000 })
     // Реквизиты не выбраны — портал отдаёт 0 (замер 2026-09-26).
     expect(parseInvoice({ item: { id: 8, mycompanyId: 0 } })?.myCompanyId).toBeNull()
     expect(parseInvoice({ item: { id: 8 } })?.myCompanyId).toBeNull()

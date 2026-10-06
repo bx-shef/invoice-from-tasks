@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { coerceRateEntries, findRate, normalizeRate, parseRates, serializeRates, validateRates, type RateEntry } from '#shared/domain/rates'
+import { coerceRateEntries, findRate, invoiceClients, normalizeRate, parseRates, serializeRates, sortRates, validateRates, type RateEntry } from '#shared/domain/rates'
 
 const rates: RateEntry[] = [
   { userId: 7, rate: 100, from: '2026-01-01' },
@@ -94,5 +94,46 @@ describe('coerceRateEntries — тело запроса', () => {
     const entries = coerceRateEntries([{ userId: 5, rate: 0, from: '2026-01-01' }])!
     expect(validateRates(entries)).toEqual([{ index: 0, message: expect.stringMatching(/больше 0/) }])
     expect(normalizeRate('0,004')).toBeNull()
+  })
+})
+
+describe('ставка клиента', () => {
+  const base: RateEntry[] = [
+    { userId: 7, rate: 100, from: '2026-01-01' },
+    { userId: 7, rate: 300, from: '2026-03-01', client: 'CO_12' },
+    { userId: 7, rate: 200, from: '2026-02-01', client: 'C_5' }
+  ]
+
+  it('компания важнее контакта, контакт — общей; до даты клиента — общая', () => {
+    expect(findRate(base, 7, '2026-04-01', ['CO_12', 'C_5'])?.rate).toBe(300)
+    expect(findRate(base, 7, '2026-02-15', ['CO_12', 'C_5'])?.rate).toBe(200)
+    expect(findRate(base, 7, '2026-01-15', ['CO_12', 'C_5'])?.rate).toBe(100)
+    expect(findRate(base, 7, '2026-04-01', ['CO_99'])?.rate).toBe(100)
+    expect(findRate(base, 7, '2026-04-01')?.rate).toBe(100)
+  })
+
+  it('клиенты счёта: компания, затем контакт', () => {
+    expect(invoiceClients({ companyId: 12, contactId: 5 })).toEqual(['CO_12', 'C_5'])
+    expect(invoiceClients({ companyId: null, contactId: 5 })).toEqual(['C_5'])
+    expect(invoiceClients({ companyId: null, contactId: null })).toEqual([])
+  })
+
+  it('хранится четвёртым элементом и читается обратно; битый код — запись отброшена', () => {
+    const json = serializeRates(base)
+    expect(json).toBe('[[7,100,"2026-01-01"],[7,200,"2026-02-01","C_5"],[7,300,"2026-03-01","CO_12"]]')
+    expect(parseRates(json)).toEqual(sortRates(base))
+    expect(parseRates([[7, 100, '2026-01-01', 'X_1'], [7, 50, '2026-01-01', 'CO_0']])).toEqual([])
+  })
+
+  it('общая и клиентская ставки с одной даты — не дубль; две клиентские — дубль', () => {
+    expect(validateRates([{ userId: 7, rate: 1, from: '2026-01-01' }, { userId: 7, rate: 2, from: '2026-01-01', client: 'CO_1' }])).toEqual([])
+    expect(validateRates([{ userId: 7, rate: 1, from: '2026-01-01', client: 'CO_1' }, { userId: 7, rate: 2, from: '2026-01-01', client: 'CO_1' }]))
+      .toEqual([{ index: 1, message: expect.stringMatching(/Дубль.*клиента/) }])
+    expect(validateRates([{ userId: 7, rate: 1, from: '2026-01-01', client: 'CO_x' }])).toEqual([{ index: 0, message: expect.stringMatching(/Клиент/) }])
+  })
+
+  it('тело запроса: клиент переносится, пустой — общая ставка', () => {
+    expect(coerceRateEntries([{ userId: 7, rate: 1, from: '2026-01-01', client: 'C_5' }])).toEqual([{ userId: 7, rate: 1, from: '2026-01-01', client: 'C_5' }])
+    expect(coerceRateEntries([{ userId: 7, rate: 1, from: '2026-01-01', client: '' }])).toEqual([{ userId: 7, rate: 1, from: '2026-01-01' }])
   })
 })
