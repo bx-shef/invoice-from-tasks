@@ -1,21 +1,12 @@
-// POST /api/public/invoice — публичная страница счёта (#34, этап 3): `{ domain, invoiceId, code }`
+// POST /api/public/invoice — публичная страница счёта (#34): `{ domain, invoiceId, code }`
 // → расшифровка счёта или спокойная фраза. Без фрейма: клиент — не сотрудник портала. Решение —
-// `loadPublicInvoice` (server/utils/publicInvoice.ts, покрыт тестами). Код в журнал не пишем.
+// `loadPublicInvoice` (server/utils/publicInvoice.ts, покрыт тестами), зависимости — publicContext.
+// Код в журнал не пишем.
 
-import { getPortalByDomain } from '../../utils/tokenStore'
-import { clientIp, installerCallFor, portalStore } from '../../utils/requestContext'
-import { isAllowedPortalHost, parseSelfHostedHosts } from '../../utils/b24Host'
-import { openClientHook } from '../../utils/clientHook'
-import { readClientTasks, type HookFetch } from '../../utils/clientPortal'
-import { loadPublicInvoice, PUBLIC_404_FLOOR_MS, PUBLIC_CACHE_MS, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL } from '../../utils/publicInvoice'
-import { SlidingWindow } from '../../utils/rateLimit'
+import { clientIp } from '../../utils/requestContext'
+import { loadPublicInvoice, PUBLIC_404_FLOOR_MS } from '../../utils/publicInvoice'
+import { publicDeps } from '../../utils/publicContext'
 import { ipBucketKey } from '../../utils/requestLimits'
-import type { PublicInvoiceView } from '#shared/domain/publicInvoice'
-
-const attempts = new SlidingWindow()
-const failures = new SlidingWindow()
-const cache = new Map<string, { at: number, view: PublicInvoiceView }>()
-const MAX_CACHE = 500
 
 export default defineEventHandler(async (event) => {
   const started = Date.now()
@@ -27,40 +18,7 @@ export default defineEventHandler(async (event) => {
     invoiceId: Number(body?.invoiceId),
     code: typeof body?.code === 'string' ? body.code.trim() : '',
     ip: ipBucketKey(clientIp(event))
-  }, {
-    allowAttempt: (ipKey, portalKey) => attempts.take([[ipKey, PUBLIC_PER_IP], [portalKey, PUBLIC_PER_PORTAL]]),
-    // Проверка без учёта (вес 0), учёт — только неверного кода: верный код счётчик не тратит.
-    locked: key => failures.used(key, PUBLIC_FAILS_PER_INVOICE) >= PUBLIC_FAILS_PER_INVOICE.max,
-    fail: (key) => { failures.take([[key, PUBLIC_FAILS_PER_INVOICE]]) },
-    cache: {
-      get: (key) => {
-        const hit = cache.get(key)
-        return hit && Date.now() - hit.at < PUBLIC_CACHE_MS ? hit.view : undefined
-      },
-      set: (key, view) => {
-        if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value!)
-        cache.set(key, { at: Date.now(), view })
-      }
-    },
-    // Вебхук расшифровывается только здесь: привязан к нашему порталу (AAD) и снова проверен SSRF-гардом.
-    clientTasks: async (hookValue, portalDomain, ids) => {
-      let hook: { url: string, host: string }
-      try {
-        hook = openClientHook(hookValue, portalDomain)
-      } catch (e) {
-        // Ключ сменили, значение из другого портала, домен вне списка — без самого вебхука в журнале.
-        console.warn(`[public] client hook not opened: ${e instanceof Error ? e.message : String(e)}`)
-        return null
-      }
-      return { host: hook.host, tasks: await readClientTasks(fetch as unknown as HookFetch, hook.url, ids) }
-    },
-    portal: async (d) => {
-      // SSRF-гард: в портал идём только по разрешённым доменам, и только если он нас установил.
-      if (!isAllowedPortalHost(d, parseSelfHostedHosts(process.env.B24_SELFHOSTED_HOSTS))) return null
-      const record = await getPortalByDomain(portalStore(), d)
-      return record ? { call: installerCallFor(record.memberId), origin: `https://${record.domain}` } : null
-    }
-  }).catch((e: unknown) => {
+  }, publicDeps()).catch((e: unknown) => {
     // Сбой портала (токен, сеть, лимит) — без подробностей наружу: публичная страница. Домен уже
     // проверен на символы имени хоста (DOMAIN_RE) — в журнал он попадает безопасным.
     console.error(`[public] invoice failed domain=${JSON.stringify(domain)}: ${e instanceof Error ? e.message : String(e)}`)

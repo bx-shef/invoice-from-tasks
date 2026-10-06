@@ -279,8 +279,17 @@ export function stageName(raw: unknown, stageId: string): string {
   return typeof hit?.NAME === 'string' ? hit.NAME : stageId
 }
 
+/** Документ счёта для скачивания: последний по каждому разрешённому шаблону. */
+export interface PublicDocument {
+  id: number
+  title: string
+  templateId: number
+}
+
 /** Что видит клиент. */
 export interface PublicInvoiceView {
+  /** PDF документов по шаблонам из настроек (этап 5). */
+  documents?: PublicDocument[]
   /** Позиций больше, чем показано (MAX_PUBLIC_ROWS): итог — по всему счёту. */
   truncated: boolean
   title: string
@@ -328,4 +337,56 @@ export function batchCommand(method: string, params: Record<string, unknown>): s
   }
   for (const [k, v] of Object.entries(params)) put(k, v)
   return `${method}?${q.toString()}`
+}
+
+/** Список документов (crm.documentgenerator.document.list → `{ documents: [...] }`). */
+function documentList(raw: unknown): Record<string, unknown>[] {
+  const list = raw && typeof raw === 'object' && 'documents' in raw ? (raw as { documents: unknown }).documents : raw
+  return (Array.isArray(list) ? list : []).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
+}
+
+/**
+ * Последний документ (наибольший ID) по каждому разрешённому шаблону — только с готовым PDF
+ * (`pdfId`) и только этого счёта: ответ портала перепроверяем, а не верим фильтру.
+ */
+export function latestDocuments(raw: unknown, templates: number[], invoiceId: number): PublicDocument[] {
+  const best = new Map<number, PublicDocument>()
+  for (const d of documentList(raw)) {
+    const id = posInt(d.id)
+    const templateId = posInt(d.templateId)
+    if (!id || !templateId || !templates.includes(templateId) || !posInt(d.pdfId)) continue
+    if (Number(d.entityTypeId) !== INVOICE_ENTITY_TYPE_ID || Number(d.entityId) !== invoiceId) continue
+    const prev = best.get(templateId)
+    if (!prev || id > prev.id) best.set(templateId, { id, title: plainText(d.title).slice(0, 200) || `Документ ${id}`, templateId })
+  }
+  return templates.map(t => best.get(t)).filter((d): d is PublicDocument => !!d)
+}
+
+/**
+ * Можно ли отдать документ (crm.documentgenerator.document.get → `{ document }`): этого счёта,
+ * разрешённого шаблона, с PDF, и машинная ссылка — https на САМ портал (её сервер скачивает
+ * токеном из ссылки; на другой хост не ходим — SSRF). Иначе `null`.
+ */
+export function documentPdfUrl(raw: unknown, templates: number[], invoiceId: number, portalHost: string): { url: string, title: string } | null {
+  const d = raw && typeof raw === 'object' && 'document' in raw ? (raw as { document: unknown }).document : raw
+  const o = d && typeof d === 'object' ? d as Record<string, unknown> : null
+  if (!o) return null
+  const templateId = posInt(o.templateId)
+  if (!templateId || !templates.includes(templateId) || !posInt(o.pdfId)) return null
+  if (Number(o.entityTypeId) !== INVOICE_ENTITY_TYPE_ID || Number(o.entityId) !== invoiceId) return null
+  if (typeof o.pdfUrlMachine !== 'string') return null
+  let u: URL
+  try {
+    u = new URL(o.pdfUrlMachine)
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'https:' || u.hostname !== portalHost || u.username || u.password || u.port) return null
+  return { url: u.toString(), title: plainText(o.title).slice(0, 200) }
+}
+
+/** Имя файла для Content-Disposition: только безопасные символы, расширение .pdf. */
+export function pdfFileName(title: string, id: number): string {
+  const base = title.replace(/[^\p{L}\p{N} ._-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)
+  return `${base || `document-${id}`}.pdf`
 }

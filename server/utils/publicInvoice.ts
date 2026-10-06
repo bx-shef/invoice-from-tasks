@@ -11,6 +11,9 @@ import { isAccessCode, parseHookValue } from '#shared/domain/appFieldTypes'
 import {
   batchCommand,
   clientTaskIdFor,
+  documentPdfUrl,
+  latestDocuments,
+  pdfFileName,
   invoiceBindingCodes,
   parsePublicClient,
   parsePublicInvoice,
@@ -21,10 +24,11 @@ import {
   taskBoundTo,
   type ClientTaskView,
   type PublicClient,
+  type PublicInvoiceItem,
   type PublicInvoiceView,
   type PublicTask
 } from '#shared/domain/publicInvoice'
-import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
+import { parseSettings, SETTINGS_KEY, type AppSettings } from '#shared/domain/settings'
 import { ACCESS_CODE_FIELD } from '#shared/domain/userFields'
 import { V3_PREFIX, type RestCall } from './b24Client'
 import { readOption } from './options'
@@ -172,7 +176,21 @@ export async function attachClientTasks(tasks: PublicTask[], clients: PublicClie
   }
 }
 
-export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): Promise<PublicResult> {
+/** Доступ подтверждён: портал, счёт, клиенты и настройки — для страницы и скачивания документа. */
+export interface PublicAccess {
+  call: RestCall
+  origin: string
+  invoice: PublicInvoiceItem
+  clients: PublicClient[]
+  settings: AppSettings
+}
+
+/**
+ * Проверка доступа — общая для страницы и скачивания PDF (этап 5): ссылка → лимиты → портал →
+ * счёт и клиенты (2 запроса) → код → настройки → стадия. Не подтверждён — готовый ответ: 400, 404
+ * (неверный код учтён), 429 или «закрыто» со фразой из настроек.
+ */
+export async function verifyPublicAccess(req: PublicRequest, deps: PublicDeps): Promise<PublicAccess | PublicResult> {
   if (!Number.isInteger(req.invoiceId) || req.invoiceId <= 0 || !DOMAIN_RE.test(req.domain)) return { status: 400, body: { error: 'Неверная ссылка' } }
   if (!isAccessCode(req.code)) return { status: 404, body: { error: NOT_FOUND } }
   const invoiceKey = `pub-inv:${req.domain}:${req.invoiceId}`
@@ -206,12 +224,26 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
   if (!settings.publicPage.stages.includes(invoice.stageId)) {
     return { status: 200, body: { state: 'closed', text: settings.publicPage.closedText } }
   }
+  return { call, origin: portal.origin, invoice, clients, settings }
+}
+
+function isResult(v: PublicAccess | PublicResult): v is PublicResult {
+  return 'status' in v
+}
+
+export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): Promise<PublicResult> {
+  const access = await verifyPublicAccess(req, deps)
+  if (isResult(access)) return access
+  const { call, invoice, clients, settings } = access
+  const portal = { origin: access.origin }
   const cacheKey = `${req.domain}:${invoice.id}`
   const cached = deps.cache.get(cacheKey)
   if (cached) return { status: 200, body: { state: 'open', invoice: cached } }
 
   const { task: clientTaskField, taskDomain } = settings.clientFields
 
+  // Документы — параллельно со стадией и строками; их сбой страницу не роняет (блок необязательный).
+  const documentsPromise = readLatestDocuments(call, settings.publicPage.templates, invoice.id)
   const [stages, myCompany, rowsRead] = await Promise.all([
     orNull(call('crm.status.list', { filter: { STATUS_ID: invoice.stageId } })),
     invoice.myCompanyId ? orNull(call('crm.item.get', { entityTypeId: 4, id: invoice.myCompanyId })) : Promise.resolve(null),
@@ -235,6 +267,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     if (task) tasks.push(task)
   }
   await attachClientTasks(tasks, clients, req.domain, deps)
+  const documents = await documentsPromise
   const view: PublicInvoiceView = {
     truncated: rowsRead.truncated,
     title: invoice.title,
@@ -246,8 +279,63 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     contacts: clients.filter(c => c.kind === 'contact').map(c => c.title).filter(Boolean),
     myCompany: parsePublicClient('company', myCompany, ACCESS_CODE_FIELD)?.title || null,
     rows: list,
-    tasks
+    tasks,
+    documents
   }
   deps.cache.set(cacheKey, view)
   return { status: 200, body: { state: 'open', invoice: view } }
+}
+
+/** Документы счёта (этап 5): новые первыми, фильтр по счёту — `entityTypeId` + `entityId` (документация метода). */
+export function documentListParams(invoiceId: number): Record<string, unknown> {
+  return {
+    select: ['id', 'title', 'templateId', 'pdfId', 'entityTypeId', 'entityId'],
+    filter: { entityTypeId: 31, entityId: invoiceId },
+    order: { id: 'desc' }
+  }
+}
+
+/** Последние документы счёта по шаблонам; сбой портала — пусто и строка в журнале. */
+export async function readLatestDocuments(call: RestCall, templates: number[], invoiceId: number) {
+  if (!templates.length) return []
+  try {
+    return latestDocuments(await call('crm.documentgenerator.document.list', documentListParams(invoiceId)), templates, invoiceId)
+  } catch (e) {
+    console.warn(`[public] documents of invoice ${invoiceId}: ${e instanceof Error ? e.message : String(e)}`)
+    return []
+  }
+}
+
+/** Предел PDF, байт — документ счёта больше не бывает, а память сервера не резиновая. */
+export const MAX_PDF_BYTES = 20 * 1024 * 1024
+
+export type DocumentResult
+  = | { status: 200, pdf: Uint8Array, fileName: string }
+    | PublicResult
+
+export interface DocumentDeps extends PublicDeps {
+  /** Скачать PDF по машинной ссылке портала (https, без редиректов, предел размера). */
+  fetchPdf: (url: string) => Promise<Uint8Array>
+}
+
+/**
+ * Скачивание PDF документа (этап 5): та же проверка доступа, что у страницы (код, стадия), затем
+ * документ — только этого счёта и разрешённого шаблона, машинная ссылка — только на сам портал.
+ * Ссылка (в ней токен) наружу не уходит: клиент получает файл, а не адрес.
+ */
+export async function loadPublicDocument(req: PublicRequest & { documentId: number }, deps: DocumentDeps): Promise<DocumentResult> {
+  if (!Number.isInteger(req.documentId) || req.documentId <= 0) return { status: 400, body: { error: 'Неверная ссылка' } }
+  const access = await verifyPublicAccess(req, deps)
+  if (isResult(access)) return access.status === 200 ? { status: 404, body: { error: 'Документ недоступен' } } : access
+  const { call, invoice, settings } = access
+  // Скачать можно только то, что показано на странице: последний документ по шаблону, а не любую
+  // старую версию перебором ID (находка ревью).
+  const shown = await readLatestDocuments(call, settings.publicPage.templates, invoice.id)
+  if (!shown.some(d => d.id === req.documentId)) return { status: 404, body: { error: 'Документ недоступен' } }
+  const doc = documentPdfUrl(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), settings.publicPage.templates, invoice.id, new URL(access.origin).hostname)
+  if (!doc) return { status: 404, body: { error: 'Документ недоступен' } }
+  const pdf = await deps.fetchPdf(doc.url)
+  // Сигнатура PDF: портал при ошибке отдаёт JSON или HTML — клиенту такой «PDF» не нужен.
+  if (pdf.byteLength < 5 || new TextDecoder().decode(pdf.subarray(0, 5)) !== '%PDF-') throw new Error('document is not a PDF')
+  return { status: 200, pdf, fileName: pdfFileName(doc.title, req.documentId) }
 }

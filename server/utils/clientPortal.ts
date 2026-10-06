@@ -35,9 +35,14 @@ export function hookMethodUrl(hookUrl: string, method: string, v3 = false): stri
 
 /** Тело ответа потоком с пределом в байтах: огромный ответ обрывается, а не ложится в память. */
 export async function readLimited(res: HookResponse, max = CLIENT_PORTAL_MAX_BYTES): Promise<string> {
+  return new TextDecoder().decode(await readLimitedBytes(res, max))
+}
+
+/** То же байтами — для PDF документов (этап 5). */
+export async function readLimitedBytes(res: HookResponse, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get('content-length'))
   if (Number.isFinite(declared) && declared > max) throw new Error('response too large')
-  if (!res.body) return ''
+  if (!res.body) return new Uint8Array()
   const reader = res.body.getReader()
   const parts: Uint8Array[] = []
   let size = 0
@@ -51,7 +56,8 @@ export async function readLimited(res: HookResponse, max = CLIENT_PORTAL_MAX_BYT
     }
     parts.push(value)
   }
-  return new TextDecoder().decode(Buffer.concat(parts))
+  // Buffer — уже Uint8Array: без лишней копии (PDF до 20 МБ).
+  return Buffer.concat(parts)
 }
 
 /** Текст ошибки портала: строка или `{ code, message }` (v3) — без адреса вебхука. */

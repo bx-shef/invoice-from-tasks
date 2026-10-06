@@ -1,6 +1,7 @@
 // Стадии счёта для вкладки «Публичная страница» (#34). Разбор — app/utils/invoiceStages.ts.
 
-import { invoiceStageEntities, stageOptions, type StageOption } from '~/utils/invoiceStages'
+import { collectOffsetPages } from '~/utils/paging'
+import { invoiceStageEntities, stageOptions, templateOptions, type StageOption, type TemplateOption } from '~/utils/invoiceStages'
 
 export function useInvoiceStages() {
   const b24 = useB24()
@@ -15,5 +16,21 @@ export function useInvoiceStages() {
     return out
   }
 
-  return { list }
+  /** Шаблоны генератора документов — для выбора, какие PDF показывать клиенту (этап 5). */
+  async function templates(): Promise<TemplateOption[]> {
+    // Метод постраничный (`start`, по 50): шаблоны всех сущностей портала, их бывает много.
+    const raw = await collectOffsetPages(
+      async (start) => {
+        const res = await b24.call<{ templates?: unknown }>('crm.documentgenerator.template.list', { select: ['id', 'name', 'active'], order: { id: 'asc' }, start })
+        const list = res?.templates
+        return Array.isArray(list) ? list : list && typeof list === 'object' ? Object.values(list) : []
+      },
+      50,
+      500,
+      'шаблонов документов больше 500 — список не показываем'
+    )
+    return templateOptions(raw)
+  }
+
+  return { list, templates }
 }

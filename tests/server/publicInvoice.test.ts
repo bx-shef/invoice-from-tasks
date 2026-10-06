@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { batch, codeEquals, isNotFound, loadPublicInvoice, matchesClient, NOT_FOUND, type PublicDeps } from '../../server/utils/publicInvoice'
+import { batch, codeEquals, documentListParams, isNotFound, loadPublicDocument, loadPublicInvoice, matchesClient, NOT_FOUND, type DocumentDeps, type PublicDeps } from '../../server/utils/publicInvoice'
 import { restCallFrom } from '../../server/utils/b24Client'
 import { batchCommand, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 import { SlidingWindow } from '../../server/utils/rateLimit'
 
 const CODE = 'ABCDEFGHJK'
 
-interface Over { stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
+interface Over { docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
 
 /** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
 function portal(over: Over = {}) {
-  const settings = JSON.stringify({ publicPage: { stages: over.stages ?? ['DT31_1:N'], closedText: 'Обратитесь к менеджеру' }, clientFields: { task: '', taskDomain: 'UF_SOURCE_DOMAIN' } })
+  const settings = JSON.stringify({ publicPage: { stages: over.stages ?? ['DT31_1:N'], closedText: 'Обратитесь к менеджеру', templates: over.templates ?? [] }, clientFields: { task: '', taskDomain: 'UF_SOURCE_DOMAIN' } })
   const calls: string[] = []
   const item = (entityTypeId: number, id: number): unknown => {
     if (entityTypeId === 31) {
@@ -43,6 +43,13 @@ function portal(over: Over = {}) {
     if (method === 'crm.status.list') return [{ STATUS_ID: 'DT31_1:N', NAME: 'Новый' }]
     if (method === 'crm.item.productrow.list') return { productRows: [{ id: 1, productName: '[10-77] Лендинг', price: 130, quantity: 1, sort: 10 }] }
     if (method === 'v3:tasks.task.result.list') return [{ text: 'Готово' }]
+    if (method === 'crm.documentgenerator.document.list' && over.docsError) throw new Error(over.docsError)
+    if (method === 'crm.documentgenerator.document.list') return { documents: [
+      { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
+      { id: '60', title: 'Старый счёт', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
+      { id: '62', title: 'Акт', templateId: '4', pdfId: '1', entityTypeId: '31', entityId: '5' }
+    ] }
+    if (method === 'crm.documentgenerator.document.get') return { document: over.doc ?? { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5', pdfUrlMachine: 'https://my.bitrix24.by/rest/crm.documentgenerator.document.getPdf.json?auth=T&token=X' } }
     throw new Error(`unexpected ${method}`)
   })
   return { call, calls }
@@ -195,5 +202,67 @@ describe('RestCall: приставка v3', () => {
     await call('crm.item.get')
     expect(v2).toHaveBeenCalledWith({ method: 'crm.item.get', params: {} })
     await expect(restCallFrom({ actions: { v2: { call: { make: v2 } } } })('v3:x')).rejects.toThrow(/v3/)
+  })
+})
+
+describe('документы (этап 5)', () => {
+  const docDeps = (p: ReturnType<typeof portal>, pdf = '%PDF-1.4 ...') => {
+    const fetchPdf = vi.fn(async () => new TextEncoder().encode(pdf))
+    return { d: { ...deps(p), fetchPdf } as DocumentDeps, fetchPdf }
+  }
+
+  it('в расшифровке — последний документ по каждому разрешённому шаблону', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ templates: [3] })))
+    if (r.status !== 200 || r.body.state !== 'open') throw new Error('closed')
+    expect(r.body.invoice.documents).toEqual([{ id: 61, title: 'Счёт 5', templateId: 3 }])
+    const none = portal()
+    await loadPublicInvoice(req(), deps(none))
+    expect(none.calls).not.toContain('crm.documentgenerator.document.list')
+  })
+
+  it('фильтр списка — документы этого счёта, новые первыми', () => {
+    expect(documentListParams(5)).toMatchObject({ filter: { entityTypeId: 31, entityId: 5 }, order: { id: 'desc' } })
+  })
+
+  it('скачивание: код проверяется заново, файл — по машинной ссылке портала', async () => {
+    const { d, fetchPdf } = docDeps(portal({ templates: [3] }))
+    const r = await loadPublicDocument({ ...req(), documentId: 61 }, d)
+    expect(r.status).toBe(200)
+    expect('pdf' in r && r.fileName).toBe('Счёт 5.pdf')
+    expect(fetchPdf).toHaveBeenCalledWith('https://my.bitrix24.by/rest/crm.documentgenerator.document.getPdf.json?auth=T&token=X')
+    const wrong = docDeps(portal({ templates: [3] }))
+    expect((await loadPublicDocument({ ...req({ code: 'ZZZZZZZZZZ' }), documentId: 61 }, wrong.d)).status).toBe(404)
+    expect(wrong.fetchPdf).not.toHaveBeenCalled()
+  })
+
+  it('чужой счёт, неразрешённый шаблон, ссылка на другой хост, закрытая стадия — 404 без скачивания', async () => {
+    const cases: Over[] = [
+      { templates: [3], doc: { id: 61, templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 999, pdfUrlMachine: 'https://my.bitrix24.by/x' } },
+      { templates: [4], doc: { id: 61, templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5, pdfUrlMachine: 'https://my.bitrix24.by/x' } },
+      { templates: [3], doc: { id: 61, templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5, pdfUrlMachine: 'https://evil.example/x' } },
+      { templates: [3], doc: { id: 61, templateId: 3, pdfId: 1, entityTypeId: 2, entityId: 5, pdfUrlMachine: 'https://my.bitrix24.by/x' } },
+      { templates: [3], stage: 'DT31_1:P' }
+    ]
+    for (const over of cases) {
+      const { d, fetchPdf } = docDeps(portal(over))
+      expect((await loadPublicDocument({ ...req(), documentId: 61 }, d)).status, JSON.stringify(over)).toBe(404)
+      expect(fetchPdf).not.toHaveBeenCalled()
+    }
+    expect((await loadPublicDocument({ ...req(), documentId: 0 }, docDeps(portal()).d)).status).toBe(400)
+  })
+
+  it('старую версию документа (не последнюю по шаблону) скачать нельзя', async () => {
+    const { d, fetchPdf } = docDeps(portal({ templates: [3], doc: { id: 60, title: 'Старый', templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5, pdfUrlMachine: 'https://my.bitrix24.by/x' } }))
+    expect((await loadPublicDocument({ ...req(), documentId: 60 }, d)).status).toBe(404)
+    expect(fetchPdf).not.toHaveBeenCalled()
+  })
+
+  it('сбой списка документов страницу не роняет — блок пуст', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ templates: [3], docsError: 'documentgenerator: OPERATION_TIME_LIMIT' })))
+    expect(r.status === 200 && r.body.state === 'open' && r.body.invoice.documents).toEqual([])
+  })
+
+  it('портал вернул не PDF — ошибка (обработчик отдаст 503)', async () => {
+    await expect(loadPublicDocument({ ...req(), documentId: 61 }, docDeps(portal({ templates: [3] }), '{"error":"x"}').d)).rejects.toThrow(/not a PDF/)
   })
 })

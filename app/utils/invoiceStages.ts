@@ -41,3 +41,33 @@ export function stageItems(options: StageOption[] | null, saved: string[]): Arra
 export function publicInvoiceUrl(siteUrl: string, portalDomain: string, invoiceId: number | string): string {
   return `${siteUrl.replace(/\/$/, '')}/p-${portalDomain}/i-${invoiceId}`
 }
+
+/** Шаблон генератора документов для выбора в настройках. */
+export interface TemplateOption {
+  id: number
+  label: string
+}
+
+/**
+ * Шаблоны из crm.documentgenerator.template.list (`{ templates: { "<id>": { id, name, active } } }`):
+ * активные, по названию. Портал отдаёт и шаблоны других сущностей — выбирает администратор.
+ */
+export function templateOptions(raw: unknown): TemplateOption[] {
+  const list = raw && typeof raw === 'object' && 'templates' in raw ? (raw as { templates: unknown }).templates : raw
+  // Документация: `templates` — ОБЪЕКТ по ID (`{ "39": {…} }`), а не массив; принимаем оба вида.
+  const items = Array.isArray(list) ? list : list && typeof list === 'object' ? Object.values(list) : []
+  return items
+    .map(t => (t ?? {}) as Record<string, unknown>)
+    .filter(t => Number(t.id) > 0 && t.active !== 'N' && t.active !== false)
+    .map(t => ({ id: Number(t.id), label: typeof t.name === 'string' && t.name ? t.name : `Шаблон #${t.id}` }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ru'))
+}
+
+/** Пункты выбора шаблонов: шаблоны портала плюс сохранённые, которых в портале нет (с пометкой). */
+export function templateItems(options: TemplateOption[] | null, saved: number[]): Array<{ label: string, value: number }> {
+  const items = (options ?? []).map(o => ({ label: o.label, value: o.id }))
+  for (const id of saved) {
+    if (!items.some(i => i.value === id)) items.push({ label: options ? `Шаблон #${id} — нет в портале` : `Шаблон #${id}`, value: id })
+  }
+  return items
+}

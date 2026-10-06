@@ -74,6 +74,8 @@ export interface AppSettings {
   publicPage: {
     stages: string[]
     closedText: string
+    /** Шаблоны генератора документов (ID), чьи документы клиент может скачать в PDF — по последнему на шаблон. */
+    templates: number[]
   }
   /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
@@ -95,6 +97,7 @@ export const LIMITS = {
   consultTitle: 100,
   vatCompanies: 50,
   publicStages: 50,
+  publicTemplates: 20,
   closedText: 500
 } as const
 
@@ -119,7 +122,7 @@ export function defaultSettings(): AppSettings {
     naming: 'plain',
     taskIdInName: false,
     clientFields: { task: '', taskDomain: '' },
-    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT },
+    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [] },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -243,7 +246,10 @@ export function parseSettings(raw: unknown): AppSettings {
       stages: Array.isArray(publicPage.stages)
         ? [...new Set(publicPage.stages.map(stageId).filter((v): v is string => v !== null))].slice(0, LIMITS.publicStages)
         : d.publicPage.stages,
-      closedText: closedText || d.publicPage.closedText
+      closedText: closedText || d.publicPage.closedText,
+      templates: Array.isArray(publicPage.templates)
+        ? [...new Set(publicPage.templates.map(positiveInt).filter((v): v is number => v !== null))].slice(0, LIMITS.publicTemplates)
+        : d.publicPage.templates
     },
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
