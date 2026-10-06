@@ -3,8 +3,8 @@ import { APP_FIELDS, camelFieldKey, fieldNames, clientTaskIdOf, isFieldName, mis
 import { parseTask, tasksBoundTo } from '#shared/domain/tasks'
 import { defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { taskListCall, TASK_SELECT } from '~/utils/invoiceRequests'
-import { userFieldAddCall, userFieldListCall } from '~/utils/userFieldRequests'
-import { fieldItems, withAppFields } from '~/utils/clientFieldSettings'
+import { needsAppId, userFieldAddCall, userFieldListCall } from '~/utils/userFieldRequests'
+import { fieldItems, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
 
 describe('коды UF', () => {
   it('принимает только UF_ латиницей до 50 символов, приводит к верхнему регистру', () => {
@@ -93,17 +93,35 @@ describe('списки UF', () => {
   })
 })
 
+describe('поля счёта приложения', () => {
+  it('создаются userfieldconfig.add в CRM_SMART_INVOICE полным кодом, системным типом', () => {
+    const qr = APP_FIELDS.find(f => f.name === 'UF_CRM_SMART_INVOICE_SH_IFT_QR')!
+    expect(userFieldAddCall(qr)).toEqual({
+      method: 'userfieldconfig.add',
+      params: { moduleId: 'crm', field: { entityId: 'CRM_SMART_INVOICE', fieldName: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', userTypeId: 'url', xmlId: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', multiple: 'N', mandatory: 'N', editFormLabel: { ru: qr.label, en: qr.label } } }
+    })
+    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['url', false], ['boolean', false], ['datetime', false]])
+    for (const f of APP_FIELDS.filter(f => f.entity === 'invoice')) expect(f.name.length).toBeLessThanOrEqual(50)
+  })
+
+  it('после создания — выбраны в настройках публичной страницы, если там пусто', () => {
+    const page = withAppInvoiceFields({ ...defaultSettings().publicPage, qrField: 'UF_CRM_SMART_INVOICE_MY' })
+    expect(page).toMatchObject({ linkField: 'UF_CRM_SMART_INVOICE_SH_IFT_LINK', qrField: 'UF_CRM_SMART_INVOICE_MY', approvedField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', approvedAtField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK_AT' })
+  })
+})
+
 describe('поля приложения', () => {
   it('«поле уже есть» — по всем кодам, любого типа', () => {
     const raw = [{ FIELD_NAME: 'UF_SH_IFT_CLIENT_TASK', USER_TYPE_ID: 'integer', MULTIPLE: 'Y' }, { FIELD_NAME: 'x' }, null]
     expect(fieldNames(raw)).toEqual(['UF_SH_IFT_CLIENT_TASK'])
-    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [] }).map(f => f.name)).not.toContain('UF_SH_IFT_CLIENT_TASK')
+    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [], invoice: [] }).map(f => f.name)).not.toContain('UF_SH_IFT_CLIENT_TASK')
   })
 
   it('создаём только отсутствующие', () => {
-    expect(missingAppFields({ task: [], company: [], contact: [] })).toEqual(APP_FIELDS)
+    expect(missingAppFields({ task: [], company: [], contact: [], invoice: [] })).toEqual(APP_FIELDS)
     const crm = ['UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_SH_IFT_CLIENT_HOOK']
-    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: crm, contact: crm }))
+    const invoice = APP_FIELDS.filter(f => f.entity === 'invoice').map(f => f.name)
+    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: crm, contact: crm, invoice }))
       .toEqual([{ entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: '[sh::invoice-from-task] Домен Битрикс24 клиента', type: 'string' }])
   })
 

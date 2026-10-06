@@ -1,7 +1,7 @@
 // Выбор полей клиента в настройках (#34): пункты выпадающего списка и подстановка созданных полей.
 // Чистые функции для SettingsClientFields.vue.
 
-import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
+import { APP_FIELDS, INVOICE_APPROVED_AT_FIELD, INVOICE_APPROVED_FIELD, INVOICE_LINK_FIELD, INVOICE_QR_FIELD, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
 
 /** Пункт списка: «Подпись (UF_CODE)»; `value: ''` — «Не выбрано». */
@@ -34,6 +34,21 @@ const SETTING_OF: Record<string, keyof AppSettings['clientFields']> = {
  * После «Создать поля»: невыбранные настройки получают поля приложения (созданные сейчас или уже
  * существующие). Выбранное администратором другое поле не трогаем.
  */
+/** Поля счёта приложения → ключ настроек публичной страницы. */
+const PUBLIC_SETTING_OF: Record<string, 'linkField' | 'qrField' | 'approvedField' | 'approvedAtField'> = {
+  [INVOICE_LINK_FIELD]: 'linkField',
+  [INVOICE_QR_FIELD]: 'qrField',
+  [INVOICE_APPROVED_FIELD]: 'approvedField',
+  [INVOICE_APPROVED_AT_FIELD]: 'approvedAtField'
+}
+
+/** То же для полей счёта: невыбранные настройки публичной страницы получают поля приложения. */
+export function withAppInvoiceFields(page: AppSettings['publicPage']): AppSettings['publicPage'] {
+  const next = { ...page }
+  for (const [name, key] of Object.entries(PUBLIC_SETTING_OF)) if (!next[key]) next[key] = name
+  return next
+}
+
 export function withAppFields(fields: AppSettings['clientFields']): AppSettings['clientFields'] {
   const next = { ...fields }
   // Поля своих типов (код доступа, вебхук) в настройки не выбираются — только поля задачи.
