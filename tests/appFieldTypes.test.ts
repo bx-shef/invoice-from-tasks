@@ -72,7 +72,7 @@ describe('код доступа', () => {
 
 describe('вебхук клиента', () => {
   it('принимает входящий вебхук и нормализует', () => {
-    expect(parseWebhookUrl(' https://Client.bitrix24.ru/rest/1/abc123def456 ')).toEqual({ url: 'https://client.bitrix24.ru/rest/1/abc123def456/', host: 'client.bitrix24.ru' })
+    expect(parseWebhookUrl(' https://Client.bitrix24.ru/rest/1/abc123def456 ')).toEqual({ url: 'https://client.bitrix24.ru/rest/1/abc123def456/', host: 'client.bitrix24.ru', userId: '1', code: 'abc123def456' })
   })
 
   it('отвергает не https, не /rest/<id>/<код>/, логин в адресе, порт, параметры', () => {

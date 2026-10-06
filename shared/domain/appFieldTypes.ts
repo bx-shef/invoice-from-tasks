@@ -141,7 +141,7 @@ export function parseHookValue(value: unknown): { host: string, sealed: string }
  * «Входящие вебхуки»). Возвращает нормализованный адрес и домен; не похоже — `null`. Проверку
  * домена на «это портал Битрикс24» (SSRF) делает сервер — assertPortalHost.
  */
-export function parseWebhookUrl(raw: unknown): { url: string, host: string } | null {
+export function parseWebhookUrl(raw: unknown): { url: string, host: string, userId: string, code: string } | null {
   if (typeof raw !== 'string') return null
   let u: URL
   try {
@@ -153,7 +153,7 @@ export function parseWebhookUrl(raw: unknown): { url: string, host: string } | n
   const m = /^\/rest\/(\d{1,10})\/([A-Za-z0-9]{8,64})\/?$/.exec(u.pathname)
   if (!m) return null
   const host = u.hostname.toLowerCase()
-  return { url: `https://${host}/rest/${m[1]}/${m[2]}/`, host }
+  return { url: `https://${host}/rest/${m[1]}/${m[2]}/`, host, userId: m[1]!, code: m[2]! }
 }
 
 /** CRM-сущность поля из PLACEMENT_OPTIONS (`ENTITY_ID`): компания — 4, контакт — 3; иначе `null`. */

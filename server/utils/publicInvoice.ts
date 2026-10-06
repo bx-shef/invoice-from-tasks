@@ -7,7 +7,7 @@
 
 import { Buffer } from 'node:buffer'
 import { timingSafeEqual } from 'node:crypto'
-import { isAccessCode } from '#shared/domain/appFieldTypes'
+import { isAccessCode, parseHookValue } from '#shared/domain/appFieldTypes'
 import {
   batchCommand,
   clientTaskIdFor,
@@ -153,14 +153,19 @@ export async function attachClientTasks(tasks: PublicTask[], clients: PublicClie
     wanted.set(host, [...(wanted.get(host) ?? []), Number(t.clientTaskId)])
   }
   if (!wanted.size) return
+  // Один портал — одна попытка: у компании и контактов вебхуки одного портала разные (свой IV),
+  // и при упавшем портале каждый ждал бы дедлайн заново (находка /code-review).
   const done = new Set<string>()
   for (const hook of new Set(clients.map(c => c.hook).filter((v): v is string => !!v))) {
-    const host = hook.split('|')[1] ?? ''
+    const host = parseHookValue(hook)?.host ?? ''
     const ids = wanted.get(host)
     if (!ids || done.has(host)) continue
-    const got = await deps.clientTasks(hook, portalDomain, ids).catch(() => null)
-    if (!got || got.host !== host) continue
     done.add(host)
+    const got = await deps.clientTasks(hook, portalDomain, ids).catch((e: unknown) => {
+      console.warn(`[public] client portal ${host}: ${e instanceof Error ? e.message : String(e)}`)
+      return null
+    })
+    if (!got || got.host !== host) continue
     for (const t of tasks) {
       if (t.clientTaskUrl && new URL(t.clientTaskUrl).hostname === host) t.clientTask = got.tasks.get(Number(t.clientTaskId)) ?? null
     }

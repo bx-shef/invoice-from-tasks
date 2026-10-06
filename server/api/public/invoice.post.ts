@@ -6,7 +6,7 @@ import { getPortalByDomain } from '../../utils/tokenStore'
 import { clientIp, installerCallFor, portalStore } from '../../utils/requestContext'
 import { isAllowedPortalHost, parseSelfHostedHosts } from '../../utils/b24Host'
 import { openClientHook } from '../../utils/clientHook'
-import { readClientTasks } from '../../utils/clientPortal'
+import { readClientTasks, type HookFetch } from '../../utils/clientPortal'
 import { loadPublicInvoice, PUBLIC_404_FLOOR_MS, PUBLIC_CACHE_MS, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL } from '../../utils/publicInvoice'
 import { SlidingWindow } from '../../utils/rateLimit'
 import { ipBucketKey } from '../../utils/requestLimits'
@@ -47,10 +47,12 @@ export default defineEventHandler(async (event) => {
       let hook: { url: string, host: string }
       try {
         hook = openClientHook(hookValue, portalDomain)
-      } catch {
+      } catch (e) {
+        // Ключ сменили, значение из другого портала, домен вне списка — без самого вебхука в журнале.
+        console.warn(`[public] client hook not opened: ${e instanceof Error ? e.message : String(e)}`)
         return null
       }
-      return { host: hook.host, tasks: await readClientTasks(fetch, hook.url, ids) }
+      return { host: hook.host, tasks: await readClientTasks(fetch as unknown as HookFetch, hook.url, ids) }
     },
     portal: async (d) => {
       // SSRF-гард: в портал идём только по разрешённым доменам, и только если он нас установил.
