@@ -167,6 +167,12 @@ const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [
             </div>
           </template>
         </article>
+        <p
+          v-if="invoice.truncated"
+          class="text-sm opacity-70"
+        >
+          Показаны первые позиции счёта; итог — по всему счёту.
+        </p>
         <div class="flex justify-between border-t pt-3 font-semibold">
           <span>Итого</span>
           <span>{{ money(invoice.total, invoice.currencyId) }}</span>

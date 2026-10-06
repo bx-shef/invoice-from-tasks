@@ -1,92 +1,186 @@
 import { describe, expect, it, vi } from 'vitest'
-import { codeEquals, loadPublicInvoice, matchesClient, NOT_FOUND, type PublicDeps } from '../../server/utils/publicInvoice'
+import { batch, codeEquals, isNotFound, loadPublicInvoice, matchesClient, NOT_FOUND, type PublicDeps } from '../../server/utils/publicInvoice'
 import { restCallFrom } from '../../server/utils/b24Client'
+import { batchCommand, type PublicInvoiceView } from '#shared/domain/publicInvoice'
+import { SlidingWindow } from '../../server/utils/rateLimit'
 
 const CODE = 'ABCDEFGHJK'
 
-function portal(over: { stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null } = {}) {
+interface Over { stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
+
+/** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
+function portal(over: Over = {}) {
   const settings = JSON.stringify({ publicPage: { stages: over.stages ?? ['DT31_1:N'], closedText: 'Обратитесь к менеджеру' }, clientFields: { task: '', companyDomain: 'UF_CRM_DOMAIN', contactDomain: '' } })
   const calls: string[] = []
+  const item = (entityTypeId: number, id: number): unknown => {
+    if (entityTypeId === 31) {
+      if (over.invoiceError) throw new Error(over.invoiceError)
+      if (id !== 5) throw new Error('crm.item.get: NOT_FOUND')
+      return { item: { id: 5, title: 'Счёт №5', stageId: over.stage ?? 'DT31_1:N', begindate: '2026-10-01', currencyId: 'BYN', opportunity: 130, companyId: 3, contactIds: [7], mycompanyId: 1, parentId2: 9 } }
+    }
+    if (entityTypeId === 4 && id === 3) return { item: { id: 3, title: 'ООО Клиент', ufCrmShIftAccessCode: over.companyCode === undefined ? CODE : over.companyCode, ufCrmDomain: 'client.bitrix24.ru' } }
+    if (entityTypeId === 4 && id === 1) return { item: { id: 1, title: 'Мы' } }
+    if (entityTypeId === 3) return { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: over.contactCode ?? null } }
+    throw new Error('NOT_FOUND')
+  }
+  const task = (id: number) => ({ task: { id, title: 'Лендинг', description: 'Описание', ufCrmTask: over.taskBinding ?? ['D_9'] } })
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     calls.push(method)
-    if (method === 'crm.item.get') {
-      const { entityTypeId, id } = params as { entityTypeId: number, id: number }
-      if (entityTypeId === 31) return id === 5 ? { item: { id: 5, title: 'Счёт №5', stageId: over.stage ?? 'DT31_1:N', begindate: '2026-10-01', currencyId: 'BYN', opportunity: 130, companyId: 3, contactIds: [7], mycompanyId: 1 } } : Promise.reject(new Error('NOT_FOUND'))
-      if (entityTypeId === 4 && id === 3) return { item: { id: 3, title: 'ООО Клиент', ufCrmShIftAccessCode: over.companyCode === undefined ? CODE : over.companyCode, ufCrmDomain: 'client.bitrix24.ru' } }
-      if (entityTypeId === 4 && id === 1) return { item: { id: 1, title: 'Мы' } }
-      if (entityTypeId === 3) return { item: { id: 7, name: 'Иван', lastName: 'Петров', ufCrmShIftAccessCode: over.contactCode ?? null } }
+    if (method === 'crm.item.get') return item(Number(params.entityTypeId), Number(params.id))
+    if (method === 'batch') {
+      const result: Record<string, unknown> = {}
+      for (const [key, cmd] of Object.entries(params.cmd as Record<string, string>)) {
+        const [m, q] = cmd.split('?') as [string, string]
+        const p = new URLSearchParams(q)
+        calls.push(`batch:${m}`)
+        try {
+          result[key] = m === 'crm.item.get' ? item(Number(p.get('entityTypeId')), Number(p.get('id'))) : task(Number(p.get('taskId')))
+        } catch { /* ошибка команды — ключа нет, как у портала */ }
+      }
+      return { result }
     }
     if (method === 'app.option.get') return settings
     if (method === 'crm.status.list') return [{ STATUS_ID: 'DT31_1:N', NAME: 'Новый' }]
     if (method === 'crm.item.productrow.list') return { productRows: [{ id: 1, productName: '[10-77] Лендинг', price: 130, quantity: 1, sort: 10 }] }
-    if (method === 'tasks.task.get') return { task: { id: 10, title: 'Лендинг', description: 'Описание' } }
     if (method === 'v3:tasks.task.result.list') return [{ text: 'Готово' }]
     throw new Error(`unexpected ${method}`)
   })
   return { call, calls }
 }
 
-function deps(p: ReturnType<typeof portal> | null, allow = true): PublicDeps {
-  return { portal: async () => (p ? { call: p.call, origin: 'https://my.bitrix24.by' } : null), allow: () => allow }
+function deps(p: ReturnType<typeof portal> | null, opts: { allow?: boolean } = {}) {
+  const fails = new Map<string, number>()
+  const cache = new Map<string, PublicInvoiceView>()
+  const d: PublicDeps & { fails: Map<string, number>, cache2: Map<string, PublicInvoiceView> } = {
+    portal: async () => (p ? { call: p.call, origin: 'https://my.bitrix24.by' } : null),
+    allowAttempt: () => opts.allow ?? true,
+    locked: key => (fails.get(key) ?? 0) >= 3,
+    fail: (key) => { fails.set(key, (fails.get(key) ?? 0) + 1) },
+    cache: { get: k => cache.get(k), set: (k, v) => { cache.set(k, v) } },
+    fails,
+    cache2: cache
+  }
+  return d
 }
 
 const req = (over: Partial<{ domain: string, invoiceId: number, code: string }> = {}) => ({ domain: 'my.bitrix24.by', invoiceId: 5, code: CODE, ip: '1.2.3.4', ...over })
 
 describe('loadPublicInvoice', () => {
-  it('верный код компании — расшифровка: клиент, исполнитель, стадия, строки, задачи', async () => {
-    const r = await loadPublicInvoice(req(), deps(portal()))
-    expect(r.status).toBe(200)
+  it('верный код компании — расшифровка; до кода — 2 запроса (счёт и пакет клиентов)', async () => {
+    const p = portal()
+    const r = await loadPublicInvoice(req(), deps(p))
     if (r.status !== 200 || r.body.state !== 'open') throw new Error('closed')
-    expect(r.body.invoice).toMatchObject({ title: 'Счёт №5', stage: 'Новый', company: 'ООО Клиент', contacts: ['Иван Петров'], myCompany: 'Мы', total: 130 })
+    expect(r.body.invoice).toMatchObject({ title: 'Счёт №5', stage: 'Новый', company: 'ООО Клиент', contacts: ['Иван Петров'], myCompany: 'Мы', total: 130, truncated: false })
     expect(r.body.invoice.tasks[0]).toMatchObject({ id: 10, results: ['Готово'], clientTaskId: '77', clientTaskUrl: 'https://client.bitrix24.ru/company/personal/user/0/tasks/task/view/77/' })
+    expect(p.calls.slice(0, 2)).toEqual(['crm.item.get', 'batch'])
+    expect(p.calls.indexOf('app.option.get')).toBeGreaterThan(p.calls.indexOf('batch'))
   })
 
   it('код контакта тоже открывает', async () => {
-    const r = await loadPublicInvoice(req(), deps(portal({ companyCode: null, contactCode: CODE })))
-    expect(r.status).toBe(200)
+    expect((await loadPublicInvoice(req(), deps(portal({ companyCode: null, contactCode: CODE })))).status).toBe(200)
   })
 
-  it('неверный код, нет счёта, нет портала — один и тот же ответ 404; стадию не выдаём', async () => {
+  it('задача из строки, не привязанная к счёту или его сделке, не показывается', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ taskBinding: ['D_999'] })))
+    if (r.status !== 200 || r.body.state !== 'open') throw new Error('closed')
+    expect(r.body.invoice.tasks).toEqual([])
+    expect(r.body.invoice.rows).toHaveLength(1)
+    const bound = await loadPublicInvoice(req(), deps(portal({ taskBinding: ['SI_5'] })))
+    expect(bound.status === 200 && bound.body.state === 'open' && bound.body.invoice.tasks).toHaveLength(1)
+  })
+
+  it('неверный код, нет счёта, нет портала — один ответ 404; ни настроек, ни стадии, ни строк', async () => {
     const wrong = portal()
     for (const r of [
       await loadPublicInvoice(req({ code: 'ZZZZZZZZZZ' }), deps(wrong)),
       await loadPublicInvoice(req({ invoiceId: 6 }), deps(portal())),
       await loadPublicInvoice(req(), deps(null))
     ]) expect(r).toEqual({ status: 404, body: { error: NOT_FOUND } })
-    expect(wrong.calls).not.toContain('crm.status.list')
-    expect(wrong.calls).not.toContain('crm.item.productrow.list')
+    expect(wrong.calls).toEqual(['crm.item.get', 'batch', 'batch:crm.item.get', 'batch:crm.item.get'])
+  })
+
+  it('сбой портала — не «неверный код», а ошибка (обработчик отдаст 503); неверный код не учтён', async () => {
+    const d = deps(portal({ invoiceError: 'crm.item.get: QUERY_LIMIT_EXCEEDED' }))
+    await expect(loadPublicInvoice(req(), d)).rejects.toThrow(/QUERY_LIMIT/)
+    expect(d.fails.size).toBe(0)
+  })
+
+  it('учитываются только неверные коды; после лимита — 429 даже с верным; верный код счётчик не тратит', async () => {
+    const d = deps(portal())
+    for (let i = 0; i < 5; i++) await loadPublicInvoice(req(), d)
+    expect(d.fails.size).toBe(0)
+    for (let i = 0; i < 3; i++) await loadPublicInvoice(req({ code: 'ZZZZZZZZZZ' }), d)
+    expect((await loadPublicInvoice(req(), d)).status).toBe(429)
   })
 
   it('отозванный код (пусто у всех) — 404', async () => {
-    const r = await loadPublicInvoice(req(), deps(portal({ companyCode: '', contactCode: null })))
-    expect(r.status).toBe(404)
+    expect((await loadPublicInvoice(req(), deps(portal({ companyCode: '', contactCode: null })))).status).toBe(404)
   })
 
   it('стадия не из настроек — спокойная фраза, без строк и задач', async () => {
     const p = portal({ stage: 'DT31_1:P' })
-    const r = await loadPublicInvoice(req(), deps(p))
-    expect(r).toEqual({ status: 200, body: { state: 'closed', text: 'Обратитесь к менеджеру' } })
+    expect(await loadPublicInvoice(req(), deps(p))).toEqual({ status: 200, body: { state: 'closed', text: 'Обратитесь к менеджеру' } })
     expect(p.calls).not.toContain('crm.item.productrow.list')
   })
 
-  it('не похожее на код — 404 без обращения к порталу; лимит — 429 до портала', async () => {
+  it('кеш: повторное открытие не читает строки и задачи, но код проверяет', async () => {
     const p = portal()
-    expect((await loadPublicInvoice(req({ code: 'abc' }), deps(p))).status).toBe(404)
-    expect((await loadPublicInvoice(req(), deps(p, false))).status).toBe(429)
-    expect(p.call).not.toHaveBeenCalled()
+    const d = deps(p)
+    await loadPublicInvoice(req(), d)
+    p.calls.length = 0
+    expect((await loadPublicInvoice(req(), d)).status).toBe(200)
+    expect(p.calls).not.toContain('crm.item.productrow.list')
+    expect((await loadPublicInvoice(req({ code: 'ZZZZZZZZZZ' }), d)).status).toBe(404)
   })
 
-  it('битая ссылка — 400', async () => {
-    expect((await loadPublicInvoice(req({ invoiceId: 0 }), deps(portal()))).status).toBe(400)
+  it('не похоже на код — 404 без портала; лимит попыток — 429 до портала; плохой домен — 400', async () => {
+    const p = portal()
+    expect((await loadPublicInvoice(req({ code: 'abc' }), deps(p))).status).toBe(404)
+    expect((await loadPublicInvoice(req(), deps(p, { allow: false }))).status).toBe(429)
+    expect(p.call).not.toHaveBeenCalled()
+    expect((await loadPublicInvoice(req({ domain: 'x'.repeat(300) }), deps(p))).status).toBe(400)
+    expect((await loadPublicInvoice(req({ domain: 'evil"\n.ru' }), deps(p))).status).toBe(400)
+    expect((await loadPublicInvoice(req({ invoiceId: 0 }), deps(p))).status).toBe(400)
   })
 })
 
-describe('сравнение кода', () => {
-  it('в постоянное время, разная длина — не равно', () => {
+describe('мелочи сервера', () => {
+  it('сравнение кода в постоянное время и по всем клиентам', () => {
     expect(codeEquals(CODE, CODE)).toBe(true)
     expect(codeEquals(CODE, 'ABCDEFGHJ')).toBe(false)
-    expect(matchesClient(CODE, [{ kind: 'company', id: 1, title: '', accessCode: null, domain: null }, { kind: 'contact', id: 2, title: '', accessCode: CODE, domain: null }])).toBe(true)
-    expect(matchesClient(CODE, [])).toBe(false)
+    const a = { kind: 'company' as const, id: 1, title: '', accessCode: 'ZZZZZZZZZZ', domain: null }
+    const b = { kind: 'contact' as const, id: 2, title: '', accessCode: CODE, domain: null }
+    expect(matchesClient(CODE, [a, b])).toBe(true)
+    expect(matchesClient(CODE, [b, a])).toBe(true)
+    expect(matchesClient(CODE, [a])).toBe(false)
+  })
+
+  it('«не найдено» и «нет доступа» — 404, прочее — сбой', () => {
+    expect(isNotFound(new Error('crm.item.get: NOT_FOUND'))).toBe(true)
+    expect(isNotFound(new Error('ACCESS_DENIED'))).toBe(true)
+    expect(isNotFound(new Error('fetch failed'))).toBe(false)
+  })
+
+  it('batch: пустой пакет — без запроса; ответ по ключам', async () => {
+    const call = vi.fn(async () => ({ result: { a: 1 }, result_error: { b: 'x' } }))
+    expect(await batch(call, {})).toEqual({})
+    expect(call).not.toHaveBeenCalled()
+    expect(await batch(call, { a: 'x' })).toEqual({ a: 1 })
+  })
+
+  it('команда пакета: массивы и вложенные объекты — как строка запроса портала', () => {
+    expect(batchCommand('tasks.task.get', { taskId: 10, select: ['ID', 'UF_CRM_TASK'] })).toBe('tasks.task.get?taskId=10&select%5B%5D=ID&select%5B%5D=UF_CRM_TASK')
+    expect(batchCommand('crm.item.list', { filter: { '=id': 3 } })).toBe('crm.item.list?filter%5B%3Did%5D=3')
+  })
+
+  it('SlidingWindow.used — без учёта новой попытки', () => {
+    const w = new SlidingWindow()
+    const lim = { max: 2, windowMs: 1000 }
+    expect(w.used('k', lim, 0)).toBe(0)
+    w.take([['k', lim]], 10)
+    w.take([['k', lim]], 20)
+    expect(w.used('k', lim, 30)).toBe(2)
+    expect(w.used('k', lim, 1015)).toBe(1)
   })
 })
 

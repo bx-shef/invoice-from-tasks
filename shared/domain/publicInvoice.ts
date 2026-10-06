@@ -4,7 +4,7 @@
 // исключение из «права CRM не расширяем», решение владельца в #34).
 
 import { parseExistingRows } from './invoice'
-import { taskPath } from './tasks'
+import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, taskPath } from './tasks'
 import { camelFieldKey, clientTaskIdOf } from './userFields'
 import { isAccessCode } from './appFieldTypes'
 
@@ -28,6 +28,8 @@ export interface PublicInvoiceItem {
   companyId: number | null
   contactIds: number[]
   myCompanyId: number | null
+  /** Сделка счёта (`parentId2`) — задачи сделки тоже относятся к счёту. */
+  dealId: number | null
 }
 
 function itemOf(result: unknown): Record<string, unknown> | null {
@@ -54,8 +56,32 @@ export function parsePublicInvoice(result: unknown): PublicInvoiceItem | null {
     opportunity: Number(o.opportunity) || 0,
     companyId: posInt(o.companyId),
     contactIds: [...new Set(contacts.map(posInt).filter((v): v is number => v !== null))],
-    myCompanyId: posInt(o.mycompanyId)
+    myCompanyId: posInt(o.mycompanyId),
+    dealId: posInt(o.parentId2)
   }
+}
+
+/**
+ * Коды привязки, по которым задача считается задачей ЭТОГО счёта: сам счёт и его сделка
+ * (crmBindingCodes, как при заполнении). Задача из строки «[123] …» без такой привязки клиенту не
+ * показывается: номер в названии строки может вписать кто угодно, а читаем мы токеном
+ * администратора (находка ревью безопасности).
+ */
+export function invoiceBindingCodes(invoice: Pick<PublicInvoiceItem, 'id' | 'dealId'>): string[] {
+  return [
+    ...crmBindingCodes(INVOICE_ENTITY_TYPE_ID, invoice.id),
+    ...(invoice.dealId ? crmBindingCodes(DEAL_ENTITY_TYPE_ID, invoice.dealId) : [])
+  ]
+}
+
+/** Привязана ли задача (ответ tasks.task.get) к счёту: `ufCrmTask` / `UF_CRM_TASK` содержит код. */
+export function taskBoundTo(taskRaw: unknown, codes: string[]): boolean {
+  const raw = taskRaw && typeof taskRaw === 'object' && 'task' in taskRaw ? (taskRaw as { task: unknown }).task : taskRaw
+  const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const list = o.ufCrmTask ?? o.UF_CRM_TASK
+  const bound = (Array.isArray(list) ? list : []).map(v => String(v).toLowerCase())
+  const wanted = new Set(codes.map(c => c.toLowerCase()))
+  return bound.some(b => wanted.has(b))
 }
 
 /** Компания или контакт клиента: подпись, код доступа и домен портала клиента из UF. */
@@ -116,8 +142,10 @@ export const MAX_PUBLIC_TEXT = 4000
  */
 export function plainText(value: unknown): string {
   if (typeof value !== 'string') return ''
+  // Имя тега — целиком (за ним только `=` или `]`): «[important]» и «[list of changes]» —
+  // обычный текст, а не теги (находка /code-review).
   return value
-    .replace(/\[(\/?)(b|i|u|s|url|img|quote|code|list|\*|color|size|font|user|disk file id)[^\]]*\]/gi, '')
+    .replace(/\[\/?(?:b|i|u|s|url|img|quote|code|list|\*|color|size|font|user|table|tr|td|th|p|left|right|center|justify)(?:=[^\]]*)?\]|\[disk file id=[^\]]*\]/gi, '')
     .replace(/\r\n?/g, '\n')
     .trim()
     .slice(0, MAX_PUBLIC_TEXT)
@@ -172,6 +200,8 @@ export function stageName(raw: unknown, stageId: string): string {
 
 /** Что видит клиент. */
 export interface PublicInvoiceView {
+  /** Позиций больше, чем показано (MAX_PUBLIC_ROWS): итог — по всему счёту. */
+  truncated: boolean
   title: string
   date: string
   stage: string
@@ -197,4 +227,19 @@ export function clientTaskIdFor(rows: PublicRow[], taskId: number, taskRaw: unkn
   const raw = taskRaw && typeof taskRaw === 'object' && 'task' in taskRaw ? (taskRaw as { task: unknown }).task : taskRaw
   const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   return clientTaskIdOf(o[camelFieldKey(clientTaskField)] ?? o[clientTaskField])
+}
+
+/**
+ * Команда пакета `batch` (REST v2): `метод?параметры` в виде строки запроса, массивы — `key[]=`,
+ * объекты — `key[sub]=` (как ждёт портал; документация метода batch).
+ */
+export function batchCommand(method: string, params: Record<string, unknown>): string {
+  const q = new URLSearchParams()
+  const put = (key: string, v: unknown): void => {
+    if (Array.isArray(v)) v.forEach(x => put(`${key}[]`, x))
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) put(`${key}[${k}]`, x)
+    else if (v !== undefined && v !== null) q.append(key, String(v))
+  }
+  for (const [k, v] of Object.entries(params)) put(k, v)
+  return `${method}?${q.toString()}`
 }

@@ -12,4 +12,9 @@ export default defineEventHandler((event) => {
   setResponseHeader(event, 'Content-Security-Policy', cached)
   setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
   setResponseHeader(event, 'Referrer-Policy', 'strict-origin-when-cross-origin')
+  // Публичная страница счёта (#34): не индексировать и не кешировать — за ней данные клиента.
+  if (/^\/p-[^/]+\/i-/.test(event.path)) {
+    setResponseHeader(event, 'X-Robots-Tag', 'noindex, nofollow')
+    setResponseHeader(event, 'Cache-Control', 'no-store')
+  }
 })

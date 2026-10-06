@@ -85,6 +85,13 @@ export class SlidingWindow {
     return ok
   }
 
+  /** Сколько единиц уже учтено в окне ключа — без учёта новой попытки (публичная страница: «заблокирован ли счёт»). */
+  used(key: string, limit: WindowLimit, now = Date.now()): number {
+    const bucket = this.#buckets.get(key)
+    if (!bucket) return 0
+    return bucket.times.reduce((sum, t, i) => (t > now - limit.windowMs ? sum + bucket.weights[i]! : sum), 0)
+  }
+
   /** Отбрасывает попадания старше окна: попадание ровно `windowMs` назад уже не считается. */
   #expire(prev: Bucket | undefined, windowMs: number, now: number): Bucket {
     if (!prev) return { windowMs, times: [], weights: [] }

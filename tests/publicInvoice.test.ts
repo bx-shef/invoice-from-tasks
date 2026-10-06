@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clientDomainOf, clientTaskIdFor, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
+import { clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
 import { DEFAULT_CLOSED_TEXT, defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { invoiceStageEntities, publicInvoiceUrl, stageItems, stageOptions } from '~/utils/invoiceStages'
 
@@ -15,7 +15,7 @@ describe('приставка строки', () => {
 describe('счёт и клиенты', () => {
   it('счёт: стадия, дата, клиент', () => {
     expect(parsePublicInvoice({ item: { id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', begindate: '2026-10-01T03:00:00+03:00', currencyId: 'BYN', opportunity: '120.5', companyId: 3, contactIds: [7, 7, 0], mycompanyId: 1 } }))
-      .toEqual({ id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1 })
+      .toEqual({ id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1, dealId: null })
     expect(parsePublicInvoice({ item: {} })).toBeNull()
   })
 
@@ -66,12 +66,26 @@ describe('строки и задачи', () => {
     })
     expect(parsePublicTask({ task: { id: 10 } }, 'https://m', 'CL_1', 'c.ru', null)?.clientTaskUrl).toBeNull()
     expect(plainText('<script>x</script>')).toBe('<script>x</script>')
+    // Имя тега целиком: «[important]» и «[list of changes]» — текст; таблицы — теги.
+    expect(plainText('Сделано [important], см. [list of changes] [TABLE][TR][TD]x[/TD][/TR][/TABLE] [USER=1]Иван[/USER]')).toBe('Сделано [important], см. [list of changes] x Иван')
     expect(plainText('я'.repeat(5000))).toHaveLength(4000)
   })
 
   it('название стадии; нет — код', () => {
     expect(stageName([{ STATUS_ID: 'DT31_1:N', NAME: 'Новый' }], 'DT31_1:N')).toBe('Новый')
     expect(stageName([], 'DT31_1:P')).toBe('DT31_1:P')
+  })
+})
+
+describe('привязка задачи к счёту', () => {
+  it('счёт и его сделка; регистр кода не важен', () => {
+    const codes = invoiceBindingCodes({ id: 5, dealId: 9 })
+    expect(codes).toEqual(['SI_5', 'T1f_5', 'D_9'])
+    expect(taskBoundTo({ task: { ufCrmTask: ['D_9'] } }, codes)).toBe(true)
+    expect(taskBoundTo({ task: { UF_CRM_TASK: ['t1F_5'] } }, codes)).toBe(true)
+    expect(taskBoundTo({ task: { ufCrmTask: ['D_10'] } }, codes)).toBe(false)
+    expect(taskBoundTo({ task: {} }, codes)).toBe(false)
+    expect(invoiceBindingCodes({ id: 5, dealId: null })).toEqual(['SI_5', 'T1f_5'])
   })
 })
 
