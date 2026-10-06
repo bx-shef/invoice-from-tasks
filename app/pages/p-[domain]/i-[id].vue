@@ -15,6 +15,29 @@ const domain = computed(() => String(route.params.domain ?? ''))
 const invoiceId = computed(() => Number(route.params.id))
 
 const code = ref('')
+
+/** Код запоминается в браузере клиента (localStorage) — на свой счёт; не вышло — просто вводят снова. */
+const codeKey = computed(() => `ift:code:${domain.value}:${invoiceId.value}`)
+function rememberCode(value: string | null) {
+  try {
+    if (value) localStorage.setItem(codeKey.value, value)
+    else localStorage.removeItem(codeKey.value)
+  } catch {
+    // Хранилище закрыто (приватный режим) — без запоминания.
+  }
+}
+onMounted(() => {
+  let saved = ''
+  try {
+    saved = localStorage.getItem(codeKey.value) ?? ''
+  } catch {
+    saved = ''
+  }
+  if (saved.length === 10) {
+    code.value = saved
+    void open()
+  }
+})
 const busy = ref(false)
 const error = ref('')
 const invoice = ref<PublicInvoiceView | null>(null)
@@ -28,12 +51,15 @@ async function open() {
       method: 'POST',
       body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value }
     })
+    rememberCode(code.value)
     if (res.state === 'open') {
       invoice.value = res.invoice
       void loadPreviews()
     } else closedText.value = res.text
   } catch (e) {
-    const err = e as { data?: { error?: string }, statusMessage?: string }
+    const err = e as { data?: { error?: string }, statusMessage?: string, statusCode?: number }
+    // Неверный код (404) — забыть сохранённый; сбой сети или лимит — оставить.
+    if (err.statusCode === 404) rememberCode(null)
     error.value = err.data?.error || err.statusMessage || 'Не удалось открыть счёт'
   } finally {
     busy.value = false
@@ -57,9 +83,9 @@ const downloading = ref<number | null>(null)
 /** Превью документов: ID → адрес картинки (blob). Нет превью — кнопка без картинки. */
 const previews = ref<Record<number, string>>({})
 
-/** Картинки документов — по одному запросу, тем же защищённым путём, что и PDF (код в теле). */
+/** Картинки документов — параллельно, тем же защищённым путём, что и PDF (код в теле). */
 async function loadPreviews() {
-  for (const d of invoice.value?.documents ?? []) {
+  await Promise.all((invoice.value?.documents ?? []).map(async (d) => {
     try {
       const blob = await $fetch<Blob>('/api/public/document', {
         method: 'POST',
@@ -70,7 +96,7 @@ async function loadPreviews() {
     } catch {
       // Превью — удобство: без него остаётся кнопка PDF.
     }
-  }
+  }))
 }
 const docError = ref('')
 
