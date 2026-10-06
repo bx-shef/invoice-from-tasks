@@ -63,7 +63,10 @@ function deps(p: ReturnType<typeof portal> | null, opts: { allow?: boolean } = {
     portal: async () => (p ? { call: p.call, origin: 'https://my.bitrix24.by' } : null),
     allowAttempt: () => opts.allow ?? true,
     locked: key => (fails.get(key) ?? 0) >= 3,
-    fail: (key) => { fails.set(key, (fails.get(key) ?? 0) + 1) },
+    fail: (key) => {
+      fails.set(key, (fails.get(key) ?? 0) + 1)
+      return fails.get(key)!
+    },
     cache: { get: k => cache.get(k), set: (k, v) => { cache.set(k, v) } },
     fails,
     cache2: cache

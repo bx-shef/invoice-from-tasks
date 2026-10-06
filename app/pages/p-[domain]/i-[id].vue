@@ -6,6 +6,7 @@
 // дата принятия, описание и результат; без вебхука — только ссылка. Не в разрешённой стадии —
 // спокойная фраза из настроек.
 // Без фрейма портала: страница открыта всем, данные отдаёт сервер только по верному коду.
+import { MAX_COMMENT_LENGTH } from '#shared/domain/approval'
 import { pdfFileName, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 
 useHead({ title: 'Расшифровка счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
@@ -15,6 +16,29 @@ const domain = computed(() => String(route.params.domain ?? ''))
 const invoiceId = computed(() => Number(route.params.id))
 
 const code = ref('')
+
+/** Код запоминается в браузере клиента (localStorage) — на свой счёт; не вышло — просто вводят снова. */
+const codeKey = computed(() => `ift:code:${domain.value}:${invoiceId.value}`)
+function rememberCode(value: string | null) {
+  try {
+    if (value) localStorage.setItem(codeKey.value, value)
+    else localStorage.removeItem(codeKey.value)
+  } catch {
+    // Хранилище закрыто (приватный режим) — без запоминания.
+  }
+}
+onMounted(() => {
+  let saved = ''
+  try {
+    saved = localStorage.getItem(codeKey.value) ?? ''
+  } catch {
+    saved = ''
+  }
+  if (saved.length === 10) {
+    code.value = saved
+    void open()
+  }
+})
 const busy = ref(false)
 const error = ref('')
 const invoice = ref<PublicInvoiceView | null>(null)
@@ -28,12 +52,15 @@ async function open() {
       method: 'POST',
       body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value }
     })
+    rememberCode(code.value)
     if (res.state === 'open') {
       invoice.value = res.invoice
       void loadPreviews()
     } else closedText.value = res.text
   } catch (e) {
-    const err = e as { data?: { error?: string }, statusMessage?: string }
+    const err = e as { data?: { error?: string }, statusMessage?: string, statusCode?: number }
+    // Неверный код (404) — забыть сохранённый; сбой сети или лимит — оставить.
+    if (err.statusCode === 404) rememberCode(null)
     error.value = err.data?.error || err.statusMessage || 'Не удалось открыть счёт'
   } finally {
     busy.value = false
@@ -57,9 +84,9 @@ const downloading = ref<number | null>(null)
 /** Превью документов: ID → адрес картинки (blob). Нет превью — кнопка без картинки. */
 const previews = ref<Record<number, string>>({})
 
-/** Картинки документов — по одному запросу, тем же защищённым путём, что и PDF (код в теле). */
+/** Картинки документов — параллельно, тем же защищённым путём, что и PDF (код в теле). */
 async function loadPreviews() {
-  for (const d of invoice.value?.documents ?? []) {
+  await Promise.all((invoice.value?.documents ?? []).map(async (d) => {
     try {
       const blob = await $fetch<Blob>('/api/public/document', {
         method: 'POST',
@@ -70,7 +97,7 @@ async function loadPreviews() {
     } catch {
       // Превью — удобство: без него остаётся кнопка PDF.
     }
-  }
+  }))
 }
 const docError = ref('')
 
@@ -105,6 +132,62 @@ async function download(id: number, title: string) {
   } finally {
     downloading.value = null
   }
+}
+
+const commentText = ref('')
+const sending = ref(false)
+const commentError = ref('')
+const commentSent = ref(false)
+
+/** Комментарий в режиме согласования: дело на ответственного; затем перечитываем счёт — список обновится. */
+async function sendComment() {
+  sending.value = true
+  commentError.value = ''
+  commentSent.value = false
+  try {
+    await $fetch('/api/public/comment', {
+      method: 'POST',
+      body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, text: commentText.value }
+    })
+    commentText.value = ''
+    commentSent.value = true
+    await refreshApproval()
+  } catch (e) {
+    const err = e as { data?: { error?: string }, statusMessage?: string }
+    commentError.value = err.data?.error || err.statusMessage || 'Не удалось отправить комментарий'
+  } finally {
+    sending.value = false
+  }
+}
+
+const approving = ref(false)
+
+/** «Согласовать»: галка и дата — в счёт, дело — ответственному; затем перечитываем отметку. */
+async function approve() {
+  approving.value = true
+  commentError.value = ''
+  try {
+    await $fetch('/api/public/approve', { method: 'POST', body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value } })
+    await refreshApproval()
+  } catch (e) {
+    const err = e as { data?: { error?: string }, statusMessage?: string }
+    commentError.value = err.data?.error || err.statusMessage || 'Не удалось отметить согласование'
+  } finally {
+    approving.value = false
+  }
+}
+
+async function refreshApproval() {
+  const res = await $fetch<{ state: 'open', invoice: PublicInvoiceView } | { state: 'closed', text: string }>('/api/public/invoice', {
+    method: 'POST',
+    body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value }
+  })
+  if (res.state === 'open' && invoice.value) invoice.value = { ...invoice.value, approval: res.invoice.approval }
+}
+
+function dateTime(value: string): string {
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
 }
 
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
@@ -339,6 +422,96 @@ const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
           <span>Итого</span>
           <span>{{ money(invoice.total, invoice.currencyId) }}</span>
         </div>
+      </section>
+
+      <section
+        v-if="invoice.approval"
+        class="space-y-3"
+        data-testid="public-approval"
+      >
+        <div class="font-medium">
+          Согласование
+        </div>
+        <B24Alert
+          v-if="invoice.approval.mark.approved"
+          color="air-primary-success"
+          :title="invoice.approval.mark.approvedAt ? `Согласовано ${dateTime(invoice.approval.mark.approvedAt)}` : 'Согласовано'"
+          data-testid="public-approved"
+        />
+        <template v-else>
+          <p class="text-sm opacity-80">
+            Счёт ждёт вашего согласования. Всё верно — нажмите «Согласовать»; нужно поправить — напишите
+            комментарий, менеджер ответит здесь.
+          </p>
+          <B24Button
+            v-if="invoice.approval.mark.enabled"
+            color="air-primary-success"
+            label="Согласовать"
+            :loading="approving"
+            :disabled="approving"
+            data-testid="public-approve"
+            @click="approve"
+          />
+        </template>
+        <form
+          class="space-y-2"
+          @submit.prevent="sendComment"
+        >
+          <B24Textarea
+            v-model="commentText"
+            :maxlength="MAX_COMMENT_LENGTH"
+            :rows="3"
+            class="w-full"
+            placeholder="Ваш комментарий"
+            aria-label="Комментарий"
+            data-testid="public-comment-text"
+          />
+          <B24Button
+            type="submit"
+            color="air-primary"
+            label="Отправить"
+            :loading="sending"
+            :disabled="sending || !commentText.trim()"
+            data-testid="public-comment-send"
+          />
+          <p
+            v-if="commentError"
+            class="text-sm text-(--ui-color-accent-main-alert)"
+          >
+            {{ commentError }}
+          </p>
+          <p
+            v-else-if="commentSent"
+            class="text-sm text-(--ui-color-accent-main-success)"
+          >
+            Комментарий отправлен
+          </p>
+        </form>
+        <article
+          v-for="c in invoice.approval.comments"
+          :key="c.id"
+          class="rounded border border-(--ui-color-divider-less) p-3 space-y-2 text-sm"
+          data-testid="public-comment"
+        >
+          <div class="flex justify-between gap-2 text-xs opacity-70">
+            <span>{{ dateTime(c.created) }}</span>
+            <B24Badge
+              v-if="c.closed"
+              color="air-primary-success"
+              size="sm"
+              label="Закрыто"
+            />
+          </div>
+          <p class="whitespace-pre-line">
+            {{ c.text }}
+          </p>
+          <div
+            v-if="c.answer"
+            class="ml-3 pl-3 border-l-2 border-(--ui-color-accent-main-primary) whitespace-pre-line"
+          >
+            <b>Ответ:</b> {{ c.answer }}
+          </div>
+        </article>
       </section>
     </template>
   </div>

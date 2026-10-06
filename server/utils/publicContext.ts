@@ -7,10 +7,41 @@ import { installerCallFor, portalStore } from './requestContext'
 import { isAllowedPortalHost, parseSelfHostedHosts } from './b24Host'
 import { openClientHook } from './clientHook'
 import { readClientTasks, readLimitedBytes, type HookFetch } from './clientPortal'
-import { MAX_PDF_BYTES, PUBLIC_CACHE_MS, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL, type DocumentDeps } from './publicInvoice'
+import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
+import type { RestCall } from './b24Client'
+import { readOption } from './options'
+import { MAX_PDF_BYTES, PUBLIC_CACHE_MS, PUBLIC_COMMENTS_PER_INVOICE, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL, type CommentDeps, type DocumentDeps } from './publicInvoice'
 import { SlidingWindow } from './rateLimit'
 
 const attempts = new SlidingWindow()
+const comments = new SlidingWindow()
+/** Сообщения в чат проблем: одно на ключ в час — порог неверных кодов не засыпет чат. */
+const noticeSent = new Map<string, number>()
+const NOTICE_WINDOW_MS = 60 * 60_000
+const MAX_NOTICE_KEYS = 1000
+
+/**
+ * Сообщение в чат проблем портала: чат — из настроек (`problemChat.dialogId`), пишет токен
+ * установщика (`im.message.add`, право `im`). Чат не выбран — молча ничего.
+ */
+async function notifyProblemChat(call: RestCall, key: string, text: string): Promise<void> {
+  const last = noticeSent.get(key)
+  if (last && Date.now() - last < NOTICE_WINDOW_MS) return
+  if (noticeSent.size >= MAX_NOTICE_KEYS) noticeSent.delete(noticeSent.keys().next().value!)
+  noticeSent.set(key, Date.now())
+  const dialogId = parseSettings(await readOption(call, SETTINGS_KEY)).problemChat.dialogId
+  if (!dialogId) return
+  await call('im.message.add', { DIALOG_ID: dialogId, MESSAGE: text, URL_PREVIEW: 'N' })
+}
+
+/** Зависимости записи комментария: проверка доступа как у страницы плюс лимит комментариев счёта. */
+export function commentDeps(): CommentDeps {
+  return {
+    ...publicDeps('page'),
+    allowComment: key => comments.take([[key, PUBLIC_COMMENTS_PER_INVOICE]]),
+    now: () => new Date()
+  }
+}
 const failures = new SlidingWindow()
 const cache = new Map<string, { at: number, view: PublicInvoiceView }>()
 const MAX_CACHE = 500
@@ -33,7 +64,9 @@ export function publicDeps(kind: 'page' | 'download' = 'page'): DocumentDeps {
     locked: key => failures.used(key, PUBLIC_FAILS_PER_INVOICE) >= PUBLIC_FAILS_PER_INVOICE.max,
     fail: (key) => {
       failures.take([[key, PUBLIC_FAILS_PER_INVOICE]])
+      return failures.used(key, PUBLIC_FAILS_PER_INVOICE)
     },
+    notify: notifyProblemChat,
     cache: {
       get: (key) => {
         const hit = cache.get(key)

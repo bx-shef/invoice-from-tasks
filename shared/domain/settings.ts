@@ -9,6 +9,9 @@ import { MAX_COMPANY_TITLE, normalizeVatRate, type CompanyVat } from './vat'
 import { normalizeFieldName } from './userFields'
 
 /** Ключ общих настроек в app.option. Суффикс версии — на случай несовместимой смены формата. */
+/** Чат для im.message.add: `chat<ID>` (групповой; личные диалоги не берём). */
+export const DIALOG_RE = /^chat[1-9]\d{0,9}$/
+
 export const SETTINGS_KEY = 'ift_settings_v1'
 /** Ключ ставок в app.option. */
 export const RATES_KEY = 'ift_rates_v1'
@@ -76,6 +79,27 @@ export interface AppSettings {
     closedText: string
     /** Шаблоны генератора документов (ID), чьи документы клиент может скачать в PDF — по последнему на шаблон. */
     templates: number[]
+    /** Поле счёта (`UF_CRM_…`, строка или ссылка), куда встройка пишет адрес публичной страницы; `''` — не писать. */
+    linkField: string
+    /** Поле счёта, куда встройка пишет адрес картинки QR-кода (для шаблона документа); `''` — не писать. */
+    qrField: string
+    /**
+     * Стадия согласования (`stageId`, одна): в ней клиент видит расшифровку и пишет комментарии
+     * (shared/domain/approval.ts). Не входит в `stages` — разбор убирает её оттуда. `''` — режима нет.
+     */
+    approvalStage: string
+    /** Поле счёта «Да/Нет», куда кнопка «Согласовать» ставит галку; `''` — не ставить. */
+    approvedField: string
+    /** Поле счёта «Дата» или «Дата и время», куда кнопка пишет момент согласования; `''` — не писать. */
+    approvedAtField: string
+  }
+  /**
+   * Чат проблем: сюда сервер пишет о подозрительных входах на публичную страницу и сбоях записи
+   * комментариев (`im.message.add` токеном установщика). `dialogId` — `chat<ID>`; `''` — не писать.
+   */
+  problemChat: {
+    dialogId: string
+    title: string
   }
   /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
@@ -98,7 +122,8 @@ export const LIMITS = {
   vatCompanies: 50,
   publicStages: 50,
   publicTemplates: 20,
-  closedText: 500
+  closedText: 500,
+  chatTitle: 200
 } as const
 
 /** Фраза по умолчанию, если счёт не в разрешённой стадии. */
@@ -122,7 +147,8 @@ export function defaultSettings(): AppSettings {
     naming: 'plain',
     taskIdInName: false,
     clientFields: { task: '', taskDomain: '' },
-    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [] },
+    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '', approvalStage: '', approvedField: '', approvedAtField: '' },
+    problemChat: { dialogId: '', title: '' },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -220,6 +246,8 @@ export function parseSettings(raw: unknown): AppSettings {
   const clientFields = asObject(o.clientFields)
   const publicPage = asObject(o.publicPage)
   const closedText = text(publicPage.closedText, LIMITS.closedText).trim()
+  const approvalStage = stageId(publicPage.approvalStage) ?? ''
+  const problemChat = asObject(o.problemChat)
   // ⚠ Без обрезки до проверки: `text(…, 3)` превращал «RUBLES» в «RUB» и пропускал мусор как валюту.
   const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : ''
   return {
@@ -244,13 +272,22 @@ export function parseSettings(raw: unknown): AppSettings {
     },
     publicPage: {
       stages: Array.isArray(publicPage.stages)
-        ? [...new Set(publicPage.stages.map(stageId).filter((v): v is string => v !== null))].slice(0, LIMITS.publicStages)
+        // Стадия согласования в обычных не живёт: доступ в ней — свой режим (решение владельца).
+        ? [...new Set(publicPage.stages.map(stageId).filter((v): v is string => v !== null && v !== approvalStage))].slice(0, LIMITS.publicStages)
         : d.publicPage.stages,
       closedText: closedText || d.publicPage.closedText,
       templates: Array.isArray(publicPage.templates)
         ? [...new Set(publicPage.templates.map(positiveInt).filter((v): v is number => v !== null))].slice(0, LIMITS.publicTemplates)
-        : d.publicPage.templates
+        : d.publicPage.templates,
+      linkField: normalizeFieldName(publicPage.linkField),
+      qrField: normalizeFieldName(publicPage.qrField),
+      approvalStage,
+      approvedField: normalizeFieldName(publicPage.approvedField),
+      approvedAtField: normalizeFieldName(publicPage.approvedAtField)
     },
+    problemChat: DIALOG_RE.test(String(problemChat.dialogId ?? ''))
+      ? { dialogId: String(problemChat.dialogId), title: text(problemChat.title, LIMITS.chatTitle).trim() }
+      : d.problemChat,
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
       timeBlock: nullablePrompt(prompts.timeBlock)

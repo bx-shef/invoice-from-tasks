@@ -17,6 +17,10 @@ const users = useUsers()
 const fill = useInvoiceFill()
 const catalog = useCatalog()
 const toast = useToast()
+const links = useInvoiceLinks()
+const config = useRuntimeConfig()
+/** Не удалось записать ссылки расшифровки в поля счёта (настройки → «Публичная страница»). */
+const linksError = ref('')
 
 const invoiceId = ref<number | null>(null)
 const source = ref<TaskSource>('deal')
@@ -120,6 +124,11 @@ onMounted(async () => {
   } catch {
     return
   }
+  // Ссылки для печатных форм — независимо от расчёта: сбой не мешает заполнению счёта.
+  void links.sync(invoiceId.value, new URL(origin.value).hostname, config.public.siteUrl || window.location.origin, app.settings.value.publicPage)
+    .catch((e: unknown) => {
+      linksError.value = e instanceof Error ? e.message : String(e)
+    })
   await Promise.all([fill.loadInvoice(invoiceId.value), measuresLoaded])
 })
 
@@ -212,6 +221,14 @@ async function consult(promptId: string) {
         <h1 class="text-xl font-semibold">
           {{ fill.invoice.value?.title || `Счёт #${invoiceId}` }}
         </h1>
+
+        <B24Alert
+          v-if="linksError"
+          color="air-primary-warning"
+          title="Ссылки расшифровки в счёт не записаны"
+          :description="`${linksError}. Заполнение счёта это не затрагивает.`"
+          data-testid="invoice-links-error"
+        />
 
         <B24Alert
           v-if="fill.error.value"

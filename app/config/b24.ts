@@ -8,9 +8,10 @@ import type { RestrictionParams } from '@bitrix24/b24jssdk'
  * ⚠ Право задач называется `task`, хотя страницы tasks.task.* в документации пишут `tasks`:
  * документация противоречит сама себе, а живой портал принял `task` (замер соседнего
  * get-task-from-b24 от 2026-08-26, их docs/CLIENT_APP.md). Страница установки сверяет список
- * с методом `scope` и показывает, чего не хватает.
+ * с методом `scope` и показывает, чего не хватает. `im` — выбор чата проблем и сообщения в него
+ * с сервера (`im.message.add` токеном установщика).
  */
-export const B24_REQUIRED_SCOPES = ['crm', 'task', 'catalog', 'user_brief', 'placement'] as const
+export const B24_REQUIRED_SCOPES = ['crm', 'task', 'catalog', 'user_brief', 'placement', 'im'] as const
 
 /** Встройка: пункт меню верхней кнопки карточки нового счёта (документация CRM_XXX_DETAIL_TOOLBAR). */
 export const INVOICE_PLACEMENT = 'CRM_SMART_INVOICE_DETAIL_TOOLBAR'
