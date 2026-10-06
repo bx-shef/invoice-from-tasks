@@ -496,6 +496,23 @@ describe('ставка клиента', () => {
     expect(buildRows(input({ rates, clients: ['CO_8'] })).rows[0]).toMatchObject({ baseRate: 200 })
   })
 
+  it('смена ставки клиента за время задачи — предупреждение с подписью; общая и клиентская с одной даты — разные версии', () => {
+    const changing = [{ userId: 7, rate: 100, from: '2026-01-01' }, { userId: 7, rate: 500, from: '2026-06-01', client: 'CO_3' }, { userId: 9, rate: 80, from: '2026-01-01' }]
+    const { warnings } = buildRows(input({ rates: changing, clients: ['CO_3'] }))
+    expect(warnings.map(w => w.message)).toEqual([expect.stringMatching(/100 с 01\.01\.2026 → 500 с 01\.06\.2026 \(ставка компании\)/)])
+    // Ставка клиента с той же даты, что общая, но начинается позже первой записи: 10.05 — общая
+    // (клиентской ещё нет), 02.06 — клиентская. Ключ версии по одной дате склеил бы их.
+    const sameDay = [{ userId: 7, rate: 100, from: '2026-06-01' }, { userId: 7, rate: 90, from: '2026-01-01' }, { userId: 7, rate: 500, from: '2026-06-01', client: 'C_4' }, { userId: 7, rate: 50, from: '2026-01-01', client: 'C_4' }]
+    expect(buildRows(input({ rates: sameDay, clients: ['C_4'] })).warnings.map(w => w.message)).toEqual([expect.stringMatching(/50 с 01\.01\.2026 \(ставка контакта\) → 500/)])
+  })
+
+  it('у счёта нет клиента, а у сотрудника строки есть ставки клиентов — предупреждение', () => {
+    const noClient = (patch: Partial<FillInput>) => buildRows(input(patch)).warnings.filter(w => /не указан клиент/.test(w.message))
+    expect(noClient({ rates })).toHaveLength(1)
+    expect(noClient({ rates, clients: ['CO_3'] })).toEqual([])
+    expect(noClient({})).toEqual([])
+  })
+
   it('тип 2: у каждого сотрудника — своя ставка клиента или общая', () => {
     const { rows } = buildRows(input({ mode: 'time', rates, clients: ['CO_3', 'C_4'] }))
     expect(rows.map(r => r.baseRate)).toEqual([500, 60])

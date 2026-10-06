@@ -113,9 +113,9 @@ describe('ставка клиента', () => {
   })
 
   it('клиенты счёта: компания, затем контакт', () => {
-    expect(invoiceClients({ companyId: 12, contactId: 5 })).toEqual(['CO_12', 'C_5'])
-    expect(invoiceClients({ companyId: null, contactId: 5 })).toEqual(['C_5'])
-    expect(invoiceClients({ companyId: null, contactId: null })).toEqual([])
+    expect(invoiceClients({ companyId: 12, contactIds: [5, 6] })).toEqual(['CO_12', 'C_5', 'C_6'])
+    expect(invoiceClients({ companyId: null, contactIds: [5] })).toEqual(['C_5'])
+    expect(invoiceClients({ companyId: null, contactIds: [] })).toEqual([])
   })
 
   it('хранится четвёртым элементом и читается обратно; битый код — запись отброшена', () => {
@@ -123,6 +123,21 @@ describe('ставка клиента', () => {
     expect(json).toBe('[[7,100,"2026-01-01"],[7,200,"2026-02-01","C_5"],[7,300,"2026-03-01","CO_12"]]')
     expect(parseRates(json)).toEqual(sortRates(base))
     expect(parseRates([[7, 100, '2026-01-01', 'X_1'], [7, 50, '2026-01-01', 'CO_0']])).toEqual([])
+  })
+
+  it('порядок хранения: общие первыми, клиенты по виду и ID числом, затем дата', () => {
+    const json = serializeRates([
+      { userId: 7, rate: 4, from: '2026-01-01', client: 'CO_12' },
+      { userId: 7, rate: 3, from: '2026-01-01', client: 'CO_9' },
+      { userId: 7, rate: 2, from: '2026-02-01', client: 'C_5' },
+      { userId: 7, rate: 1, from: '2026-05-01' }
+    ])
+    expect(json).toBe('[[7,1,"2026-05-01"],[7,2,"2026-02-01","C_5"],[7,3,"2026-01-01","CO_9"],[7,4,"2026-01-01","CO_12"]]')
+  })
+
+  it('клиент не строкой — 422, а не тихое приведение', () => {
+    const entries = coerceRateEntries([{ userId: 7, rate: 1, from: '2026-01-01', client: ['CO_1'] }])!
+    expect(validateRates(entries)).toEqual([{ index: 0, message: expect.stringMatching(/Клиент/) }])
   })
 
   it('общая и клиентская ставки с одной даты — не дубль; две клиентские — дубль', () => {

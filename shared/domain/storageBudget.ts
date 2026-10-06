@@ -23,8 +23,12 @@ export const STORAGE_KEY = 'ift_storage_v1'
 export const MIN_MEASURED_LIMIT = DOCUMENTED_OPTION_LIMIT
 export const MAX_MEASURED_LIMIT = 16 * 1024 * 1024
 
-/** Средний размер одной версии ставки в хранилище, байт: `[123,1500.5,"2026-01-01"],` ≈ 27. */
-export const AVG_RATE_ENTRY_BYTES = 30
+/**
+ * Средний размер одной версии ставки в хранилище, байт: общая `[123,1500.5,"2026-01-01"],` ≈ 27,
+ * ставки клиента `[123,1500.5,"2026-01-01","CO_12345"],` ≈ 38. Подсказка «влезет ещё» — с запасом
+ * на ставки клиентов; точный бюджет сервер считает по байтам (options.ts).
+ */
+export const AVG_RATE_ENTRY_BYTES = 35
 
 /** Длина строки в байтах UTF-8 — кириллица занимает 2 байта, и считать символы было бы ошибкой. */
 export function utf8Length(value: string): number {

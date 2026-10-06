@@ -12,9 +12,12 @@ export interface InvoiceInfo {
   dealId: number | null
   /** «Реквизиты вашей компании» (`mycompanyId`, 0 — не выбраны) — по ним ставка НДС (vat.ts). */
   myCompanyId: number | null
-  /** Клиент счёта — компания (`companyId`) и контакт (`contactId`): по ним ставки клиента (rates.ts). */
+  /**
+   * Клиент счёта — компания (`companyId`) и контакты (`contactIds`, при его отсутствии — `contactId`)
+   * в порядке счёта: по ним ставки клиента (rates.ts).
+   */
   companyId: number | null
-  contactId: number | null
+  contactIds: number[]
   opportunity: number
 }
 
@@ -30,7 +33,8 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
   const dealId = Number(o.parentId2)
   const myCompanyId = Number(o.mycompanyId)
   const companyId = Number(o.companyId)
-  const contactId = Number(o.contactId)
+  const rawContacts = Array.isArray(o.contactIds) ? o.contactIds : [o.contactId]
+  const contactIds = [...new Set(rawContacts.map(Number).filter(n => Number.isInteger(n) && n > 0))]
   return {
     id,
     title: typeof o.title === 'string' ? o.title : '',
@@ -38,7 +42,7 @@ export function parseInvoice(result: unknown): InvoiceInfo | null {
     dealId: Number.isInteger(dealId) && dealId > 0 ? dealId : null,
     myCompanyId: Number.isInteger(myCompanyId) && myCompanyId > 0 ? myCompanyId : null,
     companyId: Number.isInteger(companyId) && companyId > 0 ? companyId : null,
-    contactId: Number.isInteger(contactId) && contactId > 0 ? contactId : null,
+    contactIds,
     opportunity: Number(o.opportunity) || 0
   }
 }
@@ -78,7 +82,7 @@ export function invoiceChangedSince(collected: InvoiceInfo, now: InvoiceInfo): s
   if (collected.myCompanyId !== now.myCompanyId) changed.push('«Реквизиты вашей компании»')
   if (collected.currencyId !== now.currencyId) changed.push('валюта')
   if (collected.dealId !== now.dealId) changed.push('сделка')
-  if (collected.companyId !== now.companyId || collected.contactId !== now.contactId) changed.push('клиент')
+  if (collected.companyId !== now.companyId || collected.contactIds.join() !== now.contactIds.join()) changed.push('клиент')
   return changed.length ? `После сбора строк в счёте изменились: ${changed.join(', ')} — соберите строки заново` : null
 }
 

@@ -34,8 +34,12 @@ async function addRow() {
 }
 
 async function pickClient(row: RateEntry) {
-  const code = await clients.pickOne()
-  if (code) row.client = code
+  try {
+    const code = await clients.pickOne()
+    if (code) row.client = code
+  } catch (e) {
+    toast.add({ title: 'Не удалось выбрать клиента', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
+  }
 }
 
 function clearClient(row: RateEntry) {
@@ -67,12 +71,12 @@ async function save() {
   <div class="space-y-4">
     <p class="text-sm opacity-80">
       Ставка за час без наценки, в валюте ставок ({{ currency }}). Действует с указанной даты до следующей
-      ставки того же сотрудника. Счёт считается по ставке на дату записи времени; счёт в другой валюте
+      ставки того же сотрудника для того же клиента (или следующей общей). Счёт считается по ставке на дату записи времени; счёт в другой валюте
       пересчитывается по курсу портала.
     </p>
     <p class="text-sm opacity-80">
       Для отдельного клиента ставку можно задать иначе: выберите у строки компанию или контакт. В счёте
-      этого клиента она важнее общей — сначала ставка для компании счёта, затем для контакта, затем общая.
+      этого клиента она важнее общей — сначала ставка для компании счёта, затем для контакта, затем общая. Нет клиента у счёта — общая, с предупреждением.
     </p>
 
     <div class="overflow-x-auto">
@@ -118,6 +122,7 @@ async function save() {
                     size="xs"
                     color="air-tertiary"
                     label="Для всех"
+                    :aria-label="`Сделать ставку общей — ${users.label(row.userId)}`"
                     @click="clearClient(row)"
                   />
                 </div>

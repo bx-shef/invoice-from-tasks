@@ -19,16 +19,26 @@ export interface RateEntry {
   client?: string
 }
 
-/** Код клиента ставки: компания `CO_<id>` или контакт `C_<id>`. */
+/** Код клиента ставки: компания `CO_<id>` или контакт `C_<id>`, ID — до 10 цифр (с запасом до MAX_SAFE_INTEGER). */
 const CLIENT_RE = /^(CO|C)_[1-9]\d{0,9}$/
 
+/** Код клиента ставки ли это — тот же формат, что отдаёт диалог выбора CRM (`selectCRM`). */
 export function isRateClient(value: unknown): value is string {
   return typeof value === 'string' && CLIENT_RE.test(value)
 }
 
 /** Ключ клиента для разбора: `undefined` и пустая строка — общая ставка. */
-function clientKey(e: Pick<RateEntry, 'client'>): string {
+export function clientKey(e: Pick<RateEntry, 'client'>): string {
   return e.client ?? ''
+}
+
+/** Порядок клиентов без локали: общая первой, затем по виду и ID числом — одинаково в браузере и на сервере. */
+function compareClients(a: string, b: string): number {
+  if (a === b) return 0
+  if (!a || !b) return a ? 1 : -1
+  const [ka, ia] = a.split('_') as [string, string]
+  const [kb, ib] = b.split('_') as [string, string]
+  return ka !== kb ? (ka < kb ? -1 : 1) : Number(ia) - Number(ib)
 }
 
 /**
@@ -79,7 +89,8 @@ export function coerceRateEntries(raw: unknown): RateEntry[] | null {
   if (raw.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return null
   return raw.map((item) => {
     const o = item as Record<string, unknown>
-    const client = o.client === undefined || o.client === null || o.client === '' ? undefined : String(o.client)
+    // Не строка — оставляем как есть: validateRates отвергнет (422), а не приведёт `["CO_1"]` к коду.
+    const client = o.client === undefined || o.client === null || o.client === '' ? undefined : o.client as string
     return { userId: Number(o.userId), rate: toNumber(o.rate), from: String(o.from ?? ''), ...(client ? { client } : {}) }
   })
 }
@@ -117,7 +128,7 @@ export function parseRates(raw: unknown): RateEntry[] {
 
 /** Порядок для хранения и показа: по сотруднику, клиенту (общие первыми), дате. Детерминирован — диффы читаемы. */
 export function sortRates(entries: RateEntry[]): RateEntry[] {
-  return [...entries].sort((a, b) => a.userId - b.userId || clientKey(a).localeCompare(clientKey(b)) || a.from.localeCompare(b.from))
+  return [...entries].sort((a, b) => a.userId - b.userId || compareClients(clientKey(a), clientKey(b)) || (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
 }
 
 /** Сериализация в компактный JSON. Порядок стабильный, лишних ключей нет. */
@@ -167,7 +178,7 @@ function findIn(entries: RateEntry[], userId: number, date: string, client: stri
 
 /**
  * Ставка сотрудника, действующая на дату. Сначала ставки клиентов счёта по порядку `clients`
- * (компания, затем контакт — {@link invoiceClients}), у первого клиента со ставкой на эту дату
+ * (компания, затем контакты — {@link invoiceClients}), у первого клиента со ставкой на эту дату
  * она и берётся; нет — общая ставка сотрудника.
  *
  * @param date `YYYY-MM-DD` в часовом поясе портала (см. `portalDate`)
@@ -181,10 +192,10 @@ export function findRate(entries: RateEntry[], userId: number, date: string, cli
   return findIn(entries, userId, date, '')
 }
 
-/** Клиенты счёта в порядке выбора ставки: компания, затем контакт. */
-export function invoiceClients(invoice: { companyId: number | null, contactId: number | null }): string[] {
+/** Клиенты счёта в порядке выбора ставки: компания, затем контакты в порядке счёта. */
+export function invoiceClients(invoice: { companyId: number | null, contactIds: number[] }): string[] {
   return [
     ...(invoice.companyId ? [`CO_${invoice.companyId}`] : []),
-    ...(invoice.contactId ? [`C_${invoice.contactId}`] : [])
+    ...invoice.contactIds.map(id => `C_${id}`)
   ]
 }

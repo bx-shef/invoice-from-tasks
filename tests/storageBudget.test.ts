@@ -64,7 +64,7 @@ describe('бюджет app.option', () => {
 
   it('оценивает, сколько ещё версий ставок влезет', () => {
     const usage = storageUsage({ a: '' })
-    expect(usage.rateCapacityLeft).toBe(Math.floor((usage.budget - usage.bytes) / 30))
+    expect(usage.rateCapacityLeft).toBe(Math.floor((usage.budget - usage.bytes) / 35))
     expect(formatUsage(usage)).toBe('0,0 из 1,4 КБ')
   })
 })
