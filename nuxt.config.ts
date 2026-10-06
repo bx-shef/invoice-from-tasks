@@ -16,6 +16,11 @@ export default defineNuxtConfig({
 
   devtools: { enabled: false },
 
+  // Значок вкладки — свой svg из public/ (без него браузер показывал пустой /favicon.ico).
+  app: {
+    head: { link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }] }
+  },
+
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {

@@ -108,6 +108,12 @@ async function download(id: number, title: string) {
 }
 
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
+
+/** Строки счёта — пункты аккордеона: раскрывается задача строки (наша и задача клиента отдельно). */
+const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
+  const task = row.taskId ? tasksById.value.get(row.taskId) : undefined
+  return { value: String(i), row, task, disabled: !task }
+}))
 </script>
 
 <template>
@@ -228,83 +234,101 @@ const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [
       </section>
 
       <section class="space-y-4">
-        <article
-          v-for="(row, i) in invoice.rows"
-          :key="i"
-          class="border-t border-(--ui-color-divider-less) pt-3 space-y-2"
-          data-testid="public-row"
+        <B24Accordion
+          type="multiple"
+          :items="rowItems"
+          :b24ui="{ trigger: 'items-start' }"
+          data-testid="public-rows"
         >
-          <div class="flex justify-between gap-3 font-medium">
-            <span>{{ row.name }}</span>
-            <span class="whitespace-nowrap">{{ money(row.sum, invoice.currencyId) }}</span>
-          </div>
-          <template v-if="row.taskId && tasksById.get(row.taskId)">
-            <div class="text-sm space-y-1">
-              <a
-                :href="tasksById.get(row.taskId)!.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="underline"
-              >Задача #{{ row.taskId }}: {{ tasksById.get(row.taskId)!.title }}</a>
-              <p
-                v-if="tasksById.get(row.taskId)!.description"
-                class="whitespace-pre-line opacity-80"
-              >
-                {{ tasksById.get(row.taskId)!.description }}
-              </p>
+          <template #default="{ item }">
+            <div
+              class="flex w-full justify-between gap-3 font-medium text-left"
+              data-testid="public-row"
+            >
+              <span>{{ item.row.name }}</span>
+              <span class="whitespace-nowrap">{{ money(item.row.sum, invoice.currencyId) }}</span>
+            </div>
+          </template>
+          <template #body="{ item }">
+            <div
+              v-if="item.task"
+              class="space-y-3 text-sm"
+            >
               <div
-                v-for="(r, j) in tasksById.get(row.taskId)!.results"
-                :key="j"
-                class="whitespace-pre-line"
+                class="rounded border border-(--ui-color-divider-less) p-3 space-y-1"
+                data-testid="public-task"
               >
-                <b>Результат:</b> {{ r }}
-              </div>
-              <div v-if="tasksById.get(row.taskId)!.clientTaskId">
-                Ваша задача:
+                <div class="text-xs uppercase opacity-60">
+                  Задача исполнителя
+                </div>
                 <a
-                  v-if="tasksById.get(row.taskId)!.clientTaskUrl"
-                  :href="tasksById.get(row.taskId)!.clientTaskUrl!"
+                  :href="item.task.url"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="underline"
-                >#{{ tasksById.get(row.taskId)!.clientTaskId }}{{ tasksById.get(row.taskId)!.clientTask ? `: ${tasksById.get(row.taskId)!.clientTask!.title}` : '' }}</a>
-                <span v-else>#{{ tasksById.get(row.taskId)!.clientTaskId }}</span>
-              </div>
-              <div
-                v-if="tasksById.get(row.taskId)!.clientTask"
-                class="ml-3 pl-3 border-l border-(--ui-color-divider-less) space-y-1"
-                data-testid="public-client-task"
-              >
-                <div class="flex items-center gap-2">
-                  <img
-                    v-if="tasksById.get(row.taskId)!.clientTask!.creatorIcon"
-                    :src="tasksById.get(row.taskId)!.clientTask!.creatorIcon!"
-                    alt=""
-                    referrerpolicy="no-referrer"
-                    class="size-6 rounded-full object-cover"
-                  >
-                  <span>Поставил: {{ tasksById.get(row.taskId)!.clientTask!.creatorName || '—' }}</span>
-                </div>
-                <div>
-                  Состояние: {{ tasksById.get(row.taskId)!.clientTask!.acceptedAt ? `принята ${date(tasksById.get(row.taskId)!.clientTask!.acceptedAt!)}` : tasksById.get(row.taskId)!.clientTask!.state }}
-                </div>
+                  class="underline font-medium"
+                >#{{ item.task.id }}: {{ item.task.title }}</a>
                 <p
-                  v-if="tasksById.get(row.taskId)!.clientTask!.description"
+                  v-if="item.task.description"
                   class="whitespace-pre-line opacity-80"
                 >
-                  {{ tasksById.get(row.taskId)!.clientTask!.description }}
+                  {{ item.task.description }}
                 </p>
                 <div
-                  v-for="(r, k) in tasksById.get(row.taskId)!.clientTask!.results"
-                  :key="k"
+                  v-for="(r, j) in item.task.results"
+                  :key="j"
                   class="whitespace-pre-line"
                 >
-                  <b>Результат клиента:</b> {{ r }}
+                  <b>Результат:</b> {{ r }}
                 </div>
+              </div>
+              <div
+                v-if="item.task.clientTaskId"
+                class="rounded border border-(--ui-color-divider-less) bg-(--ui-color-bg-content-secondary) p-3 space-y-1"
+                data-testid="public-client-task"
+              >
+                <div class="text-xs uppercase opacity-60">
+                  Ваша задача
+                </div>
+                <a
+                  v-if="item.task.clientTaskUrl"
+                  :href="item.task.clientTaskUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="underline font-medium"
+                >#{{ item.task.clientTaskId }}{{ item.task.clientTask ? `: ${item.task.clientTask.title}` : '' }}</a>
+                <span v-else>#{{ item.task.clientTaskId }}</span>
+                <template v-if="item.task.clientTask">
+                  <div class="flex items-center gap-2">
+                    <img
+                      v-if="item.task.clientTask.creatorIcon"
+                      :src="item.task.clientTask.creatorIcon"
+                      alt=""
+                      referrerpolicy="no-referrer"
+                      class="size-6 rounded-full object-cover"
+                    >
+                    <span>Поставил: {{ item.task.clientTask.creatorName || '—' }}</span>
+                  </div>
+                  <div>
+                    Состояние: {{ item.task.clientTask.acceptedAt ? `принята ${date(item.task.clientTask.acceptedAt)}` : item.task.clientTask.state }}
+                  </div>
+                  <p
+                    v-if="item.task.clientTask.description"
+                    class="whitespace-pre-line opacity-80"
+                  >
+                    {{ item.task.clientTask.description }}
+                  </p>
+                  <div
+                    v-for="(r, k) in item.task.clientTask.results"
+                    :key="k"
+                    class="whitespace-pre-line"
+                  >
+                    <b>Результат:</b> {{ r }}
+                  </div>
+                </template>
               </div>
             </div>
           </template>
-        </article>
+        </B24Accordion>
         <p
           v-if="invoice.truncated"
           class="text-sm opacity-70"
