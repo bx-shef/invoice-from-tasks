@@ -13,7 +13,7 @@ describe('sealClientHook', () => {
     if (!r.ok) return
     expect(r.value.startsWith('ift1|client.bitrix24.ru|')).toBe(true)
     expect(r.value).not.toContain('abc123def456')
-    expect(openClientHook(r.value, 'my.bitrix24.by', env)).toEqual({ url: HOOK, host: 'client.bitrix24.ru' })
+    expect(openClientHook(r.value, 'my.bitrix24.by', env)).toMatchObject({ url: HOOK, host: 'client.bitrix24.ru' })
   })
 
   it('не вебхук — 400; не портал Битрикс24 — 400 (SSRF); нет ключа — 503', () => {

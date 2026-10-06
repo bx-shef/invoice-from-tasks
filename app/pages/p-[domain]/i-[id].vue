@@ -2,7 +2,9 @@
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
-// ссылкой, описание, результат. Не в разрешённой стадии — спокойная фраза из настроек.
+// ссылкой, описание, результат; задача клиента — по его вебхуку (этап 4): постановщик, состояние,
+// дата принятия, описание и результат; без вебхука — только ссылка. Не в разрешённой стадии —
+// спокойная фраза из настроек.
 // Без фрейма портала: страница открыта всем, данные отдаёт сервер только по верному коду.
 import type { PublicInvoiceView } from '#shared/domain/publicInvoice'
 
@@ -161,8 +163,40 @@ const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [
                   target="_blank"
                   rel="noopener noreferrer"
                   class="underline"
-                >#{{ tasksById.get(row.taskId)!.clientTaskId }}</a>
+                >#{{ tasksById.get(row.taskId)!.clientTaskId }}{{ tasksById.get(row.taskId)!.clientTask ? `: ${tasksById.get(row.taskId)!.clientTask!.title}` : '' }}</a>
                 <span v-else>#{{ tasksById.get(row.taskId)!.clientTaskId }}</span>
+              </div>
+              <div
+                v-if="tasksById.get(row.taskId)!.clientTask"
+                class="ml-3 pl-3 border-l border-(--ui-color-divider-less) space-y-1"
+                data-testid="public-client-task"
+              >
+                <div class="flex items-center gap-2">
+                  <img
+                    v-if="tasksById.get(row.taskId)!.clientTask!.creatorIcon"
+                    :src="tasksById.get(row.taskId)!.clientTask!.creatorIcon!"
+                    alt=""
+                    referrerpolicy="no-referrer"
+                    class="size-6 rounded-full object-cover"
+                  >
+                  <span>Поставил: {{ tasksById.get(row.taskId)!.clientTask!.creatorName || '—' }}</span>
+                </div>
+                <div>
+                  Состояние: {{ tasksById.get(row.taskId)!.clientTask!.acceptedAt ? `принята ${date(tasksById.get(row.taskId)!.clientTask!.acceptedAt!)}` : tasksById.get(row.taskId)!.clientTask!.state }}
+                </div>
+                <p
+                  v-if="tasksById.get(row.taskId)!.clientTask!.description"
+                  class="whitespace-pre-line opacity-80"
+                >
+                  {{ tasksById.get(row.taskId)!.clientTask!.description }}
+                </p>
+                <div
+                  v-for="(r, k) in tasksById.get(row.taskId)!.clientTask!.results"
+                  :key="k"
+                  class="whitespace-pre-line"
+                >
+                  <b>Результат клиента:</b> {{ r }}
+                </div>
               </div>
             </div>
           </template>

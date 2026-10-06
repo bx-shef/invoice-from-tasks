@@ -4,8 +4,8 @@
 // исключение из «права CRM не расширяем», решение владельца в #34).
 
 import { parseExistingRows } from './invoice'
-import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, taskPath } from './tasks'
-import { camelFieldKey, clientTaskIdOf } from './userFields'
+import { crmBindingCodes, DEAL_ENTITY_TYPE_ID, INVOICE_ENTITY_TYPE_ID, TASK_COMPLETED, TASK_STATUS_LABELS, taskPath } from './tasks'
+import { camelFieldKey, CLIENT_HOOK_FIELD, clientTaskIdOf } from './userFields'
 import { isAccessCode } from './appFieldTypes'
 
 /** Ссылка на задачу и её номер у клиента — из приставки названия строки «[123-456] …» (fill.ts). */
@@ -84,12 +84,14 @@ export function taskBoundTo(taskRaw: unknown, codes: string[]): boolean {
   return bound.some(b => wanted.has(b))
 }
 
-/** Компания или контакт клиента: подпись и код доступа из UF. */
+/** Компания или контакт клиента: подпись, код доступа и вебхук портала клиента (зашифрованный) из UF. */
 export interface PublicClient {
   kind: 'company' | 'contact'
   id: number
   title: string
   accessCode: string | null
+  /** Значение поля «Вебхук клиента» как есть (`ift1|домен|шифротекст`); расшифровывает сервер. */
+  hook?: string | null
 }
 
 /** Домен портала клиента из UF: только имя хоста, без схемы и пути. */
@@ -112,7 +114,8 @@ export function parsePublicClient(kind: PublicClient['kind'], result: unknown, c
     kind,
     id,
     title,
-    accessCode: isAccessCode(code) ? code : null
+    accessCode: isAccessCode(code) ? code : null,
+    hook: typeof o[camelFieldKey(CLIENT_HOOK_FIELD)] === 'string' && o[camelFieldKey(CLIENT_HOOK_FIELD)] ? String(o[camelFieldKey(CLIENT_HOOK_FIELD)]) : null
   }
 }
 
@@ -126,6 +129,87 @@ export interface PublicTask {
   /** Номер задачи у клиента и ссылка на неё в его портале (если известен домен). */
   clientTaskId: string | null
   clientTaskUrl: string | null
+  /** Задача в портале клиента, прочитанная его вебхуком (этап 4); `null` — вебхука нет или не прочиталась. */
+  clientTask?: ClientTaskView | null
+}
+
+/** Статус «ждёт контроля» (REST v2) — для клиента «требует принятия». */
+const TASK_AWAITING_CONTROL = 4
+
+/** Задача клиента для страницы: постановщик со стороны клиента, состояние, дата принятия. */
+export interface ClientTaskView {
+  title: string
+  description: string
+  results: string[]
+  creatorName: string
+  /** Аватар постановщика — только https-адрес; иначе `null`. */
+  creatorIcon: string | null
+  /** Состояние по-русски: «принята» (завершена), «требует принятия» (ждёт контроля), «поставлена» … */
+  state: string
+  /** Дата принятия (`closedDate` завершённой задачи), `YYYY-MM-DD`; не принята — `null`. */
+  acceptedAt: string | null
+}
+
+/**
+ * Состояние задачи клиента словами владельца (#34): завершена — «принята», ждёт контроля —
+ * «требует принятия», новая или ждёт выполнения — «поставлена», остальное — как в карточке.
+ */
+export function clientTaskState(status: number | null): string {
+  if (status === TASK_COMPLETED) return 'принята'
+  if (status === TASK_AWAITING_CONTROL) return 'требует принятия'
+  if (status === 1 || status === 2) return 'поставлена'
+  return status !== null ? (TASK_STATUS_LABELS[status] ?? `статус ${status}`) : 'неизвестно'
+}
+
+/**
+ * Аватар из ответа портала клиента — только с САМОГО портала (`host`), относительный путь —
+ * от него же: адрес со стороннего хоста был бы пикселем слежки за клиентом (находка ревью).
+ */
+export function portalImage(value: unknown, host: string): string | null {
+  if (!host || typeof value !== 'string' || !value) return null
+  let u: URL
+  try {
+    u = new URL(value, `https://${host}`)
+  } catch {
+    return null
+  }
+  return u.protocol === 'https:' && u.hostname === host && !u.username && !u.password ? u.toString() : null
+}
+
+/** https-адрес картинки из ответа чужого портала; другое (javascript:, data:, http:) — `null`. */
+export function httpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const u = new URL(value)
+    return u.protocol === 'https:' && !u.username && !u.password ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Задача клиента из tasks.task.get его вебхуком (замер 2026-10-06: `{ task: { title, status,
+ * closedDate, creator: { name, icon } } }`). Ответ чужого портала — недоверенный: текст без HTML
+ * и с пределами, картинка — только https.
+ */
+export function parseClientTask(raw: unknown, results: unknown, host = ''): ClientTaskView | null {
+  const t = raw && typeof raw === 'object' && 'task' in raw ? (raw as { task: unknown }).task : raw
+  const o = t && typeof t === 'object' ? t as Record<string, unknown> : null
+  if (!o || !posInt(o.id ?? o.ID)) return null
+  const creator = o.creator && typeof o.creator === 'object' ? o.creator as Record<string, unknown> : {}
+  const statusNum = Number(o.status ?? o.STATUS)
+  const status = Number.isInteger(statusNum) && statusNum > 0 ? statusNum : null
+  const closed = typeof o.closedDate === 'string' ? o.closedDate.slice(0, 10) : ''
+  const list = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
+  return {
+    title: plainText(o.title ?? o.TITLE).slice(0, 500),
+    description: plainText(o.description ?? o.DESCRIPTION),
+    results: (Array.isArray(list) ? list : []).map(r => plainText((r as Record<string, unknown> | null)?.text)).filter(Boolean).slice(0, 20),
+    creatorName: plainText(creator.name).slice(0, 200),
+    creatorIcon: portalImage(creator.icon, host),
+    state: clientTaskState(status),
+    acceptedAt: status === TASK_COMPLETED && /^\d{4}-\d{2}-\d{2}$/.test(closed) ? closed : null
+  }
 }
 
 /** Предел текста задачи на странице — описание бывает огромным. */
@@ -217,10 +301,15 @@ export function rowTaskIds(rows: PublicRow[], max: number): number[] {
 }
 
 /** Номер задачи у клиента для задачи: из строки счёта, иначе из UF задачи (`clientFields.task`). */
+/**
+ * Номер задачи клиента для задачи. Поле выбрано в настройках — ТОЛЬКО из поля нашей задачи (она
+ * уже проверена на привязку к счёту, taskBoundTo): по этому номеру вебхук клиента читает задачу в
+ * его портале, и вписанный руками в название строки «[123-999]» не должен открывать чужую задачу
+ * клиента (находка ревью этапа 4). Поле не выбрано — номер из названия строки, но тогда и домена
+ * нет (он тоже из поля задачи), и вебхук не вызывается — только показ номера.
+ */
 export function clientTaskIdFor(rows: PublicRow[], taskId: number, taskRaw: unknown, clientTaskField: string): string | null {
-  const fromRow = rows.find(r => r.taskId === taskId && r.clientTaskId)?.clientTaskId
-  if (fromRow) return fromRow
-  if (!clientTaskField) return null
+  if (!clientTaskField) return rows.find(r => r.taskId === taskId && r.clientTaskId)?.clientTaskId ?? null
   const raw = taskRaw && typeof taskRaw === 'object' && 'task' in taskRaw ? (taskRaw as { task: unknown }).task : taskRaw
   const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   return clientTaskIdOf(o[camelFieldKey(clientTaskField)] ?? o[clientTaskField])
