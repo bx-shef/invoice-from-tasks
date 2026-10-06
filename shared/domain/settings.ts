@@ -76,6 +76,10 @@ export interface AppSettings {
     closedText: string
     /** Шаблоны генератора документов (ID), чьи документы клиент может скачать в PDF — по последнему на шаблон. */
     templates: number[]
+    /** Поле счёта (`UF_CRM_…`, строка или ссылка), куда встройка пишет адрес публичной страницы; `''` — не писать. */
+    linkField: string
+    /** Поле счёта, куда встройка пишет адрес картинки QR-кода (для шаблона документа); `''` — не писать. */
+    qrField: string
   }
   /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
@@ -122,7 +126,7 @@ export function defaultSettings(): AppSettings {
     naming: 'plain',
     taskIdInName: false,
     clientFields: { task: '', taskDomain: '' },
-    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [] },
+    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '' },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -249,7 +253,9 @@ export function parseSettings(raw: unknown): AppSettings {
       closedText: closedText || d.publicPage.closedText,
       templates: Array.isArray(publicPage.templates)
         ? [...new Set(publicPage.templates.map(positiveInt).filter((v): v is number => v !== null))].slice(0, LIMITS.publicTemplates)
-        : d.publicPage.templates
+        : d.publicPage.templates,
+      linkField: normalizeFieldName(publicPage.linkField),
+      qrField: normalizeFieldName(publicPage.qrField)
     },
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),

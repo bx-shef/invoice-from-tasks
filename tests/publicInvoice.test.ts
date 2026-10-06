@@ -97,10 +97,10 @@ describe('привязка задачи к счёту', () => {
 
 describe('настройки publicPage', () => {
   it('по умолчанию — ни одной стадии и фраза по умолчанию; мусор отбрасывается', () => {
-    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [] })
+    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '' })
     expect(parseSettings({ publicPage: { stages: ['DT31_1:N', 'DT31_1:N', 'bad stage', 5], closedText: '  ', templates: [3, '4', 3, 0, 'x'] } }).publicPage)
-      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT, templates: [3, 4] })
-    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните', templates: [7] } }
+      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT, templates: [3, 4], linkField: '', qrField: '' })
+    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните', templates: [7], linkField: 'UF_CRM_SMART_INVOICE_LINK', qrField: 'UF_CRM_SMART_INVOICE_QR' } }
     expect(parseSettings(serializeSettings(s)).publicPage).toEqual(s.publicPage)
   })
 })

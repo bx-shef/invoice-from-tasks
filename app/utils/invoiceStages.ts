@@ -37,10 +37,8 @@ export function stageItems(options: StageOption[] | null, saved: string[]): Arra
   return items
 }
 
-/** Адрес публичной страницы счёта — для подсказки в настройках и QR-кода. */
-export function publicInvoiceUrl(siteUrl: string, portalDomain: string, invoiceId: number | string): string {
-  return `${siteUrl.replace(/\/$/, '')}/p-${portalDomain}/i-${invoiceId}`
-}
+/** Адрес публичной страницы счёта — общий с сервером (shared/domain/invoiceLinks.ts). */
+export { publicInvoiceUrl } from '#shared/domain/invoiceLinks'
 
 /** Шаблон генератора документов для выбора в настройках. */
 export interface TemplateOption {
