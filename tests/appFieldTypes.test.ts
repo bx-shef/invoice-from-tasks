@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, APP_FIELD_TYPES, crmEntityTypeOf, fieldTypeCalls, formatHookValue, fullTypeId, generateAccessCode, isAccessCode, parseHookValue, parseWebhookUrl } from '#shared/domain/appFieldTypes'
+import { registeredTypeIds, ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, APP_FIELD_TYPES, crmEntityTypeOf, fieldTypeCalls, formatHookValue, fullTypeId, generateAccessCode, isAccessCode, parseHookValue, parseWebhookUrl } from '#shared/domain/appFieldTypes'
 import { APP_FIELDS } from '#shared/domain/userFields'
-import { userFieldAddCall } from '~/utils/userFieldRequests'
+import { portalErrorText, userFieldAddCall } from '~/utils/userFieldRequests'
 import { fieldContext, writePlan } from '~/utils/fieldPlacement'
 import { serverProblems } from '~/utils/serverHealth'
 
@@ -122,10 +122,10 @@ describe('поля своих типов', () => {
   it('у компании и контакта — код доступа и вебхук; создаются с полным кодом типа', () => {
     const code = APP_FIELDS.find(f => f.entity === 'contact' && f.name === 'UF_CRM_SH_IFT_ACCESS_CODE')!
     expect(code.type).toBe('ift_access_code')
-    const call = userFieldAddCall(code, 12)
+    const call = userFieldAddCall(code, 'rest_12_ift_access_code')
     expect(call.method).toBe('crm.contact.userfield.add')
     expect(call.params.fields).toMatchObject({ USER_TYPE_ID: 'rest_12_ift_access_code', FIELD_NAME: 'SH_IFT_ACCESS_CODE' })
-    expect(() => userFieldAddCall(code)).toThrow(/ID приложения/)
+    expect(() => userFieldAddCall(code)).toThrow(/не зарегистрирован тип/)
     expect(userFieldAddCall(APP_FIELDS[0]!).params.PARAMS).toMatchObject({ USER_TYPE_ID: 'string' })
   })
 })
@@ -134,5 +134,18 @@ describe('health: ключ вебхуков', () => {
   it('не задан — проблема, не блокирующая', () => {
     expect(serverProblems({ config: { appCode: true, oauth: true, tokenKey: true, bitrixGpt: true, clientHookKey: false } }))
       .toEqual([{ variable: 'CLIENT_HOOK_ENC_KEY', effect: expect.stringMatching(/Вебхук клиента/), blocking: false }])
+  })
+})
+
+describe('коды своих типов из userfieldtype.list', () => {
+  it('полный код — как отдал портал; короткий — по ID приложения; чужие и мусор — мимо', () => {
+    const list = [{ USER_TYPE_ID: 'rest_77_IFT_ACCESS_CODE' }, { USER_TYPE_ID: 'ift_client_hook' }, { USER_TYPE_ID: 'other' }, null]
+    expect([...registeredTypeIds(list, 12)]).toEqual([['ift_access_code', 'rest_77_ift_access_code'], ['ift_client_hook', 'rest_12_ift_client_hook']])
+    expect([...registeredTypeIds(list, null)]).toEqual([['ift_access_code', 'rest_77_ift_access_code']])
+    expect(registeredTypeIds('x', 12).size).toBe(0)
+  })
+
+  it('ошибка портала без HTML', () => {
+    expect(portalErrorText(new Error('Указан неверный пользовательский тип.<br>'))).toBe('Указан неверный пользовательский тип.')
   })
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Поля клиента (#34): UF задачи с ID задачи клиента (идёт в название строки «[123-456] Задача») и
-// UF компании и контакта с доменом портала клиента (для публичной страницы счёта). Поля
+// UF задачи с доменом портала клиента (для публичной страницы счёта). Поля
 // приложения создаются только здесь, кнопкой — при установке и удалении приложение UF не трогает.
 import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
@@ -84,32 +84,17 @@ async function createFields() {
     </B24FormField>
 
     <B24FormField
-      label="Домен Битрикс24 клиента — поле компании"
-      description="Например, client.bitrix24.ru — для публичной страницы счёта"
+      label="Домен Битрикс24 клиента — поле задачи"
+      description="Например, client.bitrix24.ru: портал, где живёт задача клиента. Для публичной страницы счёта — ссылка на задачу клиента"
     >
       <B24SelectMenu
-        v-model="settings.clientFields.companyDomain"
-        :items="itemsFor('company', settings.clientFields.companyDomain)"
+        v-model="settings.clientFields.taskDomain"
+        :items="itemsFor('task', settings.clientFields.taskDomain)"
         value-key="value"
         :search-input="{ placeholder: 'Поиск поля…' }"
         :loading="loading"
         class="w-96 max-w-full"
-        data-testid="client-field-company-domain"
-      />
-    </B24FormField>
-
-    <B24FormField
-      label="Домен Битрикс24 клиента — поле контакта"
-      description="Для счетов на контакт без компании"
-    >
-      <B24SelectMenu
-        v-model="settings.clientFields.contactDomain"
-        :items="itemsFor('contact', settings.clientFields.contactDomain)"
-        value-key="value"
-        :search-input="{ placeholder: 'Поиск поля…' }"
-        :loading="loading"
-        class="w-96 max-w-full"
-        data-testid="client-field-contact-domain"
+        data-testid="client-field-task-domain"
       />
     </B24FormField>
 

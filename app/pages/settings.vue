@@ -20,6 +20,7 @@ const tabs = computed<TabsItem[]>(() => {
     { label: 'Наценки', slot: 'markup' as const, value: 'markup' },
     { label: 'НДС', slot: 'vat' as const, value: 'vat' },
     { label: 'Поля клиента', slot: 'clientFields' as const, value: 'clientFields' },
+    { label: 'Публичная страница', slot: 'publicPage' as const, value: 'publicPage' },
     { label: 'Промпты', slot: 'prompts' as const, value: 'prompts' },
     { label: 'Доступ', slot: 'access' as const, value: 'access' },
     { label: 'Хранилище', slot: 'storage' as const, value: 'storage' }
@@ -113,6 +114,12 @@ async function save() {
             </template>
             <template #clientFields>
               <SettingsClientFields
+                v-model="draft"
+                class="pt-4"
+              />
+            </template>
+            <template #publicPage>
+              <SettingsPublic
                 v-model="draft"
                 class="pt-4"
               />

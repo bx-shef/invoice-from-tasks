@@ -31,7 +31,10 @@ describe('ID задачи клиента', () => {
     expect(clientTaskIdOf('CL_12')).toBe('CL_12')
     // `-` — разделитель в «[102-456]»: с ним приставку не разобрать.
     expect(clientTaskIdOf('CL-12')).toBeNull()
-    expect(clientTaskIdOf('456.0000')).toBeNull()
+    // Числовое поле: целое с нулевой дробью — номер, дробное — нет.
+    expect(clientTaskIdOf('456.0000')).toBe('456')
+    expect(clientTaskIdOf(120536)).toBe('120536')
+    expect(clientTaskIdOf('456.5')).toBeNull()
     expect(clientTaskIdOf('')).toBeNull()
     expect(clientTaskIdOf('4 5')).toBeNull()
     expect(clientTaskIdOf('<b>1</b>')).toBeNull()
@@ -57,9 +60,10 @@ describe('ID задачи клиента', () => {
 
 describe('настройки clientFields', () => {
   it('по умолчанию пусто, мусор — пусто, круг сериализации сохраняет', () => {
-    expect(defaultSettings().clientFields).toEqual({ task: '', companyDomain: '', contactDomain: '' })
-    expect(parseSettings({ clientFields: { task: 'TITLE', companyDomain: 5 } }).clientFields).toEqual({ task: '', companyDomain: '', contactDomain: '' })
-    const s = { ...defaultSettings(), clientFields: { task: 'UF_A', companyDomain: 'UF_CRM_B', contactDomain: 'UF_CRM_C' } }
+    expect(defaultSettings().clientFields).toEqual({ task: '', taskDomain: '' })
+    // Старые поля домена компании и контакта (до 2026-10-06) отбрасываются разбором.
+    expect(parseSettings({ clientFields: { task: 'TITLE', taskDomain: 5, companyDomain: 'UF_CRM_B' } }).clientFields).toEqual({ task: '', taskDomain: '' })
+    const s = { ...defaultSettings(), clientFields: { task: 'UF_A', taskDomain: 'UF_SOURCE_DOMAIN' } }
     expect(parseSettings(serializeSettings(s)).clientFields).toEqual(s.clientFields)
   })
 })
@@ -73,7 +77,6 @@ describe('списки UF', () => {
       { FIELD_NAME: 'UF_M', USER_TYPE_ID: 'string', MULTIPLE: 'Y' },
       { FIELD_NAME: 'UF_CRM_TASK', USER_TYPE_ID: 'crm', MULTIPLE: 'Y' },
       { FIELD_NAME: 'UF_E', USER_TYPE_ID: 'enumeration', MULTIPLE: 'N' },
-      { FIELD_NAME: 'UF_D', USER_TYPE_ID: 'double', MULTIPLE: 'N' },
       { FIELD_NAME: 'bad', USER_TYPE_ID: 'string' },
       null
     ])
@@ -94,14 +97,14 @@ describe('поля приложения', () => {
   it('«поле уже есть» — по всем кодам, любого типа', () => {
     const raw = [{ FIELD_NAME: 'UF_SH_IFT_CLIENT_TASK', USER_TYPE_ID: 'integer', MULTIPLE: 'Y' }, { FIELD_NAME: 'x' }, null]
     expect(fieldNames(raw)).toEqual(['UF_SH_IFT_CLIENT_TASK'])
-    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [] }).every(f => f.entity !== 'task')).toBe(true)
+    expect(missingAppFields({ task: fieldNames(raw), company: [], contact: [] }).map(f => f.name)).not.toContain('UF_SH_IFT_CLIENT_TASK')
   })
 
   it('создаём только отсутствующие', () => {
     expect(missingAppFields({ task: [], company: [], contact: [] })).toEqual(APP_FIELDS)
-    const all = ['UF_CRM_SH_IFT_CLIENT_DOMAIN', 'UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_SH_IFT_CLIENT_HOOK']
-    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: all, contact: all.slice(1) }))
-      .toEqual([{ entity: 'contact', name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: '[sh::invoice-from-task] Домен Битрикс24 клиента', type: 'string' }])
+    const crm = ['UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_SH_IFT_CLIENT_HOOK']
+    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: crm, contact: crm }))
+      .toEqual([{ entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: '[sh::invoice-from-task] Домен Битрикс24 клиента', type: 'string' }])
   })
 
   it('подписи с приставкой приложения; CRM — без UF_CRM_ в коде', () => {
@@ -109,17 +112,15 @@ describe('поля приложения', () => {
     const task = userFieldAddCall(APP_FIELDS[0]!)
     expect(task.method).toBe('task.item.userfield.add')
     expect((task.params.PARAMS as Record<string, unknown>).FIELD_NAME).toBe('UF_SH_IFT_CLIENT_TASK')
-    const company = userFieldAddCall(APP_FIELDS[1]!)
+    const company = userFieldAddCall(APP_FIELDS.find(f => f.entity === 'company')!, 'rest_12_ift_access_code')
     expect(company.method).toBe('crm.company.userfield.add')
-    expect((company.params.fields as Record<string, unknown>).FIELD_NAME).toBe('SH_IFT_CLIENT_DOMAIN')
-    expect((company.params.fields as Record<string, unknown>).USER_TYPE_ID).toBe('string')
+    expect((company.params.fields as Record<string, unknown>).FIELD_NAME).toBe('SH_IFT_ACCESS_CODE')
+    expect((company.params.fields as Record<string, unknown>).USER_TYPE_ID).toBe('rest_12_ift_access_code')
   })
 
   it('после создания невыбранные настройки получают поля приложения, выбранные не трогаем', () => {
-    expect(withAppFields({ task: '', companyDomain: 'UF_CRM_MINE', contactDomain: '' }))
-      .toEqual({ task: 'UF_SH_IFT_CLIENT_TASK', companyDomain: 'UF_CRM_MINE', contactDomain: 'UF_CRM_SH_IFT_CLIENT_DOMAIN' })
-    expect(withAppFields({ task: 'UF_T', companyDomain: '', contactDomain: 'UF_CRM_C' }))
-      .toEqual({ task: 'UF_T', companyDomain: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', contactDomain: 'UF_CRM_C' })
+    expect(withAppFields({ task: '', taskDomain: 'UF_SOURCE_DOMAIN' })).toEqual({ task: 'UF_SH_IFT_CLIENT_TASK', taskDomain: 'UF_SOURCE_DOMAIN' })
+    expect(withAppFields({ task: 'UF_T', taskDomain: '' })).toEqual({ task: 'UF_T', taskDomain: 'UF_SH_IFT_CLIENT_DOMAIN' })
   })
 })
 

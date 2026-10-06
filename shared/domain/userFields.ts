@@ -28,10 +28,11 @@ export function camelFieldKey(fieldName: string): string {
 }
 
 /**
- * Типы UF, из которых читаем ID задачи клиента и домен. `double` нет: портал отдаёт его как
- * «456.0000», и номер задачи молча терялся бы (находка /code-review).
+ * Типы UF, из которых читаем ID задачи клиента и домен. `double` — тоже: номер задачи клиента на
+ * портале владельца хранится в числовом поле (`UF_SOURCE_TASK_ID`, замер 2026-10-06: значение
+ * в списке задач — строка «120536»); целое с нулевой дробью («456.0000») clientTaskIdOf понимает.
  */
-export const TEXT_FIELD_TYPES = ['string', 'integer', 'url'] as const
+export const TEXT_FIELD_TYPES = ['string', 'integer', 'double', 'url'] as const
 
 /** Поле для выпадающего списка настроек. */
 export interface UserFieldOption {
@@ -95,8 +96,8 @@ export const CLIENT_HOOK_FIELD = 'UF_CRM_SH_IFT_CLIENT_HOOK'
 /** Поля, которые создаёт кнопка «Создать поля». */
 export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'task', name: 'UF_SH_IFT_CLIENT_TASK', label: `${APP_FIELD_LABEL_PREFIX} ID Клиентской задачи`, type: 'string' },
+  { entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
   ...(['company', 'contact'] as const).flatMap((entity): AppFieldSpec[] => [
-    { entity, name: 'UF_CRM_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
     { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
     { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
   ])
@@ -119,7 +120,9 @@ export function fieldNames(raw: unknown): string[] {
 
 /** ID задачи клиента из значения UF: строка или число, без пробелов; пусто или мусор — `null`. */
 export function clientTaskIdOf(value: unknown): string | null {
-  const v = typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' ? value.trim() : ''
+  const raw = typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' ? value.trim() : ''
+  // Числовое поле (`double`) может прийти как «456.0000» — это номер 456; дробный — не номер.
+  const v = /^\d+\.0+$/.test(raw) ? raw.replace(/\.0+$/, '') : raw
   // Номер задачи клиента — его ID в портале клиента, бывает и с приставкой («CL_12»): пропускаем
   // латиницу, цифры и `_`, не длиннее 30 — в название строки счёта не попадёт ничего чужого.
   // `-` нет: это разделитель в «[102-456]», с ним «[102-12-5]» не разобрать (находка /code-review).

@@ -1,7 +1,6 @@
 // Параметры REST-запросов пользовательских полей (#34): список UF задач, компаний и контактов
 // для выбора в настройках и создание полей приложения кнопкой. Методы — docs/REST_METHODS.md.
 
-import { fullTypeId } from '#shared/domain/appFieldTypes'
 import type { AppFieldSpec } from '#shared/domain/userFields'
 import type { RestCall } from './invoiceRequests'
 
@@ -29,14 +28,15 @@ export function needsAppId(spec: AppFieldSpec): boolean {
 }
 
 /**
- * Создание поля приложения. `appId` — ID приложения (app.info → ID) для полей своих типов.
+ * Создание поля приложения. `typeId` — полный код своего типа (`rest_<ID>_<код>`, registeredTypeIds)
+ * для полей своих типов.
  *
  * У задач код передаётся целиком (`UF_` портал добавит сам, если его
  * нет); у CRM — без приставки `UF_CRM_`: её добавляет портал (документация crm.*.userfield.add).
  */
-export function userFieldAddCall(spec: AppFieldSpec, appId?: number): RestCall {
-  if (needsAppId(spec) && !(appId && appId > 0)) throw new Error(`для поля ${spec.name} нужен ID приложения`)
-  const type = spec.type === 'string' ? 'string' : fullTypeId(appId!, spec.type)
+export function userFieldAddCall(spec: AppFieldSpec, typeId?: string): RestCall {
+  if (needsAppId(spec) && !typeId) throw new Error(`для поля ${spec.name} не зарегистрирован тип ${spec.type}`)
+  const type = spec.type === 'string' ? 'string' : typeId!
   if (spec.entity === 'task') {
     return {
       method: 'task.item.userfield.add',
@@ -59,4 +59,10 @@ export function userFieldAddCall(spec: AppFieldSpec, appId?: number): RestCall {
       }
     }
   }
+}
+
+/** Текст ошибки портала для человека: без HTML (портал присылает «…тип.<br>»). */
+export function portalErrorText(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e)
+  return m.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 }

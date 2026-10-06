@@ -3,8 +3,10 @@
 // shared/domain/userFields.ts. Создавать UF может только администратор — вкладка только для него.
 
 import { fieldNames, missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
+import { fieldTypeCalls, registeredTypeIds } from '#shared/domain/appFieldTypes'
+import { absoluteHandler } from '~/utils/install'
 import { collectOffsetPages } from '~/utils/paging'
-import { MAX_USER_FIELDS, needsAppId, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
+import { MAX_USER_FIELDS, needsAppId, portalErrorText, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
 
 /** Поля для выбора и коды ВСЕХ UF сущности (для «поле уже есть», missingAppFields). */
 export interface FieldList {
@@ -15,6 +17,21 @@ export type FieldLists = Record<FieldEntity, FieldList>
 
 export function useUserFields() {
   const b24 = useB24()
+  const config = useRuntimeConfig()
+
+  /**
+   * Полные коды своих типов полей. Незарегистрированные регистрирует здесь же (как установка,
+   * fieldTypeCalls): портал, где после обновления приложения установку не открывали, иначе отвечал
+   * «Указан неверный пользовательский тип» (отчёт владельца 2026-10-06).
+   */
+  async function ensureTypes(): Promise<Map<string, string>> {
+    const siteUrl = config.public.siteUrl || window.location.origin
+    if (!absoluteHandler(siteUrl, '/')) throw new Error('у приложения нет https-адреса (NUXT_PUBLIC_SITE_URL) — типы полей не зарегистрировать')
+    const before = await b24.call<unknown>('userfieldtype.list')
+    for (const call of fieldTypeCalls(before, path => absoluteHandler(siteUrl, path))) await b24.call(call.method, call.params)
+    const appId = Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID)
+    return registeredTypeIds(await b24.call<unknown>('userfieldtype.list'), Number.isInteger(appId) && appId > 0 ? appId : null)
+  }
 
   /** UF одной сущности, постранично. */
   async function list(entity: FieldEntity): Promise<FieldList> {
@@ -61,18 +78,19 @@ export function useUserFields() {
       company: lists.company.names,
       contact: lists.contact.names
     })
-    // Поля своих типов — с полным кодом `rest_<ID приложения>_<код>`: ID — из app.info, и проверяем
-    // его ДО первой записи. Строковые поля — первыми: незарегистрированный тип (портал, где
-    // установку не открывали после обновления) не должен оставить их несозданными (находка /code-review).
-    let appId: number | undefined
-    if (missing.some(needsAppId)) {
-      appId = Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID)
-      if (!Number.isInteger(appId) || appId <= 0) throw new Error('портал не вернул ID приложения (app.info) — поля не созданы')
-    }
+    // Строковые поля — первыми: сбой своих типов не должен оставить их несозданными. Типы — до
+    // первого поля своего типа: зарегистрировать, если их нет, и взять полные коды из ответа портала.
     missing.sort((a, b) => Number(needsAppId(a)) - Number(needsAppId(b)))
+    let types: Map<string, string> | null = null
     for (const spec of missing) {
-      const { method, params } = userFieldAddCall(spec, appId)
-      await b24.call(method, params)
+      try {
+        if (needsAppId(spec)) types ??= await ensureTypes()
+        const { method, params } = userFieldAddCall(spec, types?.get(spec.type))
+        await b24.call(method, params)
+      } catch (e) {
+        // Какое поле — в сообщении: иначе «неверный пользовательский тип» не к чему приложить.
+        throw new Error(`${spec.label} (${spec.name}): ${portalErrorText(e)}`, { cause: e })
+      }
     }
     return missing
   }
