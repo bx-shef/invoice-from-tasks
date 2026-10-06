@@ -380,23 +380,30 @@ export function documentPdfUrl(raw: unknown, templates: number[], invoiceId: num
  * То же с причиной отказа — для журнала (без самой ссылки: в ней токен). На живом портале
  * (2026-10-06, счёт 145) скачивание отказывало, а причину было не узнать (находка владельца).
  */
-export function documentPdfCheck(raw: unknown, templates: number[], invoiceId: number, portalHost: string): { ok: true, url: string, title: string } | { ok: false, reason: string } {
+/** Что скачать: PDF или картинку-превью документа (`imageUrlMachine`). */
+export type DocumentKind = 'pdf' | 'image'
+
+export function documentPdfCheck(raw: unknown, templates: number[], invoiceId: number, portalHost: string, kind: DocumentKind = 'pdf'): { ok: true, url: string, title: string } | { ok: false, reason: string } {
   const d = raw && typeof raw === 'object' && 'document' in raw ? (raw as { document: unknown }).document : raw
   const o = d && typeof d === 'object' ? d as Record<string, unknown> : null
   if (!o) return { ok: false, reason: 'no document' }
   const templateId = posInt(o.templateId)
   if (!templateId || !templates.includes(templateId)) return { ok: false, reason: `template ${String(o.templateId)} not allowed` }
-  if (!posInt(o.pdfId)) return { ok: false, reason: 'no pdfId' }
+  // `pdfId` — только в ответе списка; у document.get его нет (документация, живой отказ 2026-10-06):
+  // готовность PDF там видна по ссылке и `isTransformationError`.
+  if (o.isTransformationError === true || o.isTransformationError === 'Y') return { ok: false, reason: 'transformation error' }
   if (Number(o.entityTypeId) !== INVOICE_ENTITY_TYPE_ID || Number(o.entityId) !== invoiceId) return { ok: false, reason: `entity ${String(o.entityTypeId)}/${String(o.entityId)}` }
-  if (typeof o.pdfUrlMachine !== 'string' || !o.pdfUrlMachine) return { ok: false, reason: 'no pdfUrlMachine' }
+  const field = kind === 'image' ? 'imageUrlMachine' : 'pdfUrlMachine'
+  const raw2 = o[field]
+  if (typeof raw2 !== 'string' || !raw2) return { ok: false, reason: `no ${field}` }
   let u: URL
   try {
-    u = new URL(o.pdfUrlMachine)
+    u = new URL(raw2)
   } catch {
-    return { ok: false, reason: 'pdfUrlMachine not a URL' }
+    return { ok: false, reason: `${field} not a URL` }
   }
   if (u.protocol !== 'https:' || u.hostname !== portalHost || u.username || u.password || u.port) {
-    return { ok: false, reason: `pdfUrlMachine host ${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}, portal ${portalHost}` }
+    return { ok: false, reason: `${field} host ${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}, portal ${portalHost}` }
   }
   return { ok: true, url: u.toString(), title: plainText(o.title).slice(0, 200) }
 }
@@ -405,4 +412,13 @@ export function documentPdfCheck(raw: unknown, templates: number[], invoiceId: n
 export function pdfFileName(title: string, id: number): string {
   const base = title.replace(/[^\p{L}\p{N} ._-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)
   return `${base || `document-${id}`}.pdf`
+}
+
+/** Тип файла по сигнатуре: PDF, PNG, JPEG; другое (JSON или HTML ошибки портала) — `null`. */
+export function fileKindOf(bytes: Uint8Array): { type: 'application/pdf' | 'image/png' | 'image/jpeg', ext: string } | null {
+  const b = bytes
+  if (b.length >= 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2D) return { type: 'application/pdf', ext: 'pdf' }
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return { type: 'image/png', ext: 'png' }
+  if (b.length >= 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return { type: 'image/jpeg', ext: 'jpg' }
+  return null
 }

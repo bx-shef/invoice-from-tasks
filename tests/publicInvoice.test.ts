@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { documentPdfCheck, documentPdfUrl, latestDocuments, pdfFileName, clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
+import { documentPdfCheck, documentPdfUrl, fileKindOf, latestDocuments, pdfFileName, clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
 import { DEFAULT_CLOSED_TEXT, defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { invoiceStageEntities, publicInvoiceUrl, stageItems, stageOptions, templateItems, templateOptions } from '~/utils/invoiceStages'
 
@@ -140,14 +140,20 @@ describe('документы — разбор', () => {
     for (const url of ['http://my.by/x', 'https://my.by:8443/x', 'https://u:p@my.by/x', 'https://evil.my.by/x', 'нет']) {
       expect(documentPdfUrl({ document: { ...base, pdfUrlMachine: url } }, [3], 5, 'my.by'), url).toBeNull()
     }
-    expect(documentPdfUrl({ document: { ...base, pdfId: 0, pdfUrlMachine: 'https://my.by/x' } }, [3], 5, 'my.by')).toBeNull()
+    expect(fileKindOf(new TextEncoder().encode('%PDF-1.7'))).toEqual({ type: 'application/pdf', ext: 'pdf' })
+    expect(fileKindOf(new Uint8Array([0xFF, 0xD8, 0xFF, 0xE0]))).toEqual({ type: 'image/jpeg', ext: 'jpg' })
+    expect(fileKindOf(new TextEncoder().encode('{"error"'))).toBeNull()
   })
 
   it('причины отказа — для журнала', () => {
     const base = { templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5 }
     expect(documentPdfCheck(null, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no document' })
     expect(documentPdfCheck({ ...base, templateId: 4 }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'template 4 not allowed' })
-    expect(documentPdfCheck({ ...base, pdfId: 0 }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no pdfId' })
+    // pdfId у document.get нет — не требуем; ошибка преобразования — отказ.
+    expect(documentPdfCheck({ ...base, pdfId: undefined, pdfUrlMachine: 'https://my.by/x' }, [3], 5, 'my.by')).toMatchObject({ ok: true })
+    expect(documentPdfCheck({ ...base, isTransformationError: true, pdfUrlMachine: 'https://my.by/x' }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'transformation error' })
+    expect(documentPdfCheck({ ...base, imageUrlMachine: 'https://my.by/i' }, [3], 5, 'my.by', 'image')).toMatchObject({ ok: true, url: 'https://my.by/i' })
+    expect(documentPdfCheck({ ...base, pdfUrlMachine: 'https://my.by/x' }, [3], 5, 'my.by', 'image')).toEqual({ ok: false, reason: 'no imageUrlMachine' })
     expect(documentPdfCheck({ ...base, entityTypeId: 'SMART_INVOICE' }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'entity SMART_INVOICE/5' })
     expect(documentPdfCheck(base, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'no pdfUrlMachine' })
     expect(documentPdfCheck({ ...base, pdfUrlMachine: 'https://cdn.my.by:8443/x' }, [3], 5, 'my.by')).toEqual({ ok: false, reason: 'pdfUrlMachine host https://cdn.my.by:8443, portal my.by' })

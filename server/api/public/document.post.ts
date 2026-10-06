@@ -10,12 +10,13 @@ import { ipBucketKey } from '../../utils/requestLimits'
 export default defineEventHandler(async (event) => {
   const started = Date.now()
   setResponseHeaders(event, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' })
-  const body = await readBody<{ domain?: unknown, invoiceId?: unknown, code?: unknown, documentId?: unknown } | null>(event)
+  const body = await readBody<{ domain?: unknown, invoiceId?: unknown, code?: unknown, documentId?: unknown, kind?: unknown } | null>(event)
   const domain = typeof body?.domain === 'string' ? body.domain.trim().toLowerCase().slice(0, 260) : ''
   const result = await loadPublicDocument({
     domain,
     invoiceId: Number(body?.invoiceId),
     documentId: Number(body?.documentId),
+    kind: body?.kind === 'image' ? 'image' : 'pdf',
     code: typeof body?.code === 'string' ? body.code.trim() : '',
     ip: ipBucketKey(clientIp(event))
   }, publicDeps('download')).catch((e: unknown) => {
@@ -29,8 +30,8 @@ export default defineEventHandler(async (event) => {
   setResponseStatus(event, result.status)
   if ('pdf' in result) {
     setResponseHeaders(event, {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="document.pdf"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`
+      'Content-Type': result.contentType,
+      'Content-Disposition': `${result.contentType === 'application/pdf' ? 'attachment' : 'inline'}; filename="document"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`
     })
     return result.pdf
   }

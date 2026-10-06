@@ -13,6 +13,8 @@ import {
   clientTaskIdFor,
   documentEntries,
   documentPdfCheck,
+  fileKindOf,
+  type DocumentKind,
   latestDocuments,
   pdfFileName,
   invoiceBindingCodes,
@@ -311,7 +313,7 @@ export async function readLatestDocuments(call: RestCall, templates: number[], i
 export const MAX_PDF_BYTES = 20 * 1024 * 1024
 
 export type DocumentResult
-  = | { status: 200, pdf: Uint8Array, fileName: string }
+  = | { status: 200, pdf: Uint8Array, fileName: string, contentType: string }
     | PublicResult
 
 export interface DocumentDeps extends PublicDeps {
@@ -324,7 +326,8 @@ export interface DocumentDeps extends PublicDeps {
  * документ — только этого счёта и разрешённого шаблона, машинная ссылка — только на сам портал.
  * Ссылка (в ней токен) наружу не уходит: клиент получает файл, а не адрес.
  */
-export async function loadPublicDocument(req: PublicRequest & { documentId: number }, deps: DocumentDeps): Promise<DocumentResult> {
+export async function loadPublicDocument(req: PublicRequest & { documentId: number, kind?: DocumentKind }, deps: DocumentDeps): Promise<DocumentResult> {
+  const kind: DocumentKind = req.kind === 'image' ? 'image' : 'pdf'
   if (!Number.isInteger(req.documentId) || req.documentId <= 0) return { status: 400, body: { error: 'Неверная ссылка' } }
   const access = await verifyPublicAccess(req, deps)
   if (isResult(access)) return access.status === 200 ? { status: 404, body: { error: 'Документ недоступен' } } : access
@@ -339,16 +342,18 @@ export async function loadPublicDocument(req: PublicRequest & { documentId: numb
   const templates = settings.publicPage.templates
   const listed = documentEntries(await orNull(call('crm.documentgenerator.document.list', { ...documentListParams(invoice.id), select: ['*'] })))
     .find(d => Number(d.id) === req.documentId)
-  let check = documentPdfCheck(listed ?? null, templates, invoice.id, host)
+  let check = documentPdfCheck(listed ?? null, templates, invoice.id, host, kind)
   if (!check.ok) {
-    const fromGet = documentPdfCheck(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), templates, invoice.id, host)
+    const fromGet = documentPdfCheck(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), templates, invoice.id, host, kind)
     if (!fromGet.ok) console.warn(`[public] document ${req.documentId} of invoice ${invoice.id}: list — ${check.reason}; get — ${fromGet.reason}`)
     check = fromGet
   }
   if (!check.ok) return { status: 404, body: { error: 'Документ недоступен' } }
   const doc = check
   const pdf = await deps.fetchPdf(doc.url)
-  // Сигнатура PDF: портал при ошибке отдаёт JSON или HTML — клиенту такой «PDF» не нужен.
-  if (pdf.byteLength < 5 || new TextDecoder().decode(pdf.subarray(0, 5)) !== '%PDF-') throw new Error('document is not a PDF')
-  return { status: 200, pdf, fileName: pdfFileName(doc.title, req.documentId) }
+  // Сигнатура: портал при ошибке отдаёт JSON или HTML — клиенту такой «PDF» не нужен. PDF — только
+  // PDF, превью — только PNG или JPEG.
+  const file = fileKindOf(pdf)
+  if (!file || (kind === 'pdf') !== (file.type === 'application/pdf')) throw new Error(`document ${kind} has unexpected content`)
+  return { status: 200, pdf, contentType: file.type, fileName: pdfFileName(doc.title, req.documentId).replace(/\.pdf$/, `.${file.ext}`) }
 }
