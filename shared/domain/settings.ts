@@ -68,6 +68,14 @@ export interface AppSettings {
     contactDomain: string
   }
   /**
+   * Публичная страница счёта (#34): в каких стадиях (`stageId` счёта, например `DT31_1:N`) клиент
+   * видит расшифровку; в остальных — спокойная фраза `closedText`. Пусто — не показывается никогда.
+   */
+  publicPage: {
+    stages: string[]
+    closedText: string
+  }
+  /**
    * Промпты названий. `null` — действует системный (prompts.ts); так «восстановить системный»
    * — это просто сброс в `null`, и улучшение системного промпта доходит до всех порталов.
    */
@@ -85,8 +93,18 @@ export const LIMITS = {
   prompt: 4000,
   consultPrompts: 20,
   consultTitle: 100,
-  vatCompanies: 50
+  vatCompanies: 50,
+  publicStages: 50,
+  closedText: 500
 } as const
+
+/** Фраза по умолчанию, если счёт не в разрешённой стадии. */
+export const DEFAULT_CLOSED_TEXT = 'Расшифровка этого счёта сейчас недоступна. Пожалуйста, обратитесь к вашему менеджеру.'
+
+/** Код стадии CRM: `DT31_1:N`, `NEW`, `C1:WON` — латиница, цифры, `_`, `:`, `-`. */
+function stageId(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_:-]{1,50}$/.test(value) ? value : null
+}
 
 export function defaultSettings(): AppSettings {
   return {
@@ -101,6 +119,7 @@ export function defaultSettings(): AppSettings {
     naming: 'plain',
     taskIdInName: false,
     clientFields: { task: '', companyDomain: '', contactDomain: '' },
+    publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT },
     prompts: { taskTitle: null, timeBlock: null },
     consultPrompts: []
   }
@@ -196,6 +215,8 @@ export function parseSettings(raw: unknown): AppSettings {
   const markup = asObject(o.markup)
   const prompts = asObject(o.prompts)
   const clientFields = asObject(o.clientFields)
+  const publicPage = asObject(o.publicPage)
+  const closedText = text(publicPage.closedText, LIMITS.closedText).trim()
   // ⚠ Без обрезки до проверки: `text(…, 3)` превращал «RUBLES» в «RUB» и пропускал мусор как валюту.
   const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : ''
   return {
@@ -218,6 +239,12 @@ export function parseSettings(raw: unknown): AppSettings {
       task: normalizeFieldName(clientFields.task),
       companyDomain: normalizeFieldName(clientFields.companyDomain),
       contactDomain: normalizeFieldName(clientFields.contactDomain)
+    },
+    publicPage: {
+      stages: Array.isArray(publicPage.stages)
+        ? [...new Set(publicPage.stages.map(stageId).filter((v): v is string => v !== null))].slice(0, LIMITS.publicStages)
+        : d.publicPage.stages,
+      closedText: closedText || d.publicPage.closedText
     },
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),

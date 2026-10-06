@@ -54,11 +54,19 @@ export async function requireFrameUser(event: H3Event): Promise<RequestContext> 
  * из минутного кэша проверки фрейма, после рефреша в ней старые токены.
  */
 export function installerCall(user: FrameUser): RestCall {
+  return installerCallFor(user.portal.memberId)
+}
+
+/**
+ * Токен установщика по `memberId` портала — для публичной страницы счёта (#34): у клиента нет
+ * фрейма, читать портал больше нечем (осознанное исключение, решение владельца).
+ */
+export function installerCallFor(memberId: string): RestCall {
   const kv = portalStore()
   const creds = oauthCredsFromEnv()
   return makeInstallerCall({
     kv,
-    memberId: user.portal.memberId,
+    memberId,
     clientFor: p => makePortalCall(
       {
         domain: p.domain,

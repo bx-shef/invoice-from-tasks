@@ -50,24 +50,34 @@ export function oauthParams(token: TokenInput, nowMs: number): B24OAuthParams {
 }
 
 /** Структурный срез клиента SDK, который мы зовём, — тесты подсовывают подделку. */
+type SdkMake = (o: { method: string, params?: Record<string, unknown> }) => Promise<{
+  isSuccess: boolean
+  getData: () => { result?: unknown } | undefined
+  getErrorMessages: () => string[]
+}>
+
 export interface SdkCallClient {
   actions: {
-    v2: {
-      call: {
-        make: (o: { method: string, params?: Record<string, unknown> }) => Promise<{
-          isSuccess: boolean
-          getData: () => { result?: unknown } | undefined
-          getErrorMessages: () => string[]
-        }>
-      }
-    }
+    v2: { call: { make: SdkMake } }
+    v3?: { call: { make: SdkMake } }
   }
 }
 
-/** Обёртка клиента в `RestCall`: разворачивает конверт или бросает с сообщениями портала. */
+/** Приставка имени метода для REST v3: `v3:tasks.task.result.list` (метод есть только в v3). */
+export const V3_PREFIX = 'v3:'
+
+/**
+ * Обёртка клиента в `RestCall`: разворачивает конверт или бросает с сообщениями портала. Метод с
+ * приставкой {@link V3_PREFIX} уходит в REST v3 (`actions.v3`) — один `RestCall` на обе версии,
+ * чтобы обёртки токена установщика (очередь, обновление токена) не дублировать.
+ */
 export function restCallFrom(client: SdkCallClient): RestCall {
-  return async (method, params = {}) => {
-    const res = await client.actions.v2.call.make({ method, params })
+  return async (name, params = {}) => {
+    const v3 = name.startsWith(V3_PREFIX)
+    const method = v3 ? name.slice(V3_PREFIX.length) : name
+    const api = v3 ? client.actions.v3 : client.actions.v2
+    if (!api) throw new Error(`${method}: REST v3 is not available in this SDK client`)
+    const res = await api.call.make({ method, params })
     if (!res.isSuccess) throw new Error(`${method}: ${res.getErrorMessages().join('; ') || 'unknown error'}`)
     return res.getData()?.result
   }
