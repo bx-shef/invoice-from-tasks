@@ -8,32 +8,51 @@ const HOOK = 'https://client.bitrix24.ru/rest/1/abc123def456/'
 
 describe('sealClientHook', () => {
   it('шифрует своим ключом; домен — открыто; вебхук в значении не виден', () => {
-    const r = sealClientHook(HOOK, env)
+    const r = sealClientHook(HOOK, 'my.bitrix24.by', env)
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value.startsWith('ift1|client.bitrix24.ru|')).toBe(true)
     expect(r.value).not.toContain('abc123def456')
-    expect(openClientHook(r.value, env)).toEqual({ url: HOOK, host: 'client.bitrix24.ru' })
+    expect(openClientHook(r.value, 'my.bitrix24.by', env)).toEqual({ url: HOOK, host: 'client.bitrix24.ru' })
   })
 
   it('не вебхук — 400; не портал Битрикс24 — 400 (SSRF); нет ключа — 503', () => {
-    expect(sealClientHook('https://evil.example.com/rest/1/abc123def456/', env)).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/не портал/) })
-    expect(sealClientHook('https://127.0.0.1/rest/1/abc123def456/', env)).toMatchObject({ ok: false, status: 400 })
-    expect(sealClientHook('x', env)).toMatchObject({ ok: false, status: 400 })
-    expect(sealClientHook(HOOK, {})).toMatchObject({ ok: false, status: 503 })
+    expect(sealClientHook('https://evil.example.com/rest/1/abc123def456/', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/не портал/) })
+    expect(sealClientHook('https://127.0.0.1/rest/1/abc123def456/', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400 })
+    expect(sealClientHook('x', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400 })
+    expect(sealClientHook(HOOK, 'my.bitrix24.by', {})).toMatchObject({ ok: false, status: 503 })
   })
 
   it('ключ токенов установки вебхуки не открывает', () => {
-    const r = sealClientHook(HOOK, env)
+    const r = sealClientHook(HOOK, 'my.bitrix24.by', env)
     if (!r.ok) throw new Error('seal failed')
-    expect(() => openClientHook(r.value, { CLIENT_HOOK_ENC_KEY: 'b'.repeat(64) })).toThrow()
+    expect(() => openClientHook(r.value, 'my.bitrix24.by', { CLIENT_HOOK_ENC_KEY: 'b'.repeat(64) })).toThrow()
   })
 
   it('подмена домена в открытой части — ошибка', () => {
-    const r = sealClientHook(HOOK, env)
+    const r = sealClientHook(HOOK, 'my.bitrix24.by', env)
     if (!r.ok) throw new Error('seal failed')
     const forged = r.value.replace('client.bitrix24.ru', 'other.bitrix24.ru')
-    expect(() => openClientHook(forged, env)).toThrow(/host mismatch/)
+    // Домен входит в AAD — подмену отсекает уже GCM, до сверки доменов.
+    expect(() => openClientHook(forged, 'my.bitrix24.by', env)).toThrow()
+  })
+})
+
+describe('привязка к порталу и проверка домена при использовании', () => {
+  it('значение, скопированное в другой портал, не открывается', () => {
+    const r = sealClientHook(HOOK, 'my.bitrix24.by', env)
+    if (!r.ok) throw new Error('seal failed')
+    expect(() => openClientHook(r.value, 'other.bitrix24.by', env)).toThrow()
+    expect(openClientHook(r.value, 'MY.bitrix24.by', env).host).toBe('client.bitrix24.ru')
+  })
+
+  it('коробка, убранная из B24_SELFHOSTED_HOSTS после сохранения, больше не годится', () => {
+    const box = 'https://crm.company.by/rest/1/abc123def456/'
+    const withBox = { ...env, B24_SELFHOSTED_HOSTS: 'crm.company.by' }
+    const r = sealClientHook(box, 'my.bitrix24.by', withBox)
+    if (!r.ok) throw new Error('seal failed')
+    expect(openClientHook(r.value, 'my.bitrix24.by', withBox).host).toBe('crm.company.by')
+    expect(() => openClientHook(r.value, 'my.bitrix24.by', env)).toThrow()
   })
 })
 

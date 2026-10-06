@@ -26,20 +26,17 @@ onMounted(async () => {
   value.value = ctx.value.value
 })
 
-async function write(next: string, done: string) {
+/** Общий ход записи: занятость, ошибка, подпись «сохраните карточку». `next` — что записать. */
+async function run(next: () => Promise<string>, done: string) {
   if (!ctx.value) return
-  const where = await writer.write(ctx.value, next)
-  value.value = next
-  note.value = where === 'form' ? `${done} — сохраните карточку` : done
-}
-
-async function save() {
   busy.value = true
   error.value = ''
   try {
-    const sealed = await post<{ value: string }>('/api/client-hook/seal', { url: input.value })
-    await write(sealed.value, 'Вебхук сохранён')
+    const v = await next()
+    const where = await writer.write(ctx.value, v)
+    value.value = v
     input.value = ''
+    note.value = where === 'form' ? `${done} — сохраните карточку` : done
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -47,17 +44,13 @@ async function save() {
   }
 }
 
-async function clear() {
+function save() {
+  void run(async () => (await post<{ value: string }>('/api/client-hook/seal', { url: input.value })).value, 'Вебхук сохранён')
+}
+
+function clear() {
   if (!window.confirm('Стереть вебхук клиента?')) return
-  busy.value = true
-  error.value = ''
-  try {
-    await write('', 'Вебхук стёрт')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
+  void run(async () => '', 'Вебхук стёрт')
 }
 </script>
 

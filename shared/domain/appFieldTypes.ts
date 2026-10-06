@@ -71,10 +71,11 @@ export function fieldTypeCalls(existing: unknown, handlerOf: (path: string) => s
 /** Длина кода доступа (решение владельца, #34). */
 export const ACCESS_CODE_LENGTH = 10
 /**
- * Алфавит кода: без похожих символов (0/O, 1/l/I) — код диктуют и переписывают с бумаги.
- * 54 символа × 10 позиций ≈ 57 бит — перебор закрывает лимит попыток публичной страницы (этап 3).
+ * Алфавит кода: без похожих символов (0/O/o, 1/l/I) — код диктуют и переписывают с бумаги.
+ * 56 символов (24 + 24 + 8) в 10 позициях ≈ 58 бит — перебор закрывает лимит попыток публичной
+ * страницы (этап 3).
  */
-export const ACCESS_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+export const ACCESS_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
 
 /**
  * Новый код доступа из криптостойких случайных байт (`crypto.getRandomValues` в браузере).

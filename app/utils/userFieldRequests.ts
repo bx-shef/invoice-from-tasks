@@ -29,7 +29,9 @@ export function needsAppId(spec: AppFieldSpec): boolean {
 }
 
 /**
- * Создание поля приложения. `appId` — ID приложения (app.info → ID) для полей своих типов. У задач код передаётся целиком (`UF_` портал добавит сам, если его
+ * Создание поля приложения. `appId` — ID приложения (app.info → ID) для полей своих типов.
+ *
+ * У задач код передаётся целиком (`UF_` портал добавит сам, если его
  * нет); у CRM — без приставки `UF_CRM_`: её добавляет портал (документация crm.*.userfield.add).
  */
 export function userFieldAddCall(spec: AppFieldSpec, appId?: number): RestCall {

@@ -60,11 +60,13 @@ async function runInstall() {
   }
   mark('placement', 'ok', bind ? undefined : 'уже был зарегистрирован')
 
-  // Сбой типов полей — не повод срывать установку: без них не работает только публичная страница
-  // счёта; переустановка (эта же страница) зарегистрирует их ещё раз.
+  // Сбой типов полей — не повод срывать установку счёта из задач: без типов не работают поля «Код
+  // доступа» и «Вебхук клиента» (кнопка «Создать поля» их не создаст, публичной страницы не будет).
+  // Повторное открытие установки (эта же страница) зарегистрирует их ещё раз.
   mark('fieldTypes', 'run')
   try {
     const types = await b24.call<unknown[]>('userfieldtype.list')
+    if (!absoluteHandler(siteUrl, '/')) throw new Error('у приложения нет https-адреса (NUXT_PUBLIC_SITE_URL)')
     const calls = fieldTypeCalls(types, path => absoluteHandler(siteUrl, path))
     for (const call of calls) await b24.call(call.method, call.params)
     mark('fieldTypes', 'ok', calls.length ? undefined : 'уже были зарегистрированы')

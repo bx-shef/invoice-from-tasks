@@ -46,7 +46,9 @@ describe('код доступа', () => {
     const code = generateAccessCode(n => Uint8Array.from({ length: n }, () => (seed += 37) % 256))
     expect(code).toHaveLength(ACCESS_CODE_LENGTH)
     expect(isAccessCode(code)).toBe(true)
-    for (const c of '0O1lI') expect(ACCESS_CODE_ALPHABET.includes(c)).toBe(false)
+    for (const c of '0Oo1lI') expect(ACCESS_CODE_ALPHABET.includes(c)).toBe(false)
+    expect(ACCESS_CODE_ALPHABET).toHaveLength(56)
+    expect(new Set(ACCESS_CODE_ALPHABET).size).toBe(56)
   })
 
   it('байты за кратным длине алфавита отбрасываются — без перекоса', () => {

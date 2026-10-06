@@ -61,9 +61,15 @@ export function useUserFields() {
       company: lists.company.names,
       contact: lists.contact.names
     })
-    // Поля своих типов — с полным кодом `rest_<ID приложения>_<код>`: ID — из app.info.
-    // ⚠ Тип должен быть зарегистрирован (установка, userfieldtype.add) — иначе портал откажет.
-    const appId = missing.some(needsAppId) ? Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID) : undefined
+    // Поля своих типов — с полным кодом `rest_<ID приложения>_<код>`: ID — из app.info, и проверяем
+    // его ДО первой записи. Строковые поля — первыми: незарегистрированный тип (портал, где
+    // установку не открывали после обновления) не должен оставить их несозданными (находка /code-review).
+    let appId: number | undefined
+    if (missing.some(needsAppId)) {
+      appId = Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID)
+      if (!Number.isInteger(appId) || appId <= 0) throw new Error('портал не вернул ID приложения (app.info) — поля не созданы')
+    }
+    missing.sort((a, b) => Number(needsAppId(a)) - Number(needsAppId(b)))
     for (const spec of missing) {
       const { method, params } = userFieldAddCall(spec, appId)
       await b24.call(method, params)

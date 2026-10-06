@@ -22,20 +22,25 @@ export function loadEncKey(env: Record<string, string | undefined> = process.env
   return buf
 }
 
-/** Шифрует строку: `iv:tag:данные` (base64). Свежий IV на каждый вызов. */
-export function encryptSecret(plaintext: string, key: Buffer = loadEncKey()): string {
+/**
+ * Шифрует строку: `iv:tag:данные` (base64). Свежий IV на каждый вызов. `aad` — открытые данные,
+ * к которым привязан шифротекст (GCM): расшифровать можно только с теми же (clientHook.ts).
+ */
+export function encryptSecret(plaintext: string, key: Buffer = loadEncKey(), aad?: string): string {
   const iv = randomBytes(IV_BYTES)
   const cipher = createCipheriv(ALGO, key, iv)
+  if (aad !== undefined) cipher.setAAD(Buffer.from(aad, 'utf8'))
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   return `${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${enc.toString('base64')}`
 }
 
 /** Расшифровка. Бросает на битом блобе или чужом ключе (GCM проверяет подпись) — мусор не вернёт. */
-export function decryptSecret(blob: string, key: Buffer = loadEncKey()): string {
+export function decryptSecret(blob: string, key: Buffer = loadEncKey(), aad?: string): string {
   const parts = blob.split(':')
   if (parts.length !== 3) throw new Error('decryptSecret: malformed blob')
   const [iv, tag, data] = parts.map(p => Buffer.from(p, 'base64')) as [Buffer, Buffer, Buffer]
   const decipher = createDecipheriv(ALGO, key, iv)
   decipher.setAuthTag(tag)
+  if (aad !== undefined) decipher.setAAD(Buffer.from(aad, 'utf8'))
   return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8')
 }
