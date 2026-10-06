@@ -16,8 +16,10 @@ describe('sealClientHook', () => {
     expect(openClientHook(r.value, 'my.bitrix24.by', env)).toMatchObject({ url: HOOK, host: 'client.bitrix24.ru' })
   })
 
-  it('не вебхук — 400; не портал Битрикс24 — 400 (SSRF); нет ключа — 503', () => {
-    expect(sealClientHook('https://evil.example.com/rest/1/abc123def456/', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/не портал/) })
+  it('не вебхук — 400; внутренний домен — 400 (SSRF); нет ключа — 503', () => {
+    for (const bad of ['localhost', '127.0.0.1', '10.0.0.5', 'redis', 'svc.internal', 'nas.local', '[::1]']) {
+      expect(sealClientHook(`https://${bad}/rest/1/abc123def456/`, 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400 })
+    }
     expect(sealClientHook('https://127.0.0.1/rest/1/abc123def456/', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400 })
     expect(sealClientHook('x', 'my.bitrix24.by', env)).toMatchObject({ ok: false, status: 400 })
     expect(sealClientHook(HOOK, 'my.bitrix24.by', {})).toMatchObject({ ok: false, status: 503 })
@@ -46,13 +48,10 @@ describe('привязка к порталу и проверка домена п
     expect(openClientHook(r.value, 'MY.bitrix24.by', env).host).toBe('client.bitrix24.ru')
   })
 
-  it('коробка, убранная из B24_SELFHOSTED_HOSTS после сохранения, больше не годится', () => {
-    const box = 'https://crm.company.by/rest/1/abc123def456/'
-    const withBox = { ...env, B24_SELFHOSTED_HOSTS: 'crm.company.by' }
-    const r = sealClientHook(box, 'my.bitrix24.by', withBox)
+  it('коробка клиента на своём домене принимается без белого списка', () => {
+    const r = sealClientHook('https://portal.standartno.by/rest/1/abc123def456/', 'my.bitrix24.by', env)
     if (!r.ok) throw new Error('seal failed')
-    expect(openClientHook(r.value, 'my.bitrix24.by', withBox).host).toBe('crm.company.by')
-    expect(() => openClientHook(r.value, 'my.bitrix24.by', env)).toThrow()
+    expect(openClientHook(r.value, 'my.bitrix24.by', env).host).toBe('portal.standartno.by')
   })
 })
 
