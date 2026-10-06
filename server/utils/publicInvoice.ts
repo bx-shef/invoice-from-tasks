@@ -242,6 +242,8 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
 
   const { task: clientTaskField, taskDomain } = settings.clientFields
 
+  // Документы — параллельно со стадией и строками; их сбой страницу не роняет (блок необязательный).
+  const documentsPromise = readLatestDocuments(call, settings.publicPage.templates, invoice.id)
   const [stages, myCompany, rowsRead] = await Promise.all([
     orNull(call('crm.status.list', { filter: { STATUS_ID: invoice.stageId } })),
     invoice.myCompanyId ? orNull(call('crm.item.get', { entityTypeId: 4, id: invoice.myCompanyId })) : Promise.resolve(null),
@@ -265,10 +267,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     if (task) tasks.push(task)
   }
   await attachClientTasks(tasks, clients, req.domain, deps)
-  const templates = settings.publicPage.templates
-  const documents = templates.length
-    ? latestDocuments(await orNull(call('crm.documentgenerator.document.list', documentListParams(invoice.id))), templates, invoice.id)
-    : []
+  const documents = await documentsPromise
   const view: PublicInvoiceView = {
     truncated: rowsRead.truncated,
     title: invoice.title,
@@ -296,6 +295,17 @@ export function documentListParams(invoiceId: number): Record<string, unknown> {
   }
 }
 
+/** Последние документы счёта по шаблонам; сбой портала — пусто и строка в журнале. */
+export async function readLatestDocuments(call: RestCall, templates: number[], invoiceId: number) {
+  if (!templates.length) return []
+  try {
+    return latestDocuments(await call('crm.documentgenerator.document.list', documentListParams(invoiceId)), templates, invoiceId)
+  } catch (e) {
+    console.warn(`[public] documents of invoice ${invoiceId}: ${e instanceof Error ? e.message : String(e)}`)
+    return []
+  }
+}
+
 /** Предел PDF, байт — документ счёта больше не бывает, а память сервера не резиновая. */
 export const MAX_PDF_BYTES = 20 * 1024 * 1024
 
@@ -318,6 +328,10 @@ export async function loadPublicDocument(req: PublicRequest & { documentId: numb
   const access = await verifyPublicAccess(req, deps)
   if (isResult(access)) return access.status === 200 ? { status: 404, body: { error: 'Документ недоступен' } } : access
   const { call, invoice, settings } = access
+  // Скачать можно только то, что показано на странице: последний документ по шаблону, а не любую
+  // старую версию перебором ID (находка ревью).
+  const shown = await readLatestDocuments(call, settings.publicPage.templates, invoice.id)
+  if (!shown.some(d => d.id === req.documentId)) return { status: 404, body: { error: 'Документ недоступен' } }
   const doc = documentPdfUrl(await orNull(call('crm.documentgenerator.document.get', { id: req.documentId })), settings.publicPage.templates, invoice.id, new URL(access.origin).hostname)
   if (!doc) return { status: 404, body: { error: 'Документ недоступен' } }
   const pdf = await deps.fetchPdf(doc.url)

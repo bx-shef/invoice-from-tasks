@@ -56,7 +56,8 @@ export async function readLimitedBytes(res: HookResponse, max: number): Promise<
     }
     parts.push(value)
   }
-  return new Uint8Array(Buffer.concat(parts))
+  // Buffer — уже Uint8Array: без лишней копии (PDF до 20 МБ).
+  return Buffer.concat(parts)
 }
 
 /** Текст ошибки портала: строка или `{ code, message }` (v3) — без адреса вебхука. */

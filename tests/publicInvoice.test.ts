@@ -153,6 +153,8 @@ describe('документы — разбор', () => {
   it('шаблоны в настройках: активные по названию; сохранённый, которого нет, — с пометкой', () => {
     const opts = templateOptions({ templates: [{ id: '2', name: 'Счёт', active: 'Y' }, { id: 3, name: 'Акт' }, { id: 4, name: 'Старый', active: 'N' }, { id: 0 }] })
     expect(opts).toEqual([{ id: 3, label: 'Акт' }, { id: 2, label: 'Счёт' }])
+    // Документация: templates — объект по ID, не массив.
+    expect(templateOptions({ templates: { 39: { id: '39', name: 'Счёт' }, 37: { id: '37', name: 'Акт' } } })).toEqual([{ id: 37, label: 'Акт' }, { id: 39, label: 'Счёт' }])
     expect(templateItems(opts, [9]).at(-1)).toEqual({ label: 'Шаблон #9 — нет в портале', value: 9 })
     expect(templateItems(null, [9])).toEqual([{ label: 'Шаблон #9', value: 9 }])
   })

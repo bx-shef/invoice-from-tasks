@@ -279,7 +279,6 @@ export function stageName(raw: unknown, stageId: string): string {
   return typeof hit?.NAME === 'string' ? hit.NAME : stageId
 }
 
-/** Что видит клиент. */
 /** Документ счёта для скачивания: последний по каждому разрешённому шаблону. */
 export interface PublicDocument {
   id: number
@@ -287,6 +286,7 @@ export interface PublicDocument {
   templateId: number
 }
 
+/** Что видит клиент. */
 export interface PublicInvoiceView {
   /** PDF документов по шаблонам из настроек (этап 5). */
   documents?: PublicDocument[]

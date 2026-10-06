@@ -6,7 +6,7 @@
 // дата принятия, описание и результат; без вебхука — только ссылка. Не в разрешённой стадии —
 // спокойная фраза из настроек.
 // Без фрейма портала: страница открыта всем, данные отдаёт сервер только по верному коду.
-import type { PublicInvoiceView } from '#shared/domain/publicInvoice'
+import { pdfFileName, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 
 useHead({ title: 'Расшифровка счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
 
@@ -67,12 +67,21 @@ async function download(id: number, title: string) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${title || `document-${id}`}.pdf`
+    a.download = pdfFileName(title, id)
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 10_000)
   } catch (e) {
-    const err = e as { data?: { error?: string }, statusMessage?: string }
-    docError.value = err.data?.error || err.statusMessage || 'Не удалось скачать документ'
+    // При responseType: 'blob' и тело ошибки — Blob: текст сервера достаём из него.
+    const err = e as { data?: unknown, statusMessage?: string }
+    let text = ''
+    if (err.data instanceof Blob) {
+      try {
+        text = (JSON.parse(await err.data.text()) as { error?: string }).error ?? ''
+      } catch {
+        text = ''
+      }
+    }
+    docError.value = text || err.statusMessage || 'Не удалось скачать документ'
   } finally {
     downloading.value = null
   }

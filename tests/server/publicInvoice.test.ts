@@ -6,7 +6,7 @@ import { SlidingWindow } from '../../server/utils/rateLimit'
 
 const CODE = 'ABCDEFGHJK'
 
-interface Over { templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
+interface Over { docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
 
 /** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
 function portal(over: Over = {}) {
@@ -43,6 +43,7 @@ function portal(over: Over = {}) {
     if (method === 'crm.status.list') return [{ STATUS_ID: 'DT31_1:N', NAME: 'Новый' }]
     if (method === 'crm.item.productrow.list') return { productRows: [{ id: 1, productName: '[10-77] Лендинг', price: 130, quantity: 1, sort: 10 }] }
     if (method === 'v3:tasks.task.result.list') return [{ text: 'Готово' }]
+    if (method === 'crm.documentgenerator.document.list' && over.docsError) throw new Error(over.docsError)
     if (method === 'crm.documentgenerator.document.list') return { documents: [
       { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
       { id: '60', title: 'Старый счёт', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
@@ -248,6 +249,17 @@ describe('документы (этап 5)', () => {
       expect(fetchPdf).not.toHaveBeenCalled()
     }
     expect((await loadPublicDocument({ ...req(), documentId: 0 }, docDeps(portal()).d)).status).toBe(400)
+  })
+
+  it('старую версию документа (не последнюю по шаблону) скачать нельзя', async () => {
+    const { d, fetchPdf } = docDeps(portal({ templates: [3], doc: { id: 60, title: 'Старый', templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5, pdfUrlMachine: 'https://my.bitrix24.by/x' } }))
+    expect((await loadPublicDocument({ ...req(), documentId: 60 }, d)).status).toBe(404)
+    expect(fetchPdf).not.toHaveBeenCalled()
+  })
+
+  it('сбой списка документов страницу не роняет — блок пуст', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ templates: [3], docsError: 'documentgenerator: OPERATION_TIME_LIMIT' })))
+    expect(r.status === 200 && r.body.state === 'open' && r.body.invoice.documents).toEqual([])
   })
 
   it('портал вернул не PDF — ошибка (обработчик отдаст 503)', async () => {

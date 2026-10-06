@@ -17,9 +17,18 @@ const MAX_CACHE = 500
 /** Сколько ждём PDF от портала. */
 const PDF_TIMEOUT_MS = 20_000
 
-export function publicDeps(): DocumentDeps {
+/** Скачиваний PDF с IP — 60 за 10 минут: их делает клиент с верным кодом, не перебор (тот считают неверные коды). */
+export const PUBLIC_DOWNLOADS_PER_IP = { max: 60, windowMs: 10 * 60_000 }
+
+/**
+ * @param kind `page` — открытие страницы (лимит перебора по IP), `download` — скачивание PDF
+ *   (своё, щедрее окно по IP: клиент с верным кодом скачивает несколько документов). Неверные
+ *   коды и портал — общие счётчики у обоих.
+ */
+export function publicDeps(kind: 'page' | 'download' = 'page'): DocumentDeps {
+  const ipLimit = kind === 'download' ? PUBLIC_DOWNLOADS_PER_IP : PUBLIC_PER_IP
   return {
-    allowAttempt: (ipKey, portalKey) => attempts.take([[ipKey, PUBLIC_PER_IP], [portalKey, PUBLIC_PER_PORTAL]]),
+    allowAttempt: (ipKey, portalKey) => attempts.take([[`${kind}:${ipKey}`, ipLimit], [portalKey, PUBLIC_PER_PORTAL]]),
     // Проверка без учёта, учёт — только неверного кода: верный код счётчик не тратит.
     locked: key => failures.used(key, PUBLIC_FAILS_PER_INVOICE) >= PUBLIC_FAILS_PER_INVOICE.max,
     fail: (key) => {

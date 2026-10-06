@@ -49,12 +49,14 @@ export interface TemplateOption {
 }
 
 /**
- * Шаблоны из crm.documentgenerator.template.list (`{ templates: [{ id, name, active }] }`):
+ * Шаблоны из crm.documentgenerator.template.list (`{ templates: { "<id>": { id, name, active } } }`):
  * активные, по названию. Портал отдаёт и шаблоны других сущностей — выбирает администратор.
  */
 export function templateOptions(raw: unknown): TemplateOption[] {
   const list = raw && typeof raw === 'object' && 'templates' in raw ? (raw as { templates: unknown }).templates : raw
-  return (Array.isArray(list) ? list : [])
+  // Документация: `templates` — ОБЪЕКТ по ID (`{ "39": {…} }`), а не массив; принимаем оба вида.
+  const items = Array.isArray(list) ? list : list && typeof list === 'object' ? Object.values(list) : []
+  return items
     .map(t => (t ?? {}) as Record<string, unknown>)
     .filter(t => Number(t.id) > 0 && t.active !== 'N' && t.active !== false)
     .map(t => ({ id: Number(t.id), label: typeof t.name === 'string' && t.name ? t.name : `Шаблон #${t.id}` }))

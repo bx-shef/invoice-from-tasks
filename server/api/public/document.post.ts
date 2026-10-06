@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
     documentId: Number(body?.documentId),
     code: typeof body?.code === 'string' ? body.code.trim() : '',
     ip: ipBucketKey(clientIp(event))
-  }, publicDeps()).catch((e: unknown) => {
+  }, publicDeps('download')).catch((e: unknown) => {
     console.error(`[public] document failed domain=${JSON.stringify(domain)}: ${e instanceof Error ? e.message : String(e)}`)
     return { status: 503 as const, body: { error: 'Документ временно недоступен — попробуйте позже' } }
   })
@@ -32,7 +32,7 @@ export default defineEventHandler(async (event) => {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="document.pdf"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`
     })
-    return Buffer.from(result.pdf)
+    return result.pdf
   }
   return result.body
 })
