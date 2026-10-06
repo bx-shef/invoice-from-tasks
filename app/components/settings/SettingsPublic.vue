@@ -2,7 +2,7 @@
 // Публичная страница счёта (#34, этап 3): в каких стадиях клиент видит расшифровку по коду
 // доступа, и что он видит в остальных. Адрес страницы — `/p-<домен портала>/i-<ID счёта>`.
 import { LIMITS, type AppSettings } from '#shared/domain/settings'
-import { publicInvoiceUrl, stageItems, type StageOption } from '~/utils/invoiceStages'
+import { publicInvoiceUrl, stageItems, templateItems, type StageOption, type TemplateOption } from '~/utils/invoiceStages'
 
 const settings = defineModel<AppSettings>({ required: true })
 
@@ -11,6 +11,8 @@ const stages = useInvoiceStages()
 const config = useRuntimeConfig()
 
 const options = ref<StageOption[] | null>(null)
+const templateList = ref<TemplateOption[] | null>(null)
+const templateError = ref('')
 const loadError = ref('')
 const example = ref('')
 
@@ -18,6 +20,12 @@ onMounted(async () => {
   const frame = b24.get()
   const portal = frame ? new URL(frame.getTargetOrigin()).hostname : 'ваш-портал.bitrix24.ru'
   example.value = publicInvoiceUrl(config.public.siteUrl || window.location.origin, portal, 123)
+  // Стадии и шаблоны — независимо: сбой одного не прячет другое.
+  void stages.templates().then((list) => {
+    templateList.value = list
+  }, (e: unknown) => {
+    templateError.value = e instanceof Error ? e.message : String(e)
+  })
   try {
     options.value = await stages.list()
   } catch (e) {
@@ -26,6 +34,7 @@ onMounted(async () => {
 })
 
 const items = computed(() => stageItems(options.value, settings.value.publicPage.stages))
+const templateMenu = computed(() => templateItems(templateList.value, settings.value.publicPage.templates))
 </script>
 
 <template>
@@ -55,6 +64,29 @@ const items = computed(() => stageItems(options.value, settings.value.publicPage
         :loading="!options && !loadError"
         class="w-96 max-w-full"
         data-testid="public-stages"
+      />
+    </B24FormField>
+
+    <B24FormField
+      label="PDF документов для клиента"
+      :description="`Клиент скачает последний документ счёта по каждому выбранному шаблону (Счёт, Акт, Счёт с НДС…). Не выбрано — документов нет. До ${LIMITS.publicTemplates} шаблонов`"
+    >
+      <B24Alert
+        v-if="templateError"
+        color="air-primary-alert"
+        title="Не удалось прочитать шаблоны документов"
+        :description="templateError"
+        class="mb-2"
+      />
+      <B24SelectMenu
+        v-model="settings.publicPage.templates"
+        :items="templateMenu"
+        value-key="value"
+        multiple
+        :search-input="{ placeholder: 'Поиск шаблона…' }"
+        :loading="!templateList && !templateError"
+        class="w-96 max-w-full"
+        data-testid="public-templates"
       />
     </B24FormField>
 

@@ -51,6 +51,33 @@ function date(value: string): string {
   return m ? `${m[3]}.${m[2]}.${m[1]}` : value
 }
 
+const downloading = ref<number | null>(null)
+const docError = ref('')
+
+/** PDF — POST с кодом в теле (не в адресе), файл — через blob. */
+async function download(id: number, title: string) {
+  downloading.value = id
+  docError.value = ''
+  try {
+    const blob = await $fetch<Blob>('/api/public/document', {
+      method: 'POST',
+      body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, documentId: id },
+      responseType: 'blob'
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title || `document-${id}`}.pdf`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  } catch (e) {
+    const err = e as { data?: { error?: string }, statusMessage?: string }
+    docError.value = err.data?.error || err.statusMessage || 'Не удалось скачать документ'
+  } finally {
+    downloading.value = null
+  }
+}
+
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
 </script>
 
@@ -121,6 +148,33 @@ const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [
           Дата выставления: {{ date(invoice.date) }}
         </div>
         <div>Статус: {{ invoice.stage }}</div>
+      </section>
+
+      <section
+        v-if="invoice.documents?.length"
+        class="space-y-2"
+        data-testid="public-documents"
+      >
+        <div class="font-medium">
+          Документы
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <B24Button
+            v-for="d in invoice.documents"
+            :key="d.id"
+            color="air-secondary"
+            :label="`${d.title} (PDF)`"
+            :loading="downloading === d.id"
+            :disabled="downloading !== null"
+            @click="download(d.id, d.title)"
+          />
+        </div>
+        <p
+          v-if="docError"
+          class="text-sm text-(--ui-color-accent-main-alert)"
+        >
+          {{ docError }}
+        </p>
       </section>
 
       <section class="space-y-4">

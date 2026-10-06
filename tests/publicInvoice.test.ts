@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
+import { documentPdfUrl, latestDocuments, pdfFileName, clientDomainOf, clientTaskIdFor, invoiceBindingCodes, taskBoundTo, parsePublicClient, parsePublicInvoice, parsePublicTask, plainText, publicRows, rowTaskIds, rowTaskRef, stageName } from '#shared/domain/publicInvoice'
 import { DEFAULT_CLOSED_TEXT, defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
-import { invoiceStageEntities, publicInvoiceUrl, stageItems, stageOptions } from '~/utils/invoiceStages'
+import { invoiceStageEntities, publicInvoiceUrl, stageItems, stageOptions, templateItems, templateOptions } from '~/utils/invoiceStages'
 
 describe('приставка строки', () => {
   it('«[123-456]» и «[123]»; иначе null', () => {
@@ -97,10 +97,10 @@ describe('привязка задачи к счёту', () => {
 
 describe('настройки publicPage', () => {
   it('по умолчанию — ни одной стадии и фраза по умолчанию; мусор отбрасывается', () => {
-    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT })
-    expect(parseSettings({ publicPage: { stages: ['DT31_1:N', 'DT31_1:N', 'bad stage', 5], closedText: '  ' } }).publicPage)
-      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT })
-    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните' } }
+    expect(defaultSettings().publicPage).toEqual({ stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [] })
+    expect(parseSettings({ publicPage: { stages: ['DT31_1:N', 'DT31_1:N', 'bad stage', 5], closedText: '  ', templates: [3, '4', 3, 0, 'x'] } }).publicPage)
+      .toEqual({ stages: ['DT31_1:N'], closedText: DEFAULT_CLOSED_TEXT, templates: [3, 4] })
+    const s = { ...defaultSettings(), publicPage: { stages: ['DT31_1:P'], closedText: 'Звоните', templates: [7] } }
     expect(parseSettings(serializeSettings(s)).publicPage).toEqual(s.publicPage)
   })
 })
@@ -117,5 +117,43 @@ describe('стадии в настройках', () => {
 
   it('адрес публичной страницы', () => {
     expect(publicInvoiceUrl('https://ift.bx-shef.by/', 'my.bitrix24.by', 123)).toBe('https://ift.bx-shef.by/p-my.bitrix24.by/i-123')
+  })
+})
+
+describe('документы — разбор', () => {
+  it('последний по шаблону, только с PDF и только этого счёта; порядок — как в настройках', () => {
+    const raw = { documents: [
+      { id: 1, title: 'А1', templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5 },
+      { id: 2, title: 'А2', templateId: 3, pdfId: 1, entityTypeId: 31, entityId: 5 },
+      { id: 3, title: 'Без PDF', templateId: 4, pdfId: null, entityTypeId: 31, entityId: 5 },
+      { id: 4, title: 'Чужой', templateId: 4, pdfId: 1, entityTypeId: 31, entityId: 6 },
+      { id: 5, title: 'Акт', templateId: 4, pdfId: 1, entityTypeId: 31, entityId: 5 },
+      { id: 6, title: 'Не тот шаблон', templateId: 9, pdfId: 1, entityTypeId: 31, entityId: 5 }
+    ] }
+    expect(latestDocuments(raw, [4, 3], 5)).toEqual([{ id: 5, title: 'Акт', templateId: 4 }, { id: 2, title: 'А2', templateId: 3 }])
+    expect(latestDocuments(null, [3], 5)).toEqual([])
+  })
+
+  it('ссылка на PDF: только https на сам портал, без порта и логина', () => {
+    const base = { templateId: 3, pdfId: 1, entityTypeId: '31', entityId: '5', title: 'С' }
+    expect(documentPdfUrl({ document: { ...base, pdfUrlMachine: 'https://my.by/rest/x.json?auth=1' } }, [3], 5, 'my.by')).toEqual({ url: 'https://my.by/rest/x.json?auth=1', title: 'С' })
+    for (const url of ['http://my.by/x', 'https://my.by:8443/x', 'https://u:p@my.by/x', 'https://evil.my.by/x', 'нет']) {
+      expect(documentPdfUrl({ document: { ...base, pdfUrlMachine: url } }, [3], 5, 'my.by'), url).toBeNull()
+    }
+    expect(documentPdfUrl({ document: { ...base, pdfId: 0, pdfUrlMachine: 'https://my.by/x' } }, [3], 5, 'my.by')).toBeNull()
+  })
+
+  it('имя файла — без опасных символов', () => {
+    expect(pdfFileName('Счёт №5 / "акт"', 61)).toBe('Счёт 5 акт.pdf')
+    // Слеши и кавычки вырезаются: имя не уводит из каталога загрузок и не ломает заголовок.
+    expect(pdfFileName('../a"b', 61)).toBe('.. a b.pdf')
+    expect(pdfFileName('', 61)).toBe('document-61.pdf')
+  })
+
+  it('шаблоны в настройках: активные по названию; сохранённый, которого нет, — с пометкой', () => {
+    const opts = templateOptions({ templates: [{ id: '2', name: 'Счёт', active: 'Y' }, { id: 3, name: 'Акт' }, { id: 4, name: 'Старый', active: 'N' }, { id: 0 }] })
+    expect(opts).toEqual([{ id: 3, label: 'Акт' }, { id: 2, label: 'Счёт' }])
+    expect(templateItems(opts, [9]).at(-1)).toEqual({ label: 'Шаблон #9 — нет в портале', value: 9 })
+    expect(templateItems(null, [9])).toEqual([{ label: 'Шаблон #9', value: 9 }])
   })
 })
