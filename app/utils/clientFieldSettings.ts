@@ -37,7 +37,8 @@ const SETTING_OF: Record<AppFieldSpec['entity'], keyof AppSettings['clientFields
  */
 export function withAppFields(fields: AppSettings['clientFields']): AppSettings['clientFields'] {
   const next = { ...fields }
-  for (const spec of APP_FIELDS) {
+  // Только строковые поля: поля своих типов (код доступа, вебхук) в настройки не выбираются.
+  for (const spec of APP_FIELDS.filter(f => f.type === 'string')) {
     const key = SETTING_OF[spec.entity]
     if (!next[key]) next[key] = spec.name
   }

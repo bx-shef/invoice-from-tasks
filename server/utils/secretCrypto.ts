@@ -10,14 +10,15 @@ const IV_BYTES = 12
 const KEY_BYTES = 32
 
 /**
- * Ключ из окружения `B24_TOKEN_ENC_KEY`: 64 hex-символа или base64 от 32 байт.
+ * Ключ из окружения (по умолчанию `B24_TOKEN_ENC_KEY`): 64 hex-символа или base64 от 32 байт.
  * Бросает, если ключа нет или длина не та, — лучше упасть, чем сохранить токен открытым текстом.
+ * `name` — для второго ключа: вебхуки клиентов шифруются своим (`CLIENT_HOOK_ENC_KEY`, clientHook.ts).
  */
-export function loadEncKey(env: Record<string, string | undefined> = process.env): Buffer {
-  const raw = env.B24_TOKEN_ENC_KEY?.trim()
-  if (!raw) throw new Error('B24_TOKEN_ENC_KEY is not set (need a 32-byte hex/base64 key)')
+export function loadEncKey(env: Record<string, string | undefined> = process.env, name = 'B24_TOKEN_ENC_KEY'): Buffer {
+  const raw = env[name]?.trim()
+  if (!raw) throw new Error(`${name} is not set (need a 32-byte hex/base64 key)`)
   const buf = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64')
-  if (buf.length !== KEY_BYTES) throw new Error(`B24_TOKEN_ENC_KEY must decode to ${KEY_BYTES} bytes, got ${buf.length}`)
+  if (buf.length !== KEY_BYTES) throw new Error(`${name} must decode to ${KEY_BYTES} bytes, got ${buf.length}`)
   return buf
 }
 

@@ -1,6 +1,7 @@
 // Параметры REST-запросов пользовательских полей (#34): список UF задач, компаний и контактов
 // для выбора в настройках и создание полей приложения кнопкой. Методы — docs/REST_METHODS.md.
 
+import { fullTypeId } from '#shared/domain/appFieldTypes'
 import type { AppFieldSpec } from '#shared/domain/userFields'
 import type { RestCall } from './invoiceRequests'
 
@@ -22,22 +23,29 @@ export function userFieldListCall(entity: FieldEntity, start: number): RestCall 
   return { method: `crm.${entity}.userfield.list`, params: { order: { SORT: 'ASC' }, filter: { LANG: 'ru' }, start } }
 }
 
+/** Нужен ли ID приложения (app.info) для создания поля: да — у полей своих типов. */
+export function needsAppId(spec: AppFieldSpec): boolean {
+  return spec.type !== 'string'
+}
+
 /**
- * Создание поля приложения. У задач код передаётся целиком (`UF_` портал добавит сам, если его
+ * Создание поля приложения. `appId` — ID приложения (app.info → ID) для полей своих типов. У задач код передаётся целиком (`UF_` портал добавит сам, если его
  * нет); у CRM — без приставки `UF_CRM_`: её добавляет портал (документация crm.*.userfield.add).
  */
-export function userFieldAddCall(spec: AppFieldSpec): RestCall {
+export function userFieldAddCall(spec: AppFieldSpec, appId?: number): RestCall {
+  if (needsAppId(spec) && !(appId && appId > 0)) throw new Error(`для поля ${spec.name} нужен ID приложения`)
+  const type = spec.type === 'string' ? 'string' : fullTypeId(appId!, spec.type)
   if (spec.entity === 'task') {
     return {
       method: 'task.item.userfield.add',
-      params: { PARAMS: { USER_TYPE_ID: spec.type, FIELD_NAME: spec.name, XML_ID: spec.name, LABEL: spec.label, EDIT_FORM_LABEL: { ru: spec.label, en: spec.label }, MULTIPLE: 'N', MANDATORY: 'N' } }
+      params: { PARAMS: { USER_TYPE_ID: type, FIELD_NAME: spec.name, XML_ID: spec.name, LABEL: spec.label, EDIT_FORM_LABEL: { ru: spec.label, en: spec.label }, MULTIPLE: 'N', MANDATORY: 'N' } }
     }
   }
   return {
     method: `crm.${spec.entity}.userfield.add`,
     params: {
       fields: {
-        USER_TYPE_ID: spec.type,
+        USER_TYPE_ID: type,
         FIELD_NAME: spec.name.replace(/^UF_CRM_/, ''),
         XML_ID: spec.name,
         LABEL: spec.label,

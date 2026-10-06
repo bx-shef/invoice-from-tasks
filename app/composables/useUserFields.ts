@@ -4,7 +4,7 @@
 
 import { fieldNames, missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
 import { collectOffsetPages } from '~/utils/paging'
-import { MAX_USER_FIELDS, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
+import { MAX_USER_FIELDS, needsAppId, USER_FIELDS_PAGE, userFieldAddCall, userFieldListCall, type FieldEntity } from '~/utils/userFieldRequests'
 
 /** Поля для выбора и коды ВСЕХ UF сущности (для «поле уже есть», missingAppFields). */
 export interface FieldList {
@@ -61,8 +61,11 @@ export function useUserFields() {
       company: lists.company.names,
       contact: lists.contact.names
     })
+    // Поля своих типов — с полным кодом `rest_<ID приложения>_<код>`: ID — из app.info.
+    // ⚠ Тип должен быть зарегистрирован (установка, userfieldtype.add) — иначе портал откажет.
+    const appId = missing.some(needsAppId) ? Number((await b24.call<{ ID?: unknown }>('app.info'))?.ID) : undefined
     for (const spec of missing) {
-      const { method, params } = userFieldAddCall(spec)
+      const { method, params } = userFieldAddCall(spec, appId)
       await b24.call(method, params)
     }
     return missing
