@@ -49,7 +49,8 @@ function portal(over: Over = {}) {
       { id: '60', title: 'Старый счёт', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5' },
       { id: '62', title: 'Акт', templateId: '4', pdfId: '1', entityTypeId: '31', entityId: '5' }
     ] }
-    if (method === 'crm.documentgenerator.document.get') return { document: over.doc ?? { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5', pdfUrlMachine: 'https://my.bitrix24.by/rest/crm.documentgenerator.document.getPdf.json?auth=T&token=X' } }
+    // Как в документации: у document.get нет pdfId (живой отказ 2026-10-06), есть imageUrlMachine.
+    if (method === 'crm.documentgenerator.document.get') return { document: over.doc ?? { id: '61', title: 'Счёт 5', templateId: '3', entityTypeId: '31', entityId: '5', isTransformationError: false, pdfUrlMachine: 'https://my.bitrix24.by/rest/crm.documentgenerator.document.getPdf.json?auth=T&token=X', imageUrlMachine: 'https://my.bitrix24.by/rest/crm.documentgenerator.document.getImage.json?auth=T&token=X' } }
     throw new Error(`unexpected ${method}`)
   })
   return { call, calls }
@@ -206,8 +207,9 @@ describe('RestCall: приставка v3', () => {
 })
 
 describe('документы (этап 5)', () => {
-  const docDeps = (p: ReturnType<typeof portal>, pdf = '%PDF-1.4 ...') => {
-    const fetchPdf = vi.fn(async () => new TextEncoder().encode(pdf))
+  const PNG = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2])
+  const docDeps = (p: ReturnType<typeof portal>, pdf: string | Uint8Array = '%PDF-1.4 ...') => {
+    const fetchPdf = vi.fn(async () => (typeof pdf === 'string' ? new TextEncoder().encode(pdf) : pdf))
     return { d: { ...deps(p), fetchPdf } as DocumentDeps, fetchPdf }
   }
 
@@ -280,7 +282,25 @@ describe('документы (этап 5)', () => {
     warn.mockRestore()
   })
 
+  it('превью — imageUrlMachine, только PNG/JPEG; PDF вместо картинки и наоборот — ошибка', async () => {
+    const { d, fetchPdf } = docDeps(portal({ templates: [3] }), PNG)
+    const r = await loadPublicDocument({ ...req(), documentId: 61, kind: 'image' }, d)
+    expect(r.status === 200 && 'pdf' in r && [r.contentType, r.fileName]).toEqual(['image/png', 'Счёт 5.png'])
+    expect(fetchPdf).toHaveBeenCalledWith('https://my.bitrix24.by/rest/crm.documentgenerator.document.getImage.json?auth=T&token=X')
+    await expect(loadPublicDocument({ ...req(), documentId: 61, kind: 'image' }, docDeps(portal({ templates: [3] })).d)).rejects.toThrow(/unexpected/)
+    await expect(loadPublicDocument({ ...req(), documentId: 61 }, docDeps(portal({ templates: [3] }), PNG).d)).rejects.toThrow(/unexpected/)
+  })
+
+  it('ошибка преобразования документа — 404 без скачивания', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { d, fetchPdf } = docDeps(portal({ templates: [3], doc: { id: 61, templateId: 3, entityTypeId: 31, entityId: 5, isTransformationError: true, pdfUrlMachine: 'https://my.bitrix24.by/x' } }))
+    expect((await loadPublicDocument({ ...req(), documentId: 61 }, d)).status).toBe(404)
+    expect(fetchPdf).not.toHaveBeenCalled()
+    expect(String(warn.mock.calls[0]![0])).toMatch(/transformation error/)
+    warn.mockRestore()
+  })
+
   it('портал вернул не PDF — ошибка (обработчик отдаст 503)', async () => {
-    await expect(loadPublicDocument({ ...req(), documentId: 61 }, docDeps(portal({ templates: [3] }), '{"error":"x"}').d)).rejects.toThrow(/not a PDF/)
+    await expect(loadPublicDocument({ ...req(), documentId: 61 }, docDeps(portal({ templates: [3] }), '{"error":"x"}').d)).rejects.toThrow(/unexpected/)
   })
 })

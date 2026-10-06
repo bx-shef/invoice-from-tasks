@@ -28,8 +28,10 @@ async function open() {
       method: 'POST',
       body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value }
     })
-    if (res.state === 'open') invoice.value = res.invoice
-    else closedText.value = res.text
+    if (res.state === 'open') {
+      invoice.value = res.invoice
+      void loadPreviews()
+    } else closedText.value = res.text
   } catch (e) {
     const err = e as { data?: { error?: string }, statusMessage?: string }
     error.value = err.data?.error || err.statusMessage || 'Не удалось открыть счёт'
@@ -52,6 +54,24 @@ function date(value: string): string {
 }
 
 const downloading = ref<number | null>(null)
+/** Превью документов: ID → адрес картинки (blob). Нет превью — кнопка без картинки. */
+const previews = ref<Record<number, string>>({})
+
+/** Картинки документов — по одному запросу, тем же защищённым путём, что и PDF (код в теле). */
+async function loadPreviews() {
+  for (const d of invoice.value?.documents ?? []) {
+    try {
+      const blob = await $fetch<Blob>('/api/public/document', {
+        method: 'POST',
+        body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, documentId: d.id, kind: 'image' },
+        responseType: 'blob'
+      })
+      previews.value = { ...previews.value, [d.id]: URL.createObjectURL(blob) }
+    } catch {
+      // Превью — удобство: без него остаётся кнопка PDF.
+    }
+  }
+}
 const docError = ref('')
 
 /** PDF — POST с кодом в теле (не в адресе), файл — через blob. */
@@ -167,16 +187,37 @@ const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [
         <div class="font-medium">
           Документы
         </div>
-        <div class="flex flex-wrap gap-2">
-          <B24Button
+        <div class="flex flex-wrap gap-3">
+          <div
             v-for="d in invoice.documents"
             :key="d.id"
-            color="air-secondary"
-            :label="`${d.title} (PDF)`"
-            :loading="downloading === d.id"
-            :disabled="downloading !== null"
-            @click="download(d.id, d.title)"
-          />
+            class="w-40 space-y-2"
+          >
+            <button
+              v-if="previews[d.id]"
+              type="button"
+              class="block w-full border border-(--ui-color-divider-less) rounded overflow-hidden bg-white"
+              :aria-label="`Скачать ${d.title} (PDF)`"
+              :disabled="downloading !== null"
+              @click="download(d.id, d.title)"
+            >
+              <img
+                :src="previews[d.id]"
+                :alt="d.title"
+                class="w-full h-auto"
+                data-testid="public-document-preview"
+              >
+            </button>
+            <B24Button
+              color="air-secondary"
+              size="sm"
+              class="w-full justify-center"
+              :label="`${d.title} (PDF)`"
+              :loading="downloading === d.id"
+              :disabled="downloading !== null"
+              @click="download(d.id, d.title)"
+            />
+          </div>
         </div>
         <p
           v-if="docError"
