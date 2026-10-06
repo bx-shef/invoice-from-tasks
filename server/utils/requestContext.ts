@@ -3,6 +3,7 @@
 // отдельно от чистых модулей, которые покрыты юнит-тестами.
 
 import type { H3Event } from 'h3'
+import { buildIndex, chunkPage, guidePages, isPublicGuideFile, type KbIndex, type KbPage } from '#shared/domain/kb'
 import { AiGatewayError } from './aiGateway'
 import { makeFrameCall, makePortalCall, oauthCredsFromEnv, type RestCall } from './b24Client'
 import { extractFrameAuth, verifyFrame, type FrameUser } from './frameAuth'
@@ -86,4 +87,26 @@ export function installerCallFor(memberId: string): RestCall {
 /** Переводит отказ AI-шлюза в HTTP-ошибку h3; прочие ошибки пробрасывает как есть. */
 export function aiHttpError(e: unknown): unknown {
   return e instanceof AiGatewayError ? createError({ statusCode: e.statusCode, statusMessage: e.message }) : e
+}
+
+let kbCache: Promise<{ pages: KbPage[], index: KbIndex }> | null = null
+
+/**
+ * Публичная справка из серверного ассета `assets:kb` (docs/guide): страницы и индекс поиска —
+ * один раз на процесс. Только файлы `NN-*.md` (isPublicGuideFile).
+ */
+export function loadKb(): Promise<{ pages: KbPage[], index: KbIndex }> {
+  kbCache ??= (async () => {
+    const storage = useStorage('assets:kb')
+    const files: Array<{ name: string, md: string }> = []
+    for (const key of await storage.getKeys()) {
+      const name = key.split(':').pop() ?? ''
+      if (!isPublicGuideFile(name)) continue
+      const md = await storage.getItem<string>(key)
+      if (typeof md === 'string') files.push({ name, md })
+    }
+    const pages = guidePages(files)
+    return { pages, index: buildIndex(pages.flatMap(chunkPage)) }
+  })()
+  return kbCache
 }
