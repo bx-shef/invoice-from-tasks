@@ -21,7 +21,6 @@ import {
   previewContext,
   previewLine,
   previewTotals,
-  taskHref,
   taskLinks,
   unitNoticeShown
 } from '~/utils/fillPreview'
@@ -64,7 +63,6 @@ const outlierIds = computed(() => outlierTaskIds(props.outliers))
 const openLinks = computed(() => taskLinks(props.openTasks, openTaskText))
 const outlierLinks = computed(() => taskLinks(props.outliers, outlierText))
 const unitWarning = computed(() => unitNoticeShown(props.unitNotice, props.rows.length))
-const href = (taskId: number) => taskHref(props.origin, taskId)
 /** Один класс отступа на состояние: первый итог — после разделителя, итог счёта — просторнее. */
 const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 ? 'pt-3 pb-1' : 'py-1'
 </script>
@@ -83,13 +81,11 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             v-for="(issue, i) in errors"
             :key="i"
           >
-            <a
+            <InvoiceTaskLink
               v-if="issue.taskId"
-              :href="href(issue.taskId)"
-              target="_blank"
-              rel="noopener"
-              class="underline"
-            >Задача #{{ issue.taskId }}</a>{{ issueText(issue) }}
+              :origin="origin"
+              :task-id="issue.taskId"
+            />{{ issueText(issue) }}
           </li>
         </ul>
       </template>
@@ -113,13 +109,11 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             v-for="(issue, i) in warnings"
             :key="i"
           >
-            <a
+            <InvoiceTaskLink
               v-if="issue.taskId"
-              :href="href(issue.taskId)"
-              target="_blank"
-              rel="noopener"
-              class="underline"
-            >Задача #{{ issue.taskId }}</a>{{ issueText(issue) }}
+              :origin="origin"
+              :task-id="issue.taskId"
+            />{{ issueText(issue) }}
           </li>
         </ul>
       </template>
@@ -187,12 +181,10 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
               <span class="block text-xs opacity-60">{{ line.calc }}</span>
               <span class="block text-xs opacity-60">
                 <span :title="line.rateTitle">{{ line.basis }}</span> ·
-                <a
-                  :href="href(line.row.taskId)"
-                  target="_blank"
-                  rel="noopener"
-                  class="underline"
-                >задача #{{ line.row.taskId }}</a>
+                <InvoiceTaskLink
+                  :origin="origin"
+                  :task-id="line.row.taskId"
+                >задача #{{ line.row.taskId }}</InvoiceTaskLink>
               </span>
             </td>
             <td
