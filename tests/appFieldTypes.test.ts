@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { registeredTypeIds, ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, APP_FIELD_TYPES, crmEntityTypeOf, fieldTypeCalls, formatHookValue, fullTypeId, generateAccessCode, isAccessCode, parseHookValue, parseWebhookUrl } from '#shared/domain/appFieldTypes'
+import { registeredTypeIds, ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, APP_FIELD_TYPES, crmEntityTypeOf, fieldTypeCalls, formatHookValue, fullTypeId, generateAccessCode, isAccessCode, parseHookValue, parseWebhookUrl, webhookProblem } from '#shared/domain/appFieldTypes'
 import { APP_FIELDS } from '#shared/domain/userFields'
 import { portalErrorText, userFieldAddCall } from '~/utils/userFieldRequests'
 import { fieldContext, writePlan } from '~/utils/fieldPlacement'
@@ -83,13 +83,24 @@ describe('вебхук клиента', () => {
       'https://client.bitrix24.ru/rest/1/',
       'https://client.bitrix24.ru/rest/x/abc123def456/',
       'https://client.bitrix24.ru/rest/1/abc/',
-      'https://client.bitrix24.ru/rest/1/abc123def456/crm.deal.list',
       'https://u:p@client.bitrix24.ru/rest/1/abc123def456/',
       'https://client.bitrix24.ru:8443/rest/1/abc123def456/',
-      'https://client.bitrix24.ru/rest/1/abc123def456/?a=1',
       'не адрес',
       42
     ]) expect(parseWebhookUrl(bad), String(bad)).toBeNull()
+  })
+
+  it('адрес из примера вызова — хвост метода и параметры отрезаются; коробка с коротким кодом', () => {
+    expect(parseWebhookUrl('https://client.bitrix24.ru/rest/1/abc123def456/crm.deal.list.json?a=1')?.url).toBe('https://client.bitrix24.ru/rest/1/abc123def456/')
+    expect(parseWebhookUrl('https://portal.standartno.by/rest/1/xyxyxyx/')?.code).toBe('xyxyxyx')
+  })
+
+  it('причина отказа — понятная и без кода', () => {
+    expect(webhookProblem('https://portal.standartno.by/rest/1/xyxyxyx/')).toBeNull()
+    expect(webhookProblem('Abcdefghij')).toMatch(/Это не адрес \(10 символов/)
+    expect(webhookProblem('http://x.by/rest/1/abcd/')).toMatch(/https/)
+    expect(webhookProblem('https://x.by/hook/')).toMatch(/\/rest\//)
+    expect(webhookProblem('')).toMatch(/Вставьте/)
   })
 
   it('значение поля: домен открыто, вебхук — шифротекстом; чужой формат — null', () => {

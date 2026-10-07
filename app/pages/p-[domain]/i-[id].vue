@@ -172,10 +172,19 @@ function dateTime(value: string): string {
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
 
 /** Строки счёта — пункты аккордеона: раскрывается задача строки (наша и задача клиента отдельно). */
-const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
-  const task = row.taskId ? tasksById.value.get(row.taskId) : undefined
-  return { value: String(i), row, task, disabled: !task }
-}))
+const rowItems = computed(() => {
+  const rows = invoice.value?.rows ?? []
+  const items = rows.map((row, i) => {
+    const task = row.taskId ? tasksById.value.get(row.taskId) : undefined
+    return { value: String(i), row: { name: row.name, sum: row.sum as number | null }, task, disabled: !task }
+  })
+  // Задачи счёта без строки (согласование до сборки строк) — в том же списке, без суммы.
+  const inRows = new Set(rows.map(r => r.taskId))
+  for (const task of invoice.value?.tasks ?? []) {
+    if (!inRows.has(task.id)) items.push({ value: `t${task.id}`, row: { name: task.title, sum: null }, task, disabled: false })
+  }
+  return items
+})
 </script>
 
 <template>
@@ -336,7 +345,14 @@ const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
               data-testid="public-row"
             >
               <span>{{ item.row.name }}</span>
-              <span class="whitespace-nowrap">{{ money(item.row.sum, invoice.currencyId) }}</span>
+              <span
+                v-if="item.row.sum !== null"
+                class="whitespace-nowrap"
+              >{{ money(item.row.sum, invoice.currencyId) }}</span>
+              <span
+                v-else
+                class="whitespace-nowrap text-xs font-normal opacity-60"
+              >задача по счёту</span>
             </div>
           </template>
           <template #body="{ item }">

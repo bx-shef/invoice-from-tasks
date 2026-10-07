@@ -6,7 +6,7 @@ import { SlidingWindow } from '../../server/utils/rateLimit'
 
 const CODE = 'ABCDEFGHJK'
 
-interface Over { listUrl?: string, docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string }
+interface Over { listUrl?: string, docsError?: string, templates?: number[], doc?: Record<string, unknown>, stage?: string, stages?: string[], companyCode?: string | null, contactCode?: string | null, taskBinding?: string[], invoiceError?: string, invoiceTasks?: unknown[] }
 
 /** Подставной портал: отвечает на одиночные вызовы и на `batch` (команды — строки запроса). */
 function portal(over: Over = {}) {
@@ -43,6 +43,8 @@ function portal(over: Over = {}) {
     if (method === 'crm.status.list') return [{ STATUS_ID: 'DT31_1:N', NAME: 'Новый' }]
     if (method === 'crm.item.productrow.list') return { productRows: [{ id: 1, productName: '[10-77] Лендинг', price: 130, quantity: 1, sort: 10 }] }
     if (method === 'v3:tasks.task.result.list') return [{ text: 'Готово' }]
+    // Задачи, привязанные к самому счёту (без строки): по умолчанию — одна, #20.
+    if (method === 'tasks.task.list') return params.filter && (params.filter as { UF_CRM_TASK?: string }).UF_CRM_TASK === 'SI_5' ? { tasks: over.invoiceTasks ?? [] } : { tasks: [] }
     if (method === 'crm.documentgenerator.document.list' && over.docsError) throw new Error(over.docsError)
     if (method === 'crm.documentgenerator.document.list') return { documents: [
       { id: '61', title: 'Счёт 5', templateId: '3', pdfId: '1', entityTypeId: '31', entityId: '5', ...(over.listUrl ? { pdfUrlMachine: over.listUrl } : {}) },
@@ -77,6 +79,12 @@ function deps(p: ReturnType<typeof portal> | null, opts: { allow?: boolean } = {
 const req = (over: Partial<{ domain: string, invoiceId: number, code: string }> = {}) => ({ domain: 'my.bitrix24.by', invoiceId: 5, code: CODE, ip: '1.2.3.4', ...over })
 
 describe('loadPublicInvoice', () => {
+  it('задача, привязанная к счёту без строки в нём, — тоже видна (согласование пустого счёта)', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ invoiceTasks: [{ id: 20, title: 'План', description: '', ufCrmTask: ['SI_5'] }, { id: 21, title: 'Чужая', ufCrmTask: ['D_1'] }] })))
+    if (r.status !== 200 || r.body.state !== 'open') throw new Error('closed')
+    expect(r.body.invoice.tasks.map(t => t.id)).toEqual([10, 20])
+  })
+
   it('верный код компании — расшифровка; до кода — 2 запроса (счёт и пакет клиентов)', async () => {
     const p = portal()
     const r = await loadPublicInvoice(req(), deps(p))

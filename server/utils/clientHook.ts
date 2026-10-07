@@ -3,7 +3,7 @@
 // владельца): утечка ключа токенов установки не раскрывает вебхуки клиентов, и наоборот.
 // Расшифровка — только на сервере (этап 4, чтение задач клиента); в браузер вебхук не возвращается.
 
-import { formatHookValue, parseHookValue, parseWebhookUrl } from '#shared/domain/appFieldTypes'
+import { formatHookValue, parseHookValue, parseWebhookUrl, webhookProblem } from '#shared/domain/appFieldTypes'
 import { decryptSecret, encryptSecret, loadEncKey } from './secretCrypto'
 
 export const CLIENT_HOOK_KEY_ENV = 'CLIENT_HOOK_ENC_KEY'
@@ -47,7 +47,7 @@ function hookAad(portalDomain: string, hookHost: string): string {
  */
 export function sealClientHook(raw: unknown, portalDomain: string, env: Record<string, string | undefined> = process.env): SealResult {
   const hook = parseWebhookUrl(raw)
-  if (!hook) return { ok: false, status: 400, error: 'Это не входящий вебхук Битрикс24: нужен адрес вида https://портал.bitrix24.ru/rest/1/код/' }
+  if (!hook) return { ok: false, status: 400, error: webhookProblem(raw) ?? 'Это не входящий вебхук Битрикс24' }
   if (!isPublicHookHost(hook.host)) return { ok: false, status: 400, error: 'Домен вебхука — внутренний адрес, а не портал' }
   let key: Buffer
   try {

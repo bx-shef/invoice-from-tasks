@@ -152,8 +152,10 @@ export function parseWebhookUrl(raw: unknown): { url: string, host: string, user
   } catch {
     return null
   }
-  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || u.port) return null
-  const m = /^\/rest\/(\d{1,10})\/([A-Za-z0-9]{8,64})\/?$/.exec(u.pathname)
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null
+  // Хвост метода (`…/код/profile`, `…/код/crm.deal.list.json`) и параметры отрезаем: вставляют адрес
+  // из примера вызова (владелец 2026-10-07). Код — буквы, цифры, `_`, от 4 символов.
+  const m = /^\/rest\/(\d{1,10})\/([A-Za-z0-9_]{4,64})(?:\/[A-Za-z0-9._]*)?\/?$/.exec(u.pathname)
   if (!m) return null
   const host = u.hostname.toLowerCase()
   return { url: `https://${host}/rest/${m[1]}/${m[2]}/`, host, userId: m[1]!, code: m[2]! }
@@ -166,4 +168,23 @@ export function crmEntityTypeOf(entityId: unknown): 3 | 4 | 31 | null {
   if (v === 'CRM_CONTACT') return 3
   if (v === 'CRM_SMART_INVOICE') return 31
   return null
+}
+
+/**
+ * Почему адрес — не вебхук: текст для сотрудника без самого кода (он секрет). `null` — адрес годится.
+ */
+export function webhookProblem(raw: unknown): string | null {
+  if (parseWebhookUrl(raw)) return null
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!text) return 'Вставьте адрес вебхука'
+  let u: URL
+  try {
+    u = new URL(text)
+  } catch {
+    return `Это не адрес (${text.length} символов, начинается с «${text.slice(0, 8)}…»): вставьте адрес вида https://портал.bitrix24.ru/rest/1/код/`
+  }
+  if (u.protocol !== 'https:') return 'Адрес вебхука должен начинаться с https://'
+  if (u.username || u.password || u.port) return 'В адресе вебхука не должно быть логина, пароля и порта'
+  if (!/^\/rest\/\d+\//.test(u.pathname)) return `После домена ${u.hostname} должно идти /rest/<ID пользователя>/<код>/`
+  return 'Код вебхука — буквы и цифры, от 4 символов: проверьте, что адрес скопирован целиком'
 }
