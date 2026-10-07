@@ -1,0 +1,366 @@
+/* ============================================================================
+   Справка в раскладке сайта toolsai (site/app/assets/css: tokens, layout, content, components).
+   Всё — под .hd-shell: стили не протекают в остальное приложение. Шрифт — системный
+   (GetVoIP Grotesque и Geologica эталона не тащим: лишний вес во фрейме портала).
+   ========================================================================= */
+
+.hd-shell {
+  --hd-primary: #0075ff;
+  --hd-bg: #ffffff;
+  --hd-border: #f0f0f0;
+  --hd-text-primary: #333333;
+  --hd-text-secondary: #525c69;
+  --hd-text-tertiary: #828b95;
+  --hd-text-heading: #000000;
+  --hd-text-brand: #292a39;
+  --hd-link: #0154c8;
+  --hd-soft: #f1f3f5;
+  --hd-input-bg: #f6fafb;
+  --hd-input-border: #c4e6ff;
+  --hd-line: #e3e8f0;
+  --hd-code-bg: #f1f5fa;
+  --hd-code-border: #d8e1ec;
+  --hd-hover-bg: #e6f4ff;
+  --hd-float-shadow: 0 4px 20px rgba(0, 0, 0, .1);
+  --hd-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --hd-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --hd-header-height: 59px;
+  --hd-sidebar-width: 260px;
+  --hd-chat-width: 420px;
+  --hd-transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+
+  min-height: 100vh;
+  font-family: var(--hd-font);
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--hd-text-primary);
+  background: var(--hd-bg);
+  transition: padding-right .25s ease;
+}
+.hd-shell--chat { padding-right: var(--hd-chat-width); }
+.hd-shell:has(#help-menu[data-collapsed="true"]) { --hd-sidebar-width: 64px; }
+
+/* --- Шапка --------------------------------------------------------------- */
+.hd-shell .hd-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--hd-header-height);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 32px;
+  background: var(--hd-bg);
+  border-bottom: 1px solid var(--hd-line);
+}
+.hd-shell .hd-logo { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; text-decoration: none; }
+.hd-shell .hd-logo-brand { font-size: 18px; font-weight: 600; color: var(--hd-text-brand); }
+.hd-shell .hd-logo-word { font-size: 18px; color: var(--hd-text-tertiary); }
+.hd-shell .hd-header-search { flex: 1 1 auto; max-width: 420px; margin-left: auto; }
+
+/* --- Поиск --------------------------------------------------------------- */
+.hd-shell .hd-search-wrap { position: relative; min-width: 0; }
+.hd-shell .hd-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 120;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--hd-line);
+  border-radius: 12px;
+  background: var(--hd-bg);
+  box-shadow: var(--hd-float-shadow);
+}
+.hd-shell .hd-search-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 19px;
+  cursor: pointer;
+}
+.hd-shell .hd-search-item:hover { background: var(--hd-hover-bg); }
+.hd-shell .hd-search-item-title { color: var(--hd-text-primary); }
+.hd-shell .hd-search-item-crumb { font-size: 12px; color: var(--hd-text-tertiary); }
+.hd-shell .hd-search-ask { color: var(--hd-primary); }
+.hd-shell .hd-search-empty { margin: 0; padding: 8px 10px; font-size: 14px; color: var(--hd-text-tertiary); }
+
+/* --- Меню слева и тело --------------------------------------------------- */
+.hd-shell .hd-body { display: flex; align-items: flex-start; }
+.hd-shell .hd-page { flex: 1 1 auto; min-width: 0; }
+.hd-shell .hd-sidebar.hd-sidebar {
+  position: sticky;
+  top: var(--hd-header-height);
+  height: calc(100svh - var(--hd-header-height));
+  min-height: 0;
+  border-right: 1px solid var(--hd-line);
+}
+.hd-shell .hd-menu-footer { display: flex; align-items: center; gap: 4px; width: 100%; }
+.hd-shell .hd-menu-footer-nav { flex: 1 1 auto; min-width: 0; }
+.hd-shell .hd-menu-footer--collapsed { flex-direction: column; }
+
+/* --- Статья: белый лист, текст и оглавление ------------------------------ */
+.hd-shell .hd-article-layout {
+  width: 100%;
+  max-width: 1175px;
+  margin: 0 auto;
+  padding: 0 32px 120px;
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+}
+.hd-shell .hd-article {
+  flex: 1;
+  min-width: 0;
+  max-width: 875px;
+  font-size: 17px;
+  line-height: 23px;
+  overflow-wrap: anywhere;
+}
+.hd-shell .hd-alert { margin-top: 24px; }
+.hd-shell .hd-aside {
+  display: none;
+  flex: 0 0 auto;
+  width: 188px;
+  padding-top: 24px;
+  position: sticky;
+  top: var(--hd-header-height);
+}
+@media (min-width: 900px) { .hd-shell .hd-aside { display: block; } }
+/* при открытом чате место под оглавление есть только на широком экране */
+@media (max-width: 1339px) { .hd-shell--chat .hd-aside { display: none; } }
+
+.hd-shell .hd-article-head { display: flex; align-items: center; gap: 16px; padding: 24px 0 16px; }
+.hd-shell .hd-breadcrumbs { flex: 1 1 auto; min-width: 0; }
+.hd-shell .hd-breadcrumbs ol { padding-left: 0; margin: 0; list-style: none; }
+.hd-shell .hd-article-title-wrap { padding: 10px 0 20px; }
+.hd-shell .hd-article h1 { margin: 0; font-size: 32px; font-weight: 500; line-height: 38px; color: var(--hd-text-heading); }
+.hd-shell .hd-lead { margin: 0 0 16px; color: var(--hd-text-secondary); }
+
+.hd-shell .hd-toc-preview {
+  margin: 10px 0 24px;
+  padding: 18px 20px 24px;
+  border: 1px solid var(--hd-border);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #f4f9ff 0%, #ffffff 45%);
+}
+.hd-shell .hd-toc-preview p { margin: 0 0 8px; font-size: 16px; }
+.hd-shell .hd-toc-preview ul { margin: 4px 0 0; padding-left: 20px; list-style: disc; }
+.hd-shell .hd-toc-preview li { padding: 4px 0; font-size: 17px; }
+.hd-shell .hd-toc-preview li::marker { color: var(--hd-primary); }
+.hd-shell .hd-toc-preview a { color: var(--hd-link); text-decoration: none; }
+.hd-shell .hd-toc-preview a:hover { text-decoration: underline; }
+
+/* --- Типографика текста (content.css эталона) ---------------------------- */
+.hd-shell .hd-md h2 {
+  margin: 32px 0 20px;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--hd-text-heading);
+  scroll-margin-top: calc(var(--hd-header-height) + 16px);
+}
+.hd-shell .hd-md h3 {
+  margin: 24px 0 12px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--hd-text-heading);
+  scroll-margin-top: calc(var(--hd-header-height) + 16px);
+}
+.hd-shell .hd-md p { margin: 0 0 16px; }
+.hd-shell .hd-md a { color: var(--hd-link); text-decoration: none; transition: var(--hd-transition); }
+.hd-shell .hd-md a:hover { text-decoration: underline; }
+.hd-shell .hd-md ul, .hd-shell .hd-md ol { margin: 0 0 16px; padding-left: 20px; }
+.hd-shell .hd-md ul { list-style: disc; }
+.hd-shell .hd-md ol { list-style: decimal; }
+.hd-shell .hd-md li { padding: 4px 0; }
+.hd-shell .hd-md li::marker { color: var(--hd-primary); }
+.hd-shell .hd-md strong { font-weight: 600; }
+.hd-shell .hd-md code {
+  font: 14px/1.4 var(--hd-font-mono);
+  background: var(--hd-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.hd-shell .hd-md pre {
+  margin: 0 0 24px;
+  padding: 16px;
+  background: var(--hd-code-bg);
+  border: 1px solid var(--hd-code-border);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+.hd-shell .hd-md pre code { background: none; padding: 0; }
+.hd-shell .hd-md table { display: block; overflow-x: auto; border-collapse: collapse; margin: 0 0 24px; font-size: 14px; }
+.hd-shell .hd-md th, .hd-shell .hd-md td { border: 1px solid var(--hd-border); padding: 12px 14px; text-align: left; vertical-align: top; }
+.hd-shell .hd-md th { background: var(--hd-border); font-weight: 500; }
+.hd-shell .hd-md blockquote { margin: 0 0 24px; padding: 16px; border-radius: 10px; background: var(--hd-hover-bg); }
+.hd-shell .hd-md blockquote p:last-child { margin-bottom: 0; }
+.hd-shell .hd-md hr { border: 0; border-top: 1px solid var(--hd-border); margin: 32px 0; }
+
+/* --- Соседние страницы --------------------------------------------------- */
+.hd-shell .hd-surround {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--hd-border);
+}
+.hd-shell .hd-surround-link { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--hd-text-primary); text-decoration: none; font-size: 14px; }
+.hd-shell .hd-surround-link:hover { color: var(--hd-primary); }
+.hd-shell .hd-surround-link--next { text-align: right; align-items: flex-end; }
+.hd-shell .hd-surround-dir { font-size: 12px; color: var(--hd-text-tertiary); }
+
+/* --- Оглавление справа --------------------------------------------------- */
+.hd-shell .hd-toc-title { margin: 0 0 16px; font-size: 15px; line-height: 20px; font-weight: 600; color: var(--hd-text-heading); }
+.hd-shell .hd-toc-list { margin: 0; padding: 0; list-style: none; border-left: 1px solid var(--hd-line); }
+.hd-shell .hd-toc-link {
+  display: block;
+  margin-left: -1px;
+  padding: 8px 0 8px 14px;
+  border-left: 2px solid transparent;
+  font-size: 14px;
+  line-height: 19px;
+  color: var(--hd-text-tertiary);
+  text-decoration: none;
+  transition: var(--hd-transition);
+}
+.hd-shell .hd-toc-depth-3 .hd-toc-link { padding-left: 26px; font-size: 13px; }
+.hd-shell .hd-toc-link:hover { color: var(--hd-text-primary); }
+.hd-shell .hd-toc-link.is-active { color: var(--hd-text-primary); border-left-color: var(--hd-text-primary); }
+.hd-shell .hd-discuss { margin-top: 32px; }
+
+/* --- Плавающее поле вопроса ---------------------------------------------- */
+.hd-shell .hd-ask-float {
+  position: fixed;
+  bottom: 24px;
+  left: calc(50% + var(--hd-sidebar-width) / 2);
+  z-index: 75;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--hd-input-border);
+  border-radius: 12px;
+  background: var(--hd-bg);
+  box-shadow: var(--hd-float-shadow);
+  transform: translateX(-50%);
+}
+.hd-shell .hd-ask-float:focus-within { border-color: var(--hd-primary); }
+.hd-shell .hd-ask-float-input { flex: 1; min-width: 0; }
+
+/* --- Чат панелью справа -------------------------------------------------- */
+.hd-shell .hd-chat-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 110;
+  width: var(--hd-chat-width);
+  border-left: 1px solid var(--hd-line);
+  background: var(--hd-bg);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform .25s ease, visibility .25s ease;
+}
+.hd-shell .hd-chat-overlay.is-open { transform: none; visibility: visible; }
+.hd-shell .hd-chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--hd-header-height);
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--hd-line);
+}
+.hd-shell .hd-chat-bar-title { flex: 1; font-size: 16px; font-weight: 600; color: var(--hd-text-heading); }
+.hd-shell .hd-chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - var(--hd-header-height));
+  padding: 24px 24px 20px;
+}
+.hd-shell .hd-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-bottom: 24px;
+  font-size: 15px;
+  line-height: 22px;
+}
+.hd-shell .hd-chat-welcome-title { margin: 0 0 14px; font-size: 18px; line-height: 25px; font-weight: 600; color: var(--hd-text-primary); }
+.hd-shell .hd-chat-welcome p { margin: 0; }
+.hd-shell .hd-chat-welcome ul { margin: 4px 0 0; padding-left: 20px; list-style: disc; }
+.hd-shell .hd-chat-welcome li::marker { color: var(--hd-primary); }
+.hd-shell .hd-chat-example { color: var(--hd-link); text-align: left; cursor: pointer; }
+.hd-shell .hd-chat-example:hover { text-decoration: underline; }
+.hd-shell .hd-chat-q {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--hd-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hd-shell .hd-chat-a { min-width: 0; }
+.hd-shell .hd-chat-md p { margin: 0 0 .7em; }
+.hd-shell .hd-chat-md p:last-child { margin-bottom: 0; }
+.hd-shell .hd-chat-md ul, .hd-shell .hd-chat-md ol { margin: 0 0 .7em; padding-left: 1.3em; }
+.hd-shell .hd-chat-md ul { list-style: disc; }
+.hd-shell .hd-chat-md ol { list-style: decimal; }
+.hd-shell .hd-chat-md li { padding: 2px 0; }
+.hd-shell .hd-chat-md a, .hd-shell .hd-chat-sources a { color: var(--hd-link); text-decoration: none; }
+.hd-shell .hd-chat-md a:hover, .hd-shell .hd-chat-sources a:hover { text-decoration: underline; }
+.hd-shell .hd-chat-md strong { font-weight: 600; }
+.hd-shell .hd-chat-md code { font: 14px/1.4 var(--hd-font-mono); background: var(--hd-soft); border-radius: 6px; padding: 1px 5px; overflow-wrap: anywhere; }
+.hd-shell .hd-chat-sources { margin-top: 10px; font-size: 14px; color: var(--hd-text-tertiary); }
+.hd-shell .hd-chat-sources ul { margin: 4px 0 0; padding-left: 20px; list-style: disc; }
+.hd-shell .hd-chat-sources li::marker { color: var(--hd-primary); }
+.hd-shell .hd-chat-wait { color: var(--hd-text-tertiary); }
+.hd-shell .hd-chat-error { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.hd-shell .hd-chat-error p { margin: 0; }
+.hd-shell .hd-chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 6px;
+  border-radius: 12px;
+  background: var(--hd-bg);
+  box-shadow: var(--hd-float-shadow);
+}
+.hd-shell .hd-chat-row { display: flex; align-items: center; gap: 8px; }
+.hd-shell .hd-chat-input { flex: 1; min-width: 0; }
+.hd-shell .hd-chat-topic { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; font-size: 13px; color: var(--hd-text-tertiary); }
+.hd-shell .hd-chat-topic span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hd-shell .hd-chat-topic a { color: var(--hd-link); text-decoration: none; }
+.hd-shell .hd-chat-disclaimer { margin: 0; text-align: center; font-size: 12px; line-height: 15px; font-style: italic; color: var(--hd-text-tertiary); }
+
+/* --- Узкий экран и телефон ----------------------------------------------- */
+@media (max-width: 1023px) { .hd-shell { --hd-sidebar-width: 0px; } }
+@media (max-width: 767px) {
+  .hd-shell { --hd-chat-width: 100vw; }
+  .hd-shell--chat { padding-right: 0; }
+  .hd-shell .hd-header { padding: 12px 16px; gap: 8px; }
+  .hd-shell .hd-logo-brand { display: none; }
+  .hd-shell .hd-article-layout { padding: 0 16px 96px; }
+  .hd-shell .hd-article h1 { font-size: 26px; line-height: 32px; }
+  .hd-shell .hd-chat { padding: 20px 16px 16px; }
+}
