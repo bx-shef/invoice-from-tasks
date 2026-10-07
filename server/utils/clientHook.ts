@@ -53,7 +53,13 @@ export function sealClientHook(raw: unknown, portalDomain: string, env: Record<s
   try {
     key = loadEncKey(env, CLIENT_HOOK_KEY_ENV)
   } catch {
-    return { ok: false, status: 503, error: 'На сервере не задан ключ шифрования вебхуков (CLIENT_HOOK_ENC_KEY)' }
+    return {
+      ok: false,
+      status: 503,
+      error: env[CLIENT_HOOK_KEY_ENV]?.trim()
+        ? 'Ключ шифрования вебхуков (CLIENT_HOOK_ENC_KEY) неверного формата: нужно 32 байта — openssl rand -hex 32'
+        : 'На сервере не задан ключ шифрования вебхуков (CLIENT_HOOK_ENC_KEY)'
+    }
   }
   return { ok: true, value: formatHookValue(hook.host, encryptSecret(hook.url, key, hookAad(portalDomain, hook.host))), host: hook.host }
 }
