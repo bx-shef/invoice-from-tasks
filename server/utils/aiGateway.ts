@@ -3,7 +3,7 @@
 // `requestContext.ts → aiHttpError`. Так модуль тестируется в node без Nitro.
 
 import { chatWithRetry, describeLlmFailure, makeChatFn, resolveLlmConfig, type ChatFn, type ChatRequest } from './llm'
-import { AI_LIMITS, SlidingWindow } from './rateLimit'
+import { AI_LIMITS, KB_CHAT_LIMITS, SlidingWindow } from './rateLimit'
 import type { FrameUser } from './frameAuth'
 
 export interface AiLimitOptions {
@@ -35,6 +35,17 @@ export function enforceAiLimit(user: FrameUser, opts: AiLimitOptions = {}): void
     [`pw:${user.portal.memberId}`, AI_LIMITS.portalRows, rows]
   ], opts.now ?? Date.now())
   if (!ok) throw new AiGatewayError(429, 'Слишком много обращений к BitrixGPT. Попробуйте позже.')
+}
+
+const kbWindows = new SlidingWindow()
+
+/** Лимит ИИ-чата справки (KB_CHAT_LIMITS) — свой счётчик, общие AI_LIMITS не трогает. */
+export function enforceKbChatLimit(user: FrameUser, opts: Pick<AiLimitOptions, 'window' | 'now'> = {}): void {
+  const ok = (opts.window ?? kbWindows).take([
+    [`kb-u:${user.portal.memberId}:${user.userId}`, KB_CHAT_LIMITS.user, 1],
+    [`kb-p:${user.portal.memberId}`, KB_CHAT_LIMITS.portal, 1]
+  ], opts.now ?? Date.now())
+  if (!ok) throw new AiGatewayError(429, 'Слишком много вопросов в справку: не больше 30 за 10 минут. Попробуйте чуть позже.')
 }
 
 let liveChat: ChatFn | null = null

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AiGatewayError, askBitrixGpt, enforceAiLimit } from '../../server/utils/aiGateway'
+import { AiGatewayError, askBitrixGpt, enforceAiLimit, enforceKbChatLimit } from '../../server/utils/aiGateway'
 import type { FrameUser } from '../../server/utils/frameAuth'
-import { AI_LIMITS, SlidingWindow } from '../../server/utils/rateLimit'
+import { AI_LIMITS, KB_CHAT_LIMITS, SlidingWindow } from '../../server/utils/rateLimit'
 
 function user(userId: number, memberId = 'm1'): FrameUser {
   return {
@@ -73,5 +73,21 @@ describe('askBitrixGpt', () => {
     expect(err.message).not.toContain('описание')
     expect(log.mock.calls.flat().join(' ')).toContain('kind=auth')
     expect(log.mock.calls.flat().join(' ')).not.toContain('описание')
+  })
+})
+
+describe('enforceKbChatLimit', () => {
+  it('30 вопросов за 10 минут на сотрудника, коллега — независимо; через 10 минут — снова', () => {
+    const window = new SlidingWindow()
+    for (let i = 0; i < KB_CHAT_LIMITS.user.max; i++) enforceKbChatLimit(user(1), { window, now: 1000 })
+    expect(() => enforceKbChatLimit(user(1), { window, now: 1000 })).toThrow(AiGatewayError)
+    expect(() => enforceKbChatLimit(user(2), { window, now: 1000 })).not.toThrow()
+    expect(() => enforceKbChatLimit(user(1), { window, now: 1000 + KB_CHAT_LIMITS.user.windowMs + 1 })).not.toThrow()
+  })
+
+  it('свой счётчик: исчерпанный лимит чата не мешает названиям строк', () => {
+    for (let i = 0; i < KB_CHAT_LIMITS.user.max; i++) enforceKbChatLimit(user(7))
+    expect(() => enforceKbChatLimit(user(7))).toThrow(/30 за 10 минут/)
+    expect(() => enforceAiLimit(user(7))).not.toThrow()
   })
 })

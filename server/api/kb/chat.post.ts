@@ -1,9 +1,9 @@
 // POST /api/kb/chat — ИИ-чат справки (по принципу toolsai): `{ messages, page? }` → ответ BitrixGPT
 // по фрагментам публичной справки и список страниц-источников. Только из фрейма портала (модель
-// платная) и в общих AI-лимитах сотрудника. Вопросы и ответы в журнал не пишем.
+// платная) и в своём лимите — 30 вопросов за 10 минут на сотрудника (KB_CHAT_LIMITS). Вопросы и ответы в журнал не пишем.
 
 import { kbSources, kbSystemPrompt, parseKbMessages, selectChunks } from '#shared/domain/kb'
-import { askBitrixGpt, enforceAiLimit } from '../../utils/aiGateway'
+import { askBitrixGpt, enforceKbChatLimit } from '../../utils/aiGateway'
 import { aiHttpError, loadKb, requireFrameUser } from '../../utils/requestContext'
 
 export default defineEventHandler(async (event) => {
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
   const chosen = selectChunks(index, question, page)
   console.info(`[kb] фрагментов: ${index.docs.length}, выбрано: ${chosen.map(c => c.url).join(', ') || '—'}`)
   try {
-    enforceAiLimit(user)
+    enforceKbChatLimit(user)
     const answer = await askBitrixGpt({ messages: [{ role: 'system', content: kbSystemPrompt(chosen) }, ...messages], json: false })
     return { answer: answer.trim(), sources: kbSources(chosen, pages) }
   } catch (e) {
