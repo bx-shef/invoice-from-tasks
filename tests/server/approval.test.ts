@@ -35,6 +35,7 @@ function portal(over: Over = {}) {
     if (method === 'app.option.get') return settings
     if (method === 'crm.status.list') return []
     if (method === 'crm.item.productrow.list') return { productRows: [] }
+    if (method === 'tasks.task.list') return { tasks: [] }
     if (method === 'crm.activity.list') return [
       { ID: '22', SUBJECT: 'Комментарий клиента: ООО Клиент', DESCRIPTION: 'Ещё вопрос', CREATED: '2026-10-06T11:00:00+03:00', COMPLETED: 'N' },
       { ID: '21', SUBJECT: 'Комментарий клиента: ООО Клиент', DESCRIPTION: 'Цена?', CREATED: '2026-10-06T10:00:00+03:00', COMPLETED: 'Y' }

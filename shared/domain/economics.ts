@@ -1,20 +1,22 @@
 // Экономика задач и счёта (решение владельца 2026-10-07): сколько вышло бы по формуле (часы ×
-// цена часа) и сколько выставлено клиенту («Стоимость работ» или та же формула). Дельта — в
+// цена часа) и сколько выставлено клиенту («Стоимость работ» или та же формула). Суммы — С НДС, как
+// платит клиент (владелец: «1500 — это я выставил», без НДС было 1250 — непонятно). Дельта — в
 // деньгах: «−1200» — мы в минусе, «200» — в плюсе; разница — в процентах к формуле. Строки с
 // убытком или завышением больше порога (настройки) и задачи без времени или ставки — помечаются.
 // Итог по счёту — JSON в поле счёта своего типа «Экономика счёта» (/uf/economics).
 
 import type { DraftRow, FillMode, FillResult, TaskSource } from './fill'
 import { roundMoney } from './money'
+import { grossPrice } from './vat'
 
 /** Пометка задачи: убыток, завышение, нет данных (время — оценка ИИ, нет ставки); `null` — в норме. */
 export type EconomyFlag = 'loss' | 'over' | 'missing' | null
 
 export interface TaskEconomy {
   taskId: number
-  /** По формуле, без НДС. */
+  /** По формуле, с НДС. */
   formula: number
-  /** Выставлено клиенту, без НДС. */
+  /** Выставлено клиенту, с НДС (для «Стоимости работ» — ровно она). */
   billed: number
   /** Выставлено − формула. */
   delta: number
@@ -22,6 +24,10 @@ export interface TaskEconomy {
   diffPercent: number | null
   /** Часы — оценка ИИ: в задаче нет затраченного времени. */
   estimated: boolean
+  /** Часы задачи (после округления; для задачи без времени — оценка ИИ). */
+  hours: number
+  /** Выставлено «Стоимостью работ», а не формулой. */
+  fixed: boolean
   flag: EconomyFlag
 }
 
@@ -43,11 +49,14 @@ export function flagOf(diffPercent: number | null, estimated: boolean, threshold
  * сборки (нет ставки) — «нет данных» с нулями: их видно в списке, а не молча нет.
  */
 export function taskEconomics(result: Pick<FillResult, 'rows' | 'errors'>, threshold: number): TaskEconomy[] {
-  const byTask = new Map<number, { formula: number, billed: number, estimated: boolean }>()
+  const byTask = new Map<number, { formula: number, billed: number, estimated: boolean, hours: number, fixed: boolean }>()
   for (const row of result.rows) {
-    const t = byTask.get(row.taskId) ?? { formula: 0, billed: 0, estimated: false }
-    t.formula += row.formulaSum
-    t.billed += row.sum
+    const t = byTask.get(row.taskId) ?? { formula: 0, billed: 0, estimated: false, hours: 0, fixed: false }
+    t.hours += row.hours ?? 0
+    t.fixed ||= row.fixedGross !== undefined
+    // С налогом: «Стоимость работ» — как записана, остальное — сумма строки плюс НДС.
+    t.formula += grossPrice(row.formulaSum, row.taxRate)
+    t.billed += row.fixedGross ?? grossPrice(row.sum, row.taxRate)
     t.estimated ||= !!row.estimated
     byTask.set(row.taskId, t)
   }
@@ -56,11 +65,11 @@ export function taskEconomics(result: Pick<FillResult, 'rows' | 'errors'>, thres
     const billed = roundMoney(t.billed)
     const delta = roundMoney(billed - formula)
     const diffPercent = percent(delta, formula)
-    return { taskId, formula, billed, delta, diffPercent, estimated: t.estimated, flag: flagOf(diffPercent, t.estimated, threshold) }
+    return { taskId, formula, billed, delta, diffPercent, estimated: t.estimated, hours: Math.round(t.hours * 100) / 100, fixed: t.fixed, flag: flagOf(diffPercent, t.estimated, threshold) }
   })
   for (const e of result.errors) {
     if (e.taskId && !byTask.has(e.taskId) && !out.some(o => o.taskId === e.taskId)) {
-      out.push({ taskId: e.taskId, formula: 0, billed: 0, delta: 0, diffPercent: null, estimated: false, flag: 'missing' })
+      out.push({ taskId: e.taskId, formula: 0, billed: 0, delta: 0, diffPercent: null, estimated: false, hours: 0, fixed: false, flag: 'missing' })
     }
   }
   return out.sort((a, b) => a.taskId - b.taskId)

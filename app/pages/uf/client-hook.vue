@@ -3,7 +3,9 @@
 // чтобы читать задачи клиента в его портале. Хранится ТОЛЬКО зашифрованным (сервер, ключ
 // CLIENT_HOOK_ENC_KEY): пусто — поле ввода, задан — «указан для <домен>» и «Стереть». Сам вебхук
 // после сохранения не показывается никогда.
-import { parseHookValue } from '#shared/domain/appFieldTypes'
+import ObserverIcon from '@bitrix24/b24icons-vue/outline/ObserverIcon'
+import CrossedEyeIcon from '@bitrix24/b24icons-vue/outline/CrossedEyeIcon'
+import { parseHookValue, webhookProblem } from '#shared/domain/appFieldTypes'
 import { fieldContext, type FieldContext } from '~/utils/fieldPlacement'
 
 const b24 = useB24()
@@ -13,6 +15,8 @@ const writer = useFieldWriter()
 const ctx = ref<FieldContext | null>(null)
 const value = ref('')
 const input = ref('')
+/** Адрес виден (кнопка с глазом): проверить, что вставлено именно то. */
+const show = ref(false)
 const busy = ref(false)
 const note = ref('')
 const error = ref('')
@@ -45,6 +49,12 @@ async function run(next: () => Promise<string>, done: string) {
 }
 
 function save() {
+  // Проверка на месте — ошибка сразу и с причиной, без похода на сервер.
+  const problem = webhookProblem(input.value)
+  if (problem) {
+    error.value = problem
+    return
+  }
   void run(async () => (await post<{ value: string }>('/api/client-hook/seal', { url: input.value })).value, 'Вебхук сохранён')
 }
 
@@ -69,15 +79,32 @@ function clear() {
         />
       </template>
       <template v-else>
+        <!-- new-password: Chrome игнорирует autocomplete="off" у поля-пароля и подставлял чужой
+             сохранённый пароль (отчёт владельца 2026-10-07: «не пустил» адрес, которого там не было). -->
         <B24Input
+          id="client-hook"
           v-model="input"
-          type="password"
-          autocomplete="off"
+          :type="show ? 'text' : 'password'"
+          name="client-hook"
+          autocomplete="new-password"
           placeholder="https://портал.bitrix24.ru/rest/1/код/"
           class="w-80 max-w-full"
+          :b24ui="{ trailing: 'pe-1' }"
           aria-label="Входящий вебхук портала клиента"
           data-testid="client-hook-input"
-        />
+        >
+          <template #trailing>
+            <B24Button
+              size="xs"
+              color="air-tertiary-no-accent"
+              :icon="show ? CrossedEyeIcon : ObserverIcon"
+              :aria-label="show ? 'Скрыть адрес' : 'Показать адрес'"
+              :aria-pressed="show"
+              aria-controls="client-hook"
+              @click="show = !show"
+            />
+          </template>
+        </B24Input>
         <B24Button
           size="xs"
           color="air-secondary"

@@ -24,7 +24,7 @@ describe('parseSettings — защитный разбор app.option', () => {
     expect(s.roundingDirection).toBe('nearest')
     expect(s.markup).toEqual({ defaultPercent: 70, tags: [{ tag: 'ЧЧ1', percent: 20 }, { tag: 'ЧЧ2', percent: 120 }] })
     expect(s.naming).toBe('ai')
-    expect(s.prompts).toEqual({ taskTitle: 'свой промпт', timeBlock: null })
+    expect(s.prompts).toEqual({ taskTitle: 'свой промпт', timeBlock: null, estimate: null })
   })
 
   it('недопустимый шаг и направление округления, валюта отбрасываются', () => {

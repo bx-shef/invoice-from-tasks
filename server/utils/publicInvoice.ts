@@ -34,6 +34,7 @@ import {
 import { APPROVED_TITLE, approvalMark, approvalUpdates, cleanComment, commentListParams, commentsFrom, commentTodoParams, noteText, type ApprovalComment } from '#shared/domain/approval'
 import { parseSettings, SETTINGS_KEY, type AppSettings } from '#shared/domain/settings'
 import { ACCESS_CODE_FIELD, camelFieldKey } from '#shared/domain/userFields'
+import { crmBindingCodes } from '#shared/domain/tasks'
 import { V3_PREFIX, type RestCall } from './b24Client'
 import { readOption } from './options'
 import type { WindowLimit } from './rateLimit'
@@ -320,6 +321,22 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     const resultList = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
     const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
     if (task) tasks.push(task)
+  }
+  // Задачи, привязанные к самому счёту, но без строки в нём (согласование до сборки строк —
+  // отчёт владельца 2026-10-07: «где задачи?» на пустом счёте). Только привязка к счёту, не к сделке.
+  for (const code of crmBindingCodes(31, invoice.id)) {
+    if (tasks.length >= MAX_PUBLIC_TASKS) break
+    const listed = await orNull(call('tasks.task.list', { filter: { UF_CRM_TASK: code }, select, order: { ID: 'asc' } }))
+    const rawList = Array.isArray((listed as { tasks?: unknown } | null)?.tasks) ? (listed as { tasks: unknown[] }).tasks : []
+    for (const rawTask of rawList) {
+      if (tasks.length >= MAX_PUBLIC_TASKS) break
+      const id = Number((rawTask as { id?: unknown, ID?: unknown })?.id ?? (rawTask as { ID?: unknown })?.ID)
+      if (!Number.isInteger(id) || tasks.some(t => t.id === id) || !taskBoundTo(rawTask, codes)) continue
+      const results = await orNull(call(`${V3_PREFIX}tasks.task.result.list`, { filter: [['taskId', '=', id]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: 20 } }))
+      const resultList = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
+      const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
+      if (task) tasks.push(task)
+    }
   }
   await attachClientTasks(tasks, clients, req.domain, deps)
   const documents = await documentsPromise

@@ -319,6 +319,7 @@ async function consult(promptId: string) {
           :threshold="app.settings.value.economics.threshold"
           :origin="origin"
           :titles="taskTitles"
+          :currency="fill.invoice.value?.currencyId ?? ''"
         />
 
         <InvoiceWriteConfirm

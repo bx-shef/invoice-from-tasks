@@ -64,12 +64,16 @@ async function recalc() {
   error.value = ''
   try {
     await app.load()
-    if (!app.settings.value.economics.invoiceField) throw new Error('В настройках не выбрано поле «Экономика счёта» — нажмите «Создать поля приложения»')
+    // Пишем в то поле, в котором открыт виджет (владелец 2026-10-07: настройку не выбрали — а
+    // поле-то вот оно). Настройка — для «Собрать строки» в окне счёта.
+    const field = ctx.value.fieldName || app.settings.value.economics.invoiceField
+    if (!field) throw new Error('Не удалось определить поле «Экономика счёта»')
+    app.settings.value.economics.invoiceField = field
     await fill.loadInvoice(ctx.value.itemId)
     await fill.collect(source.value, mode.value)
     if (fill.error.value || fill.problems.value.length) throw new Error(fill.error.value || fill.problems.value.join('; '))
     const res = await b24.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: 31, id: ctx.value.itemId })
-    econ.value = parseInvoiceEconomy(res?.item?.[camelFieldKey(app.settings.value.economics.invoiceField)]) ?? econ.value
+    econ.value = parseInvoiceEconomy(res?.item?.[camelFieldKey(field)]) ?? econ.value
     asking.value = false
     if (fill.economyNotice.value) error.value = fill.economyNotice.value
   } catch (e) {
