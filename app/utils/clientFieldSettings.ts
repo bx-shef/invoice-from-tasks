@@ -1,7 +1,7 @@
 // Выбор полей клиента в настройках (#34): пункты выпадающего списка и подстановка созданных полей.
 // Чистые функции для SettingsClientFields.vue.
 
-import { APP_FIELDS, INVOICE_APPROVED_AT_FIELD, INVOICE_APPROVED_FIELD, INVOICE_LINK_FIELD, INVOICE_QR_FIELD, type UserFieldOption } from '#shared/domain/userFields'
+import { APP_FIELDS, INVOICE_APPROVED_AT_FIELD, INVOICE_APPROVED_FIELD, INVOICE_ECONOMICS_FIELD, INVOICE_LINK_FIELD, INVOICE_QR_FIELD, TASK_DELTA_FIELD, TASK_DIFF_PERCENT_FIELD, TASK_WORK_COST_FIELD, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
 
 /** Пункт списка: «Подпись (UF_CODE)»; `value: ''` — «Не выбрано». */
@@ -47,6 +47,22 @@ export function withAppInvoiceFields(page: AppSettings['publicPage']): AppSettin
   const next = { ...page }
   for (const [name, key] of Object.entries(PUBLIC_SETTING_OF)) if (!next[key]) next[key] = name
   return next
+}
+
+/**
+ * После «Создать поля»: поля экономики задачи и «Экономика счёта» — в настройки, если там пусто
+ * (своё поле «Стоимость работ», выбранное администратором, не трогаем).
+ */
+export function withAppEconomyFields(settings: Pick<AppSettings, 'taskFields' | 'economics'>): Pick<AppSettings, 'taskFields' | 'economics'> {
+  const f = settings.taskFields
+  return {
+    taskFields: {
+      workCost: f.workCost || TASK_WORK_COST_FIELD,
+      diffPercent: f.diffPercent || TASK_DIFF_PERCENT_FIELD,
+      delta: f.delta || TASK_DELTA_FIELD
+    },
+    economics: { ...settings.economics, invoiceField: settings.economics.invoiceField || INVOICE_ECONOMICS_FIELD }
+  }
 }
 
 export function withAppFields(fields: AppSettings['clientFields']): AppSettings['clientFields'] {

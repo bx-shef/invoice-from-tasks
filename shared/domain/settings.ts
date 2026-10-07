@@ -71,6 +71,22 @@ export interface AppSettings {
     taskDomain: string
   }
   /**
+   * Экономика задач (решение владельца 2026-10-07). `workCost` — UF задачи «Стоимость работ»: итог
+   * строки с налогом, который платит клиент (тип «Задача — одна строка»); `diffPercent` и `delta` —
+   * UF задачи, куда «Собрать строки» пишет разницу с формулой (%) и дельту в деньгах. `''` — нет.
+   */
+  taskFields: {
+    workCost: string
+    diffPercent: string
+    delta: string
+  }
+  economics: {
+    /** Порог маркировки, %: убыток или завышение больше порога — строка помечается. */
+    threshold: number
+    /** UF счёта своего типа «Экономика счёта» (JSON); `''` — не писать. */
+    invoiceField: string
+  }
+  /**
    * Публичная страница счёта (#34): в каких стадиях (`stageId` счёта, например `DT31_1:N`) клиент
    * видит расшифровку; в остальных — спокойная фраза `closedText`. Пусто — не показывается никогда.
    */
@@ -126,6 +142,9 @@ export const LIMITS = {
   chatTitle: 200
 } as const
 
+/** Порог маркировки экономики задач по умолчанию, % (владелец: 20%). */
+export const DEFAULT_ECONOMICS_THRESHOLD = 20
+
 /** Фраза по умолчанию, если счёт не в разрешённой стадии. */
 export const DEFAULT_CLOSED_TEXT = 'Расшифровка этого счёта сейчас недоступна. Пожалуйста, обратитесь к вашему менеджеру.'
 
@@ -147,6 +166,8 @@ export function defaultSettings(): AppSettings {
     naming: 'plain',
     taskIdInName: false,
     clientFields: { task: '', taskDomain: '' },
+    taskFields: { workCost: '', diffPercent: '', delta: '' },
+    economics: { threshold: DEFAULT_ECONOMICS_THRESHOLD, invoiceField: '' },
     publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '', approvalStage: '', approvedField: '', approvedAtField: '' },
     problemChat: { dialogId: '', title: '' },
     prompts: { taskTitle: null, timeBlock: null },
@@ -244,6 +265,8 @@ export function parseSettings(raw: unknown): AppSettings {
   const markup = asObject(o.markup)
   const prompts = asObject(o.prompts)
   const clientFields = asObject(o.clientFields)
+  const taskFields = asObject(o.taskFields)
+  const economics = asObject(o.economics)
   const publicPage = asObject(o.publicPage)
   const closedText = text(publicPage.closedText, LIMITS.closedText).trim()
   const approvalStage = stageId(publicPage.approvalStage) ?? ''
@@ -269,6 +292,17 @@ export function parseSettings(raw: unknown): AppSettings {
     clientFields: {
       task: normalizeFieldName(clientFields.task),
       taskDomain: normalizeFieldName(clientFields.taskDomain)
+    },
+    taskFields: {
+      workCost: normalizeFieldName(taskFields.workCost),
+      diffPercent: normalizeFieldName(taskFields.diffPercent),
+      delta: normalizeFieldName(taskFields.delta)
+    },
+    economics: {
+      threshold: Number.isInteger(Number(economics.threshold)) && Number(economics.threshold) >= 1 && Number(economics.threshold) <= 500
+        ? Number(economics.threshold)
+        : d.economics.threshold,
+      invoiceField: normalizeFieldName(economics.invoiceField)
     },
     publicPage: {
       stages: Array.isArray(publicPage.stages)

@@ -4,7 +4,7 @@
 // приложения создаются только здесь, кнопкой — при установке и удалении приложение UF не трогает.
 import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
-import { fieldItems, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
+import { fieldItems, withAppEconomyFields, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
 import type { FieldLists } from '~/composables/useUserFields'
 
 const settings = defineModel<AppSettings>({ required: true })
@@ -41,6 +41,7 @@ async function createFields() {
     const created = await userFields.createMissing(lists.value)
     settings.value.clientFields = withAppFields(settings.value.clientFields)
     settings.value.publicPage = withAppInvoiceFields(settings.value.publicPage)
+    Object.assign(settings.value, withAppEconomyFields(settings.value))
     toast.add({
       title: created.length ? `Создано полей: ${created.length}` : 'Поля приложения уже есть',
       description: 'Поля выбраны в настройках — сохраните настройки',
@@ -96,6 +97,65 @@ async function createFields() {
         :loading="loading"
         class="w-96 max-w-full"
         data-testid="client-field-task-domain"
+      />
+    </B24FormField>
+
+    <h3 class="font-medium pt-2">
+      Экономика задач
+      <HelpLink anchor="economics" />
+    </h3>
+    <B24FormField
+      label="Стоимость работ — поле задачи"
+      description="Итог строки с налогом, который платит клиент: в счёт уходит ровно эта сумма, цена без налога — обратным счётом. Пусто — строка по формуле"
+    >
+      <B24SelectMenu
+        v-model="settings.taskFields.workCost"
+        :items="itemsFor('task', settings.taskFields.workCost)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="task-field-work-cost"
+      />
+    </B24FormField>
+    <B24FormField
+      label="Разница с формулой, % — поле задачи"
+      description="«Собрать строки» записывает сюда (выставлено − формула) / формула × 100"
+    >
+      <B24SelectMenu
+        v-model="settings.taskFields.diffPercent"
+        :items="itemsFor('task', settings.taskFields.diffPercent)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="task-field-diff"
+      />
+    </B24FormField>
+    <B24FormField
+      label="Дельта — поле задачи"
+      description="Выставлено − формула в деньгах без НДС: −1200 — мы в минусе, 200 — в плюсе"
+    >
+      <B24SelectMenu
+        v-model="settings.taskFields.delta"
+        :items="itemsFor('task', settings.taskFields.delta)"
+        value-key="value"
+        :search-input="{ placeholder: 'Поиск поля…' }"
+        :loading="loading"
+        class="w-96 max-w-full"
+        data-testid="task-field-delta"
+      />
+    </B24FormField>
+    <B24FormField
+      label="Порог пометки, %"
+      description="Убыток или завышение больше порога подсвечиваются в списке задач"
+    >
+      <B24InputNumber
+        v-model="settings.economics.threshold"
+        :min="1"
+        :max="500"
+        class="w-32"
+        data-testid="economics-threshold"
       />
     </B24FormField>
 

@@ -8,9 +8,10 @@ import { serverProblems } from '~/utils/serverHealth'
 const handlerOf = (path: string) => `https://app.example.by${path}`
 
 describe('регистрация типов полей при установке', () => {
-  it('нет типов — add обоих с обработчиком, подписью и высотой', () => {
+  it('нет типов — add всех с обработчиком, подписью и высотой; экономика счёта — своя страница', () => {
     const calls = fieldTypeCalls([], handlerOf)
-    expect(calls.map(c => c.method)).toEqual(['userfieldtype.add', 'userfieldtype.add'])
+    expect(calls.map(c => c.method)).toEqual(['userfieldtype.add', 'userfieldtype.add', 'userfieldtype.add'])
+    expect(calls[2]!.params).toMatchObject({ USER_TYPE_ID: 'ift_economics', HANDLER: 'https://app.example.by/uf/economics' })
     expect(calls[0]!.params).toEqual({
       USER_TYPE_ID: 'ift_access_code',
       HANDLER: 'https://app.example.by/uf/access-code',
@@ -23,7 +24,8 @@ describe('регистрация типов полей при установке
   it('есть с тем же обработчиком — ничего; с другим (переезд) — update; полный код и регистр — тот же тип', () => {
     const existing = [
       { USER_TYPE_ID: 'rest_12_IFT_ACCESS_CODE', HANDLER: 'https://app.example.by/uf/access-code' },
-      { userTypeId: 'ift_client_hook', handler: 'https://old.example.by/uf/client-hook' }
+      { userTypeId: 'ift_client_hook', handler: 'https://old.example.by/uf/client-hook' },
+      { USER_TYPE_ID: 'ift_economics', HANDLER: 'https://app.example.by/uf/economics' }
     ]
     const calls = fieldTypeCalls(existing, handlerOf)
     expect(calls).toHaveLength(1)

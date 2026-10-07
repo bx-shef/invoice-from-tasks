@@ -1,0 +1,149 @@
+// Экономика задач и счёта (решение владельца 2026-10-07): сколько вышло бы по формуле (часы ×
+// цена часа) и сколько выставлено клиенту («Стоимость работ» или та же формула). Дельта — в
+// деньгах: «−1200» — мы в минусе, «200» — в плюсе; разница — в процентах к формуле. Строки с
+// убытком или завышением больше порога (настройки) и задачи без времени или ставки — помечаются.
+// Итог по счёту — JSON в поле счёта своего типа «Экономика счёта» (/uf/economics).
+
+import type { DraftRow, FillMode, FillResult, TaskSource } from './fill'
+import { roundMoney } from './money'
+
+/** Пометка задачи: убыток, завышение, нет данных (время — оценка ИИ, нет ставки); `null` — в норме. */
+export type EconomyFlag = 'loss' | 'over' | 'missing' | null
+
+export interface TaskEconomy {
+  taskId: number
+  /** По формуле, без НДС. */
+  formula: number
+  /** Выставлено клиенту, без НДС. */
+  billed: number
+  /** Выставлено − формула. */
+  delta: number
+  /** Дельта к формуле, %; формулы нет (0) — `null`. */
+  diffPercent: number | null
+  /** Часы — оценка ИИ: в задаче нет затраченного времени. */
+  estimated: boolean
+  flag: EconomyFlag
+}
+
+/** Процент до десятых. */
+function percent(delta: number, base: number): number | null {
+  return base > 0 ? Math.round(delta / base * 1000) / 10 : null
+}
+
+/** Пометка по порогу: оценка ИИ и задачи без ставки — «нет данных», затем убыток/завышение. */
+export function flagOf(diffPercent: number | null, estimated: boolean, threshold: number): EconomyFlag {
+  if (estimated || diffPercent === null) return 'missing'
+  if (diffPercent < -threshold) return 'loss'
+  if (diffPercent > threshold) return 'over'
+  return null
+}
+
+/**
+ * Экономика по задачам: строки задачи складываются (тип 2 — несколько строк). Задачи с ошибками
+ * сборки (нет ставки) — «нет данных» с нулями: их видно в списке, а не молча нет.
+ */
+export function taskEconomics(result: Pick<FillResult, 'rows' | 'errors'>, threshold: number): TaskEconomy[] {
+  const byTask = new Map<number, { formula: number, billed: number, estimated: boolean }>()
+  for (const row of result.rows) {
+    const t = byTask.get(row.taskId) ?? { formula: 0, billed: 0, estimated: false }
+    t.formula += row.formulaSum
+    t.billed += row.sum
+    t.estimated ||= !!row.estimated
+    byTask.set(row.taskId, t)
+  }
+  const out: TaskEconomy[] = [...byTask.entries()].map(([taskId, t]) => {
+    const formula = roundMoney(t.formula)
+    const billed = roundMoney(t.billed)
+    const delta = roundMoney(billed - formula)
+    const diffPercent = percent(delta, formula)
+    return { taskId, formula, billed, delta, diffPercent, estimated: t.estimated, flag: flagOf(diffPercent, t.estimated, threshold) }
+  })
+  for (const e of result.errors) {
+    if (e.taskId && !byTask.has(e.taskId) && !out.some(o => o.taskId === e.taskId)) {
+      out.push({ taskId: e.taskId, formula: 0, billed: 0, delta: 0, diffPercent: null, estimated: false, flag: 'missing' })
+    }
+  }
+  return out.sort((a, b) => a.taskId - b.taskId)
+}
+
+/** Значения для UF задачи: разница, % и дельта. Формулы нет — разницу не пишем (пусто). */
+export function taskFieldValues(e: TaskEconomy, fields: { diffPercent: string, delta: string }): Record<string, number | string> {
+  const out: Record<string, number | string> = {}
+  if (fields.diffPercent) out[fields.diffPercent] = e.diffPercent ?? ''
+  if (fields.delta) out[fields.delta] = e.delta
+  return out
+}
+
+/** Сколько задач кладём в JSON поля счёта — значение UF не резиновое. */
+export const MAX_ECONOMY_TASKS = 100
+
+/** Итог по счёту — значение поля «Экономика счёта» (JSON, версия `v`). */
+export interface InvoiceEconomy {
+  v: 1
+  /** Когда посчитано, ISO. */
+  at: string
+  currency: string
+  source: TaskSource
+  mode: FillMode
+  threshold: number
+  formula: number
+  billed: number
+  delta: number
+  diffPercent: number | null
+  /** Прибыль, убыток или в ноль (дельта по модулю меньше копейки). */
+  verdict: 'profit' | 'loss' | 'even'
+  /** Сколько задач помечено: убыток, завышение, нет данных. */
+  counts: { loss: number, over: number, missing: number }
+  tasks: Array<Pick<TaskEconomy, 'taskId' | 'formula' | 'billed' | 'delta' | 'diffPercent' | 'flag'> & { title: string }>
+}
+
+export function invoiceEconomy(
+  list: TaskEconomy[],
+  meta: { at: Date, currency: string, source: TaskSource, mode: FillMode, threshold: number, titles: ReadonlyMap<number, string> }
+): InvoiceEconomy {
+  const formula = roundMoney(list.reduce((n, e) => n + e.formula, 0))
+  const billed = roundMoney(list.reduce((n, e) => n + e.billed, 0))
+  const delta = roundMoney(billed - formula)
+  const counts = { loss: 0, over: 0, missing: 0 }
+  for (const e of list) if (e.flag) counts[e.flag]++
+  return {
+    v: 1,
+    at: meta.at.toISOString(),
+    currency: meta.currency,
+    source: meta.source,
+    mode: meta.mode,
+    threshold: meta.threshold,
+    formula,
+    billed,
+    delta,
+    diffPercent: percent(delta, formula),
+    verdict: Math.abs(delta) < 0.01 ? 'even' : delta > 0 ? 'profit' : 'loss',
+    counts,
+    tasks: list.slice(0, MAX_ECONOMY_TASKS).map(e => ({
+      taskId: e.taskId,
+      title: (meta.titles.get(e.taskId) ?? '').slice(0, 120),
+      formula: e.formula,
+      billed: e.billed,
+      delta: e.delta,
+      diffPercent: e.diffPercent,
+      flag: e.flag
+    }))
+  }
+}
+
+/** Разбор значения поля: JSON нашей версии; мусор — `null`. */
+export function parseInvoiceEconomy(raw: unknown): InvoiceEconomy | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  try {
+    const o = JSON.parse(raw) as Partial<InvoiceEconomy>
+    if (o?.v !== 1 || typeof o.billed !== 'number' || typeof o.formula !== 'number' || !Array.isArray(o.tasks)) return null
+    return o as InvoiceEconomy
+  } catch {
+    return null
+  }
+}
+
+/** Строки с пометкой — для подсветки предпросмотра (по задаче строки). */
+export function rowFlag(row: Pick<DraftRow, 'taskId'>, list: TaskEconomy[]): EconomyFlag {
+  return list.find(e => e.taskId === row.taskId)?.flag ?? null
+}

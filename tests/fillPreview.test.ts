@@ -46,7 +46,8 @@ const row: DraftRow = {
   price: 170,
   quantity: 5.5,
   sum: 935,
-  taxRate: 20
+  taxRate: 20,
+  formulaSum: 935
 }
 
 const ctx: PreviewContext = { convertedFrom: null, userLabel: id => (id === 1 ? 'Игорь Шевчик' : `#${id}`) }

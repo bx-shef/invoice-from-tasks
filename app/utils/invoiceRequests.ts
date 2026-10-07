@@ -60,8 +60,8 @@ export function productRowListCall(invoiceId: number, start: number): RestCall {
  * портал отвергает с 400 (замер 2026-09-24). `clientTaskField` — UF с ID задачи клиента из
  * настроек (#34): добавляется в `select`, иначе портал его не отдаст.
  */
-export function taskListCall(code: string, clientTaskField = ''): RestCall {
-  const select = clientTaskField ? [...TASK_SELECT, clientTaskField] : TASK_SELECT
+export function taskListCall(code: string, clientTaskField = '', workCostField = ''): RestCall {
+  const select = [...TASK_SELECT, ...[clientTaskField, workCostField].filter(Boolean)]
   return { method: 'tasks.task.list', params: { filter: { UF_CRM_TASK: code }, select } }
 }
 

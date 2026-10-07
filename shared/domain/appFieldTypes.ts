@@ -6,10 +6,12 @@
 /** Короткие коды типов. Портал приводит к нижнему регистру и строит полный `rest_<ID приложения>_<код>`. */
 export const ACCESS_CODE_TYPE = 'ift_access_code'
 export const CLIENT_HOOK_TYPE = 'ift_client_hook'
+/** «Экономика счёта» (решение владельца 2026-10-07): JSON итога в поле счёта, красиво — в /uf/economics. */
+export const ECONOMICS_TYPE = 'ift_economics'
 
 /** Тип поля: код, путь обработчика, подписи. */
 export interface AppFieldTypeSpec {
-  code: typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE
+  code: typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE | typeof ECONOMICS_TYPE
   path: string
   title: string
   description: string
@@ -19,7 +21,8 @@ export interface AppFieldTypeSpec {
 
 export const APP_FIELD_TYPES: readonly AppFieldTypeSpec[] = [
   { code: ACCESS_CODE_TYPE, path: '/uf/access-code', title: 'Код доступа к расшифровке счёта', description: 'Счёт из задач: код для публичной страницы счёта', height: 60 },
-  { code: CLIENT_HOOK_TYPE, path: '/uf/client-hook', title: 'Вебхук Битрикс24 клиента', description: 'Счёт из задач: вебхук для чтения задач клиента (хранится зашифрованным)', height: 60 }
+  { code: CLIENT_HOOK_TYPE, path: '/uf/client-hook', title: 'Вебхук Битрикс24 клиента', description: 'Счёт из задач: вебхук для чтения задач клиента (хранится зашифрованным)', height: 60 },
+  { code: ECONOMICS_TYPE, path: '/uf/economics', title: 'Экономика счёта', description: 'Счёт из задач: прибыль или убыток счёта по задачам — формула против выставленного', height: 320 }
 ]
 
 /** Полный код типа для `crm.*.userfield.add`: `rest_<ID приложения>_<код>` (статья «Как встроить виджет… в виде пользовательского поля»). */
@@ -157,9 +160,10 @@ export function parseWebhookUrl(raw: unknown): { url: string, host: string, user
 }
 
 /** CRM-сущность поля из PLACEMENT_OPTIONS (`ENTITY_ID`): компания — 4, контакт — 3; иначе `null`. */
-export function crmEntityTypeOf(entityId: unknown): 3 | 4 | null {
+export function crmEntityTypeOf(entityId: unknown): 3 | 4 | 31 | null {
   const v = String(entityId ?? '').toUpperCase()
   if (v === 'CRM_COMPANY') return 4
   if (v === 'CRM_CONTACT') return 3
+  if (v === 'CRM_SMART_INVOICE') return 31
   return null
 }

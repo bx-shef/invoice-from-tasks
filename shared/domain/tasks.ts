@@ -39,6 +39,11 @@ export interface TaskInfo {
    * Незакрытая задача — предупреждение, а не стоп ({@link openTaskStatus}).
    */
   status: number | null
+  /**
+   * «Стоимость работ» из UF задачи (`taskFields.workCost`): итог строки с налогом, который платит
+   * клиент. Не выбрано, пусто или не число — `null` (строка — по формуле).
+   */
+  workCost: number | null
 }
 
 /** Статус «завершена» — единственный, при котором задача закрыта. */
@@ -136,7 +141,16 @@ export function listRows(result: unknown, ...keys: string[]): Row[] {
  *
  * @param clientTaskField код UF с ID задачи клиента (`clientFields.task`); `''` — не читаем
  */
-export function parseTask(row: Row, clientTaskField = ''): TaskInfo | null {
+/** Деньги из UF: число ≥ 0 (строка «1 200,50» тоже); пусто или мусор — `null`. */
+export function moneyOf(raw: unknown): number | null {
+  const v = Array.isArray(raw) ? raw[0] : raw
+  if (v === null || v === undefined || v === '') return null
+  // Поле «Деньги» отдаёт «1200.50|BYN» — валюту отбрасываем: она — валюта счёта.
+  const n = Number(String(v).split('|')[0]!.replace(/\s/g, '').replace(',', '.'))
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null
+}
+
+export function parseTask(row: Row, clientTaskField = '', workCostField = ''): TaskInfo | null {
   const id = toInt(pick(row, 'id', 'ID'))
   if (id === null) return null
   return {
@@ -148,7 +162,8 @@ export function parseTask(row: Row, clientTaskField = ''): TaskInfo | null {
     crmBindings: toStringList(pick(row, 'ufCrmTask', 'UF_CRM_TASK')),
     timeSpentInLogs: Math.max(0, Number(pick(row, 'timeSpentInLogs', 'TIME_SPENT_IN_LOGS')) || 0),
     tags: parseTaskTags(row),
-    status: toStatus(pick(row, 'status', 'STATUS'))
+    status: toStatus(pick(row, 'status', 'STATUS')),
+    workCost: workCostField ? moneyOf(pick(row, camelFieldKey(workCostField), workCostField)) : null
   }
 }
 
@@ -215,10 +230,10 @@ export function hasCrmBinding(task: TaskInfo, codes: string[]): boolean {
 }
 
 /** Задачи из ответа списка, оставляя только действительно привязанные и без дублей. */
-export function tasksBoundTo(rows: Row[], codes: string[], clientTaskField = ''): TaskInfo[] {
+export function tasksBoundTo(rows: Row[], codes: string[], clientTaskField = '', workCostField = ''): TaskInfo[] {
   const byId = new Map<number, TaskInfo>()
   for (const row of rows) {
-    const task = parseTask(row, clientTaskField)
+    const task = parseTask(row, clientTaskField, workCostField)
     if (task && hasCrmBinding(task, codes)) byId.set(task.id, task)
   }
   return [...byId.values()].sort((a, b) => a.id - b.id)
