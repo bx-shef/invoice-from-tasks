@@ -6,6 +6,8 @@
 // дата принятия, описание и результат; без вебхука — только ссылка. Не в разрешённой стадии —
 // спокойная фраза из настроек.
 // Без фрейма портала: страница открыта всем, данные отдаёт сервер только по верному коду.
+import ObserverIcon from '@bitrix24/b24icons-vue/outline/ObserverIcon'
+import CrossedEyeIcon from '@bitrix24/b24icons-vue/outline/CrossedEyeIcon'
 import { MAX_COMMENT_LENGTH } from '#shared/domain/approval'
 import { pdfFileName, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 
@@ -17,28 +19,8 @@ const invoiceId = computed(() => Number(route.params.id))
 
 const code = ref('')
 
-/** Код запоминается в браузере клиента (localStorage) — на свой счёт; не вышло — просто вводят снова. */
-const codeKey = computed(() => `ift:code:${domain.value}:${invoiceId.value}`)
-function rememberCode(value: string | null) {
-  try {
-    if (value) localStorage.setItem(codeKey.value, value)
-    else localStorage.removeItem(codeKey.value)
-  } catch {
-    // Хранилище закрыто (приватный режим) — без запоминания.
-  }
-}
-onMounted(() => {
-  let saved = ''
-  try {
-    saved = localStorage.getItem(codeKey.value) ?? ''
-  } catch {
-    saved = ''
-  }
-  if (saved.length === 10) {
-    code.value = saved
-    void open()
-  }
-})
+/** Код показан открытым текстом (кнопка с глазом) — как пример «With password toggle» в b24ui. */
+const showCode = ref(false)
 const busy = ref(false)
 const error = ref('')
 const invoice = ref<PublicInvoiceView | null>(null)
@@ -52,15 +34,12 @@ async function open() {
       method: 'POST',
       body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value }
     })
-    rememberCode(code.value)
     if (res.state === 'open') {
       invoice.value = res.invoice
       void loadPreviews()
     } else closedText.value = res.text
   } catch (e) {
-    const err = e as { data?: { error?: string }, statusMessage?: string, statusCode?: number }
-    // Неверный код (404) — забыть сохранённый; сбой сети или лимит — оставить.
-    if (err.statusCode === 404) rememberCode(null)
+    const err = e as { data?: { error?: string }, statusMessage?: string }
     error.value = err.data?.error || err.statusMessage || 'Не удалось открыть счёт'
   } finally {
     busy.value = false
@@ -215,14 +194,42 @@ const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
         label="Код доступа"
         description="Код выдаёт ваш менеджер"
       >
+        <!-- Логин для менеджера паролей: домен портала — браузер предложит тот же код на всех счетах. -->
+        <input
+          :value="domain"
+          type="text"
+          name="username"
+          autocomplete="username"
+          readonly
+          tabindex="-1"
+          aria-hidden="true"
+          class="sr-only"
+        >
         <B24Input
+          id="access-code"
           v-model="code"
-          autocomplete="off"
+          name="password"
+          :type="showCode ? 'text' : 'password'"
+          autocomplete="current-password"
           maxlength="10"
           class="w-60 font-mono"
+          :b24ui="{ trailing: 'pe-1' }"
           aria-label="Код доступа"
           data-testid="public-code"
-        />
+        >
+          <template #trailing>
+            <B24Button
+              size="sm"
+              color="air-tertiary-no-accent"
+              :icon="showCode ? CrossedEyeIcon : ObserverIcon"
+              :aria-label="showCode ? 'Скрыть код' : 'Показать код'"
+              :aria-pressed="showCode"
+              aria-controls="access-code"
+              data-testid="public-code-toggle"
+              @click="showCode = !showCode"
+            />
+          </template>
+        </B24Input>
       </B24FormField>
       <B24Button
         type="submit"
@@ -516,3 +523,10 @@ const rowItems = computed(() => (invoice.value?.rows ?? []).map((row, i) => {
     </template>
   </div>
 </template>
+
+<style>
+/* Свой глаз у Edge не нужен — есть кнопка (пример b24ui). */
+::-ms-reveal {
+  display: none;
+}
+</style>

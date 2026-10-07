@@ -62,6 +62,7 @@ const roundingText = computed(() => {
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
 watch([source, mode], () => fill.reset())
 const result = computed(() => fill.result.value)
+const taskTitles = computed(() => Object.fromEntries(fill.tasks.value.map(t => [t.id, t.title])))
 /**
  * Идущие вопросы перед записью (writeConfirm.ts) — на месте кнопок. Строки собрали заново или
  * сбросили — вопросы были о прежних строках: снимаем.
@@ -305,6 +306,19 @@ async function consult(promptId: string) {
           :conversion="fill.conversion.value"
           :origin="origin"
           :user-label="users.label"
+        />
+        <B24Alert
+          v-if="fill.economyNotice.value"
+          color="air-primary-warning"
+          :description="fill.economyNotice.value"
+          data-testid="economy-notice"
+        />
+        <InvoiceEconomicsTable
+          v-if="result"
+          :items="fill.economics.value"
+          :threshold="app.settings.value.economics.threshold"
+          :origin="origin"
+          :titles="taskTitles"
         />
 
         <InvoiceWriteConfirm

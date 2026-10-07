@@ -3,7 +3,7 @@
 // в настройках; поля приложения создаются ТОЛЬКО кнопкой в настройках (решение владельца, #34) —
 // при установке и удалении приложение UF не трогает.
 
-import { ACCESS_CODE_TYPE, CLIENT_HOOK_TYPE } from './appFieldTypes'
+import { ACCESS_CODE_TYPE, CLIENT_HOOK_TYPE, ECONOMICS_TYPE } from './appFieldTypes'
 
 /** Код UF: `UF_` и заглавные латиница, цифры, `_`; предел — 50 символов (документация crm.*.userfield.add). */
 const FIELD_NAME_RE = /^UF_[A-Z0-9_]{1,47}$/
@@ -32,7 +32,7 @@ export function camelFieldKey(fieldName: string): string {
  * портале владельца хранится в числовом поле (`UF_SOURCE_TASK_ID`, замер 2026-10-06: значение
  * в списке задач — строка «120536»); целое с нулевой дробью («456.0000») clientTaskIdOf понимает.
  */
-export const TEXT_FIELD_TYPES = ['string', 'integer', 'double', 'url'] as const
+export const TEXT_FIELD_TYPES = ['string', 'integer', 'double', 'url', 'money'] as const
 
 /** Поле для выпадающего списка настроек. */
 export interface UserFieldOption {
@@ -77,7 +77,7 @@ export function parseUserFields(raw: unknown, types: readonly string[] = TEXT_FI
 export const APP_FIELD_LABEL_PREFIX = '[sh::invoice-from-task]'
 
 /** Системные типы полей приложения (остальные — свои типы, appFieldTypes.ts). */
-export const SYSTEM_FIELD_TYPES = ['string', 'url', 'boolean', 'datetime'] as const
+export const SYSTEM_FIELD_TYPES = ['string', 'url', 'boolean', 'datetime', 'double'] as const
 export type SystemFieldType = typeof SYSTEM_FIELD_TYPES[number]
 
 /** Поля счёта: объект UF нового счёта в userfieldconfig — `CRM_SMART_INVOICE`, коды — `UF_CRM_SMART_INVOICE_…`. */
@@ -86,6 +86,12 @@ export const INVOICE_LINK_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_LINK'
 export const INVOICE_QR_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_QR'
 export const INVOICE_APPROVED_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_OK'
 export const INVOICE_APPROVED_AT_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_OK_AT'
+export const INVOICE_ECONOMICS_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_ECON'
+
+/** Поля экономики задачи (решение владельца 2026-10-07). */
+export const TASK_WORK_COST_FIELD = 'UF_SH_IFT_WORK_COST'
+export const TASK_DIFF_PERCENT_FIELD = 'UF_SH_IFT_DIFF_PCT'
+export const TASK_DELTA_FIELD = 'UF_SH_IFT_DELTA'
 
 /** Поле приложения: где создаётся, код, подпись и тип. */
 export interface AppFieldSpec {
@@ -97,7 +103,7 @@ export interface AppFieldSpec {
    * Тип: `string` — системный; иначе короткий код своего типа приложения (appFieldTypes.ts) —
    * полный `rest_<ID приложения>_<код>` строится при создании (`fullTypeId`).
    */
-  type: SystemFieldType | typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE
+  type: SystemFieldType | typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE | typeof ECONOMICS_TYPE
 }
 
 /** Коды полей своих типов у компании и контакта — одинаковые: публичная страница ищет по ним. */
@@ -108,6 +114,9 @@ export const CLIENT_HOOK_FIELD = 'UF_CRM_SH_IFT_CLIENT_HOOK'
 export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'task', name: 'UF_SH_IFT_CLIENT_TASK', label: `${APP_FIELD_LABEL_PREFIX} ID Клиентской задачи`, type: 'string' },
   { entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: `${APP_FIELD_LABEL_PREFIX} Домен Битрикс24 клиента`, type: 'string' },
+  { entity: 'task', name: TASK_WORK_COST_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Стоимость работ`, type: 'double' },
+  { entity: 'task', name: TASK_DIFF_PERCENT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Разница с формулой, %`, type: 'double' },
+  { entity: 'task', name: TASK_DELTA_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дельта с формулой`, type: 'double' },
   ...(['company', 'contact'] as const).flatMap((entity): AppFieldSpec[] => [
     { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
     { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
@@ -115,7 +124,8 @@ export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'invoice', name: INVOICE_LINK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Ссылка на расшифровку`, type: 'url' },
   { entity: 'invoice', name: INVOICE_QR_FIELD, label: `${APP_FIELD_LABEL_PREFIX} QR-код расшифровки`, type: 'url' },
   { entity: 'invoice', name: INVOICE_APPROVED_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Согласовано клиентом`, type: 'boolean' },
-  { entity: 'invoice', name: INVOICE_APPROVED_AT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дата согласования`, type: 'datetime' }
+  { entity: 'invoice', name: INVOICE_APPROVED_AT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дата согласования`, type: 'datetime' },
+  { entity: 'invoice', name: INVOICE_ECONOMICS_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Экономика счёта`, type: ECONOMICS_TYPE }
 ]
 
 /**

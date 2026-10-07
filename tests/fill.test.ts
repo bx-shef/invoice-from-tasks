@@ -17,7 +17,8 @@ const task: TaskInfo = {
   crmBindings: ['D_5'],
   timeSpentInLogs: 5400,
   tags: [],
-  status: 5
+  status: 5,
+  workCost: null
 }
 
 const entries: TimeEntry[] = [
@@ -117,9 +118,35 @@ describe('тип 1 — задача как строка', () => {
     expect(errors[0]?.message).toContain('Иван Петров')
   })
 
-  it('задача без времени — ошибка «нет затраченного времени»', () => {
-    const { errors } = buildRows(input({ entries: [], tasks: [{ ...task, timeSpentInLogs: 0 }] }))
-    expect(errors).toEqual([{ taskId: 10, message: 'в задаче нет затраченного времени' }])
+  it('задача без времени — не стоп: часы оценил ИИ, ставка на сегодня, предупреждение', () => {
+    const r = buildRows(input({ entries: [], tasks: [{ ...task, timeSpentInLogs: 0 }], estimates: new Map([[10, 2]]), today: '2026-06-10' }))
+    expect(r.errors).toEqual([])
+    expect(r.rows[0]).toMatchObject({ key: 't10', hours: 2, baseRate: 200, rateDate: '2026-06-10', sum: 400, formulaSum: 400, estimated: true })
+    expect(r.warnings[0]?.message).toMatch(/часы оценил ИИ: 2 ч/)
+  })
+
+  it('задача без времени и без оценки — строка с нулём, запись не запрещена', () => {
+    const r = buildRows(input({ entries: [], tasks: [{ ...task, timeSpentInLogs: 0 }], today: '2026-06-10' }))
+    expect(r.errors).toEqual([])
+    expect(r.rows[0]).toMatchObject({ hours: 0, sum: 0, estimated: true })
+    expect(r.warnings[0]?.message).toMatch(/строка с нулём/)
+  })
+
+  it('«Стоимость работ» — итог строки с налогом × 1; формула остаётся для сравнения', () => {
+    const r = buildRows(input({ tasks: [{ ...task, workCost: 360 }], vatRate: 20 }))
+    expect(r.rows[0]).toMatchObject({ quantity: 1, price: 300, sum: 300, fixedGross: 360, formulaSum: 300 })
+    expect(toProductRows(r.rows, settings())[0]).toMatchObject({ price: 360, quantity: 1, taxRate: 20 })
+  })
+
+  it('«Стоимость работ» без времени — в счёт она, формула по оценке ИИ', () => {
+    const r = buildRows(input({ entries: [], tasks: [{ ...task, timeSpentInLogs: 0, workCost: 1000 }], estimates: new Map([[10, 3]]), today: '2026-06-10' }))
+    expect(r.rows[0]).toMatchObject({ fixedGross: 1000, sum: 1000, formulaSum: 600, estimated: true })
+  })
+
+  it('тип 2: задача без записей — одна строка по оценке; «Стоимость работ» не применяется', () => {
+    const r = buildRows(input({ mode: 'time', entries: [], tasks: [{ ...task, timeSpentInLogs: 0, workCost: 1000 }], estimates: new Map([[10, 1]]), today: '2026-06-10' }))
+    expect(r.rows[0]).toMatchObject({ sum: 200, estimated: true })
+    expect(r.rows[0]?.fixedGross).toBeUndefined()
   })
 
   it('время в задаче есть, а записей не видно — говорим про доступ, а не «нет времени»', () => {

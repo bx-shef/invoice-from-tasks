@@ -4,7 +4,7 @@ import { parseTask, tasksBoundTo } from '#shared/domain/tasks'
 import { defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { taskListCall, TASK_SELECT } from '~/utils/invoiceRequests'
 import { needsAppId, userFieldAddCall, userFieldListCall } from '~/utils/userFieldRequests'
-import { fieldItems, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
+import { fieldItems, withAppEconomyFields, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
 
 describe('коды UF', () => {
   it('принимает только UF_ латиницей до 50 символов, приводит к верхнему регистру', () => {
@@ -100,8 +100,16 @@ describe('поля счёта приложения', () => {
       method: 'userfieldconfig.add',
       params: { moduleId: 'crm', field: { entityId: 'CRM_SMART_INVOICE', fieldName: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', userTypeId: 'url', xmlId: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', multiple: 'N', mandatory: 'N', editFormLabel: { ru: qr.label, en: qr.label } } }
     })
-    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['url', false], ['boolean', false], ['datetime', false]])
+    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['url', false], ['boolean', false], ['datetime', false], ['ift_economics', true]])
     for (const f of APP_FIELDS.filter(f => f.entity === 'invoice')) expect(f.name.length).toBeLessThanOrEqual(50)
+  })
+
+  it('экономика: свои поля задачи и счёта подставляются, выбранное администратором не трогаем', () => {
+    const d = defaultSettings()
+    const next = withAppEconomyFields({ taskFields: { ...d.taskFields, workCost: 'UF_COST_OWN' }, economics: d.economics })
+    expect(next.taskFields).toEqual({ workCost: 'UF_COST_OWN', diffPercent: 'UF_SH_IFT_DIFF_PCT', delta: 'UF_SH_IFT_DELTA' })
+    expect(next.economics.invoiceField).toBe('UF_CRM_SMART_INVOICE_SH_IFT_ECON')
+    expect(userFieldAddCall(APP_FIELDS.find(f => f.name === 'UF_SH_IFT_WORK_COST')!).params).toMatchObject({ PARAMS: { USER_TYPE_ID: 'double' } })
   })
 
   it('после создания — выбраны в настройках публичной страницы, если там пусто', () => {
@@ -121,7 +129,8 @@ describe('поля приложения', () => {
     expect(missingAppFields({ task: [], company: [], contact: [], invoice: [] })).toEqual(APP_FIELDS)
     const crm = ['UF_CRM_SH_IFT_ACCESS_CODE', 'UF_CRM_SH_IFT_CLIENT_HOOK']
     const invoice = APP_FIELDS.filter(f => f.entity === 'invoice').map(f => f.name)
-    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK'], company: crm, contact: crm, invoice }))
+    const economy = ['UF_SH_IFT_WORK_COST', 'UF_SH_IFT_DIFF_PCT', 'UF_SH_IFT_DELTA']
+    expect(missingAppFields({ task: ['UF_SH_IFT_CLIENT_TASK', ...economy], company: crm, contact: crm, invoice }))
       .toEqual([{ entity: 'task', name: 'UF_SH_IFT_CLIENT_DOMAIN', label: '[sh::invoice-from-task] Домен Битрикс24 клиента', type: 'string' }])
   })
 

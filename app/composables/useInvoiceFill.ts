@@ -37,7 +37,10 @@ import {
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
 import { writeBlocker, type InvoiceCheck, type WriteBlock } from '~/utils/writeConfirm'
-import { invoiceClients } from '#shared/domain/rates'
+import { findRate, invoiceClients } from '#shared/domain/rates'
+import { MAX_ESTIMATE_ITEMS, type EstimateItem } from '#shared/domain/estimate'
+import { invoiceEconomy, taskEconomics, taskFieldValues, type TaskEconomy } from '#shared/domain/economics'
+import { camelFieldKey } from '#shared/domain/userFields'
 import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
@@ -69,6 +72,10 @@ export function useInvoiceFill() {
   const error = ref('')
   /** Итог записи: что сказать сотруднику после «Заменить» / «Добавить» (writeOutcome.ts). */
   const notice = ref('')
+  /** Экономика задач последней сборки (economics.ts): формула, выставлено, дельта, пометки. */
+  const economics = ref<TaskEconomy[]>([])
+  /** Что не удалось с экономикой (оценка ИИ, запись полей задач и счёта) — не мешает записи строк. */
+  const economyNotice = ref('')
   /** Какая запись идёт сейчас — чтобы индикатор крутился на нажатой кнопке, а не на соседней. */
   const writing = ref<WriteMode | null>(null)
 
@@ -166,6 +173,8 @@ export function useInvoiceFill() {
     notice.value = ''
     conversion.value = null
     vat.value = null
+    economics.value = []
+    economyNotice.value = ''
     step.value = 'idle'
   }
 
@@ -177,10 +186,10 @@ export function useInvoiceFill() {
     const rows: Record<string, unknown>[] = []
     for (const code of codes) {
       // Теги приходят в этом же списке (TASK_SELECT → TAGS), отдельных запросов нет.
-      const { method, params } = taskListCall(code, settings.value.clientFields.task)
+      const { method, params } = taskListCall(code, settings.value.clientFields.task, settings.value.taskFields.workCost)
       rows.push(...await b24.callList<Record<string, unknown>>(method, params, { ...TASK_LIST_OPTIONS }))
     }
-    return tasksBoundTo(rows, codes, settings.value.clientFields.task)
+    return tasksBoundTo(rows, codes, settings.value.clientFields.task, settings.value.taskFields.workCost)
   }
 
   /**
@@ -283,16 +292,23 @@ export function useInvoiceFill() {
       await users.load([...involved])
       const userNames = new Map(Object.entries(users.names.value).map(([id, name]) => [Number(id), name]))
 
+      const today = localDate(new Date())
+      const clients = invoiceClients(inv)
+      economyNotice.value = ''
+      const estimates = await estimateHours(tasks.value, entries, today, clients)
+
       const built = buildRows({
         mode,
         tasks: tasks.value,
         entries,
         rates: rates.value,
-        clients: invoiceClients(inv),
+        clients,
         settings: settings.value,
         conversion: conversion.value,
         vatRate: vatChoice.rate,
-        userNames
+        userNames,
+        estimates,
+        today
       })
 
       let names: Record<string, string> | null = null
@@ -306,11 +322,71 @@ export function useInvoiceFill() {
       }
       // Названия от BitrixGPT, затем ID задачи (finishRows): предпросмотр — то, что уйдёт в счёт.
       result.value = finishRows(built, names, settings.value.taskIdInName)
+      economics.value = taskEconomics(result.value, settings.value.economics.threshold)
       step.value = 'preview'
+      // Поля задач и счёта — по нажатию «Собрать строки» (решение владельца); сбой — не стоп.
+      await saveEconomics(inv, source, mode)
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
       step.value = 'idle'
     }
+  }
+
+  /**
+   * Оценка часов ИИ для задач без затраченного времени (планирование): пакетами по
+   * MAX_ESTIMATE_ITEMS. Сбой — без оценок (строки с нулём) и строка в economyNotice.
+   */
+  async function estimateHours(list: TaskInfo[], entries: TimeEntry[], today: string, clients: readonly string[]): Promise<Map<number, number>> {
+    const withTime = new Set(entries.filter(e => e.seconds > 0).map(e => e.taskId))
+    const items: EstimateItem[] = list
+      .filter(t => t.timeSpentInLogs === 0 && !withTime.has(t.id) && t.title)
+      .map(t => ({
+        key: `t${t.id}`,
+        title: t.title,
+        description: t.description.slice(0, 1500),
+        hourPrice: t.responsibleId ? findRate(rates.value, t.responsibleId, today, clients)?.rate ?? 0 : 0
+      }))
+    const out = new Map<number, number>()
+    if (!items.length) return out
+    try {
+      for (const part of chunk(items, MAX_ESTIMATE_ITEMS)) {
+        const res = await post<{ hours: Record<string, number> }>('/api/ai/estimate', { items: part })
+        for (const [key, hours] of Object.entries(res.hours)) out.set(Number(key.slice(1)), hours)
+      }
+    } catch (e) {
+      economyNotice.value = `ИИ не оценил часы задач без времени (${e instanceof Error ? e.message : String(e)}) — их строки с нулём`
+    }
+    return out
+  }
+
+  /**
+   * Разница и дельта — в поля задач (tasks.task.update пакетом, правами сотрудника), итог — в поле
+   * счёта «Экономика счёта» (JSON). Поля не выбраны — не пишем. Сбой — в economyNotice.
+   */
+  async function saveEconomics(inv: InvoiceInfo, source: TaskSource, mode: FillMode): Promise<void> {
+    const problems: string[] = []
+    const { diffPercent, delta } = settings.value.taskFields
+    if (diffPercent || delta) {
+      const calls: BatchCall[] = economics.value
+        .filter(e => e.flag !== 'missing' || e.formula > 0 || e.billed > 0)
+        .map(e => ['tasks.task.update', { taskId: e.taskId, fields: taskFieldValues(e, { diffPercent, delta }) }])
+      try {
+        if (calls.length) await b24.batch(calls)
+      } catch (e) {
+        problems.push(`поля задач: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    const field = settings.value.economics.invoiceField
+    if (field) {
+      const titles = new Map(tasks.value.map(t => [t.id, t.title]))
+      const value = invoiceEconomy(economics.value, { at: new Date(), currency: inv.currencyId, source, mode, threshold: settings.value.economics.threshold, titles })
+      try {
+        await b24.call('crm.item.update', { entityTypeId: INVOICE_ENTITY_TYPE_ID, id: inv.id, fields: { [camelFieldKey(field)]: JSON.stringify(value) } })
+      } catch (e) {
+        problems.push(`поле счёта: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (problems.length) economyNotice.value = [economyNotice.value, `Экономика не сохранена — ${problems.join('; ')}`].filter(Boolean).join('. ')
   }
 
   async function namingItems(mode: FillMode, built: FillResult): Promise<NamingItem[]> {
@@ -428,5 +504,10 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, prepareWrite, write, consult }
+  return { invoice, existing, tasks, result, economics, economyNotice, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, prepareWrite, write, consult }
+}
+
+/** Сегодня в поясе браузера сотрудника, `YYYY-MM-DD` — дата ставки для задачи без времени. */
+export function localDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }

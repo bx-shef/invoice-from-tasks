@@ -48,6 +48,13 @@ export interface FillInput {
   vatRate: VatRate
   /** Имена сотрудников для понятных сообщений; нет имени — пишем `#ID`. */
   userNames?: Map<number, string>
+  /**
+   * Оценка часов от ИИ для задач без затраченного времени (планирование, решение владельца
+   * 2026-10-07): ID задачи → часы. Нет оценки — строка с нулём и предупреждением.
+   */
+  estimates?: ReadonlyMap<number, number>
+  /** Сегодня (`YYYY-MM-DD`, пояс портала) — дата ставки для задачи без времени. */
+  today?: string
 }
 
 export interface DraftRow {
@@ -83,6 +90,15 @@ export interface DraftRow {
   sum: number
   /** Ставка НДС строки — одна на счёт; `null` — «Без НДС». */
   taxRate: VatRate
+  /** Сумма по формуле (часы × цена часа), без НДС — с ней сравнивается выставленное (economics.ts). */
+  formulaSum: number
+  /** Часы — оценка ИИ: в задаче нет затраченного времени. */
+  estimated?: boolean
+  /**
+   * «Стоимость работ» задачи — итог строки С НАЛОГОМ, который платит клиент: в счёт уходит ровно
+   * эта цена × 1, цена без налога — обратным счётом (toProductRows, решение владельца).
+   */
+  fixedGross?: number
 }
 
 export interface FillIssue {
@@ -208,11 +224,71 @@ function rateChangeWarning(input: FillInput, userId: number, dates: string[], ap
  * Цена и количество строки по настройке priceMode. Сумма — от цены часа и часов в обоих режимах,
  * поэтому режим не меняет итог счёта (кроме копеек округления цены за всю строку в режиме `sum`).
  */
-function placed(input: FillInput, hourPrice: number, hours: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate'> {
+function placed(input: FillInput, hourPrice: number, hours: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum'> {
   const sum = roundMoney(hourPrice * hours)
   return input.settings.priceMode === 'sum'
-    ? { hourPrice, price: sum, quantity: 1, sum, taxRate: input.vatRate }
-    : { hourPrice, price: hourPrice, quantity: hours, sum, taxRate: input.vatRate }
+    ? { hourPrice, price: sum, quantity: 1, sum, taxRate: input.vatRate, formulaSum: sum }
+    : { hourPrice, price: hourPrice, quantity: hours, sum, taxRate: input.vatRate, formulaSum: sum }
+}
+
+/**
+ * Строка с «Стоимостью работ» (тип «Задача — одна строка»): клиент платит ровно `gross` — цена × 1;
+ * сумма без налога для предпросмотра — обратным счётом. Формула остаётся для сравнения.
+ */
+function fixedPlaced(input: FillInput, hourPrice: number, hours: number, gross: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum' | 'fixedGross'> {
+  const net = netOfGross(gross, input.vatRate)
+  return { hourPrice, price: net, quantity: 1, sum: net, taxRate: input.vatRate, formulaSum: roundMoney(hourPrice * hours), fixedGross: gross }
+}
+
+/** Цена без налога из итога с налогом, до копеек. */
+export function netOfGross(gross: number, rate: VatRate): number {
+  return rate === null || rate === 0 ? gross : roundMoney(gross * 100 / (100 + rate))
+}
+
+/**
+ * Задача без затраченного времени (планирование): не стоп, а предупреждение (решение владельца
+ * 2026-10-07). Часы — оценка ИИ (`estimates`), ставка — ответственного на сегодня; «Стоимость
+ * работ» задаёт итог строки. Нет ни оценки, ни стоимости — строка с нулём.
+ */
+function plannedTaskRow(input: FillInput, task: TaskInfo, result: FillResult): void {
+  if (!task.title) result.errors.push({ taskId: task.id, message: 'у задачи нет названия' })
+  if (task.responsibleId === null) result.errors.push({ taskId: task.id, message: 'у задачи нет ответственного' })
+  if (!task.title || task.responsibleId === null) return
+  const today = input.today ?? new Date().toISOString().slice(0, 10)
+  const rate = findRate(input.rates, task.responsibleId, today, input.clients)
+  if (!rate) {
+    result.errors.push({ taskId: task.id, message: `нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(today)}` })
+    return
+  }
+  const estimate = input.estimates?.get(task.id)
+  const { rounding: step, roundingDirection: direction } = input.settings
+  const seconds = estimate && estimate > 0 ? Math.round(estimate * 3600) : 0
+  const rounded = seconds ? Math.max(roundSeconds(seconds, step, direction), 0) : 0
+  const hours = secondsToHours(rounded)
+  result.warnings.push({
+    taskId: task.id,
+    message: estimate
+      ? `в задаче нет затраченного времени — часы оценил ИИ: ${formatDuration(rounded)}${task.workCost !== null && input.mode === 'task' ? ', в счёт — «Стоимость работ»' : ''}`
+      : task.workCost !== null && input.mode === 'task'
+        ? 'в задаче нет затраченного времени — в счёт идёт «Стоимость работ», сравнить не с чем'
+        : 'в задаче нет затраченного времени и оценки ИИ — строка с нулём, поправьте цену в счёте'
+  })
+  const { price: hourPrice, ...markup } = priceFor(input, task, rate)
+  result.rows.push({
+    key: `t${task.id}`,
+    taskId: task.id,
+    clientTaskId: task.clientTaskId,
+    userId: task.responsibleId,
+    name: clampName(task.title),
+    seconds: 0,
+    roundedSeconds: rounded,
+    hours,
+    baseRate: rate.rate,
+    rateDate: today,
+    ...markup,
+    ...(task.workCost !== null && input.mode === 'task' ? fixedPlaced(input, hourPrice, hours, task.workCost) : placed(input, hourPrice, hours)),
+    estimated: true
+  })
 }
 
 /** Ноль после округления возможен только «к ближайшему» — но текст от направления не зависит. */
@@ -225,14 +301,14 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
   for (const task of input.tasks) {
     const entries = input.entries.filter(e => e.taskId === task.id && e.seconds > 0)
     const total = entries.reduce((sum, e) => sum + e.seconds, 0)
+    if (total === 0 && task.timeSpentInLogs === 0) {
+      plannedTaskRow(input, task, result)
+      continue
+    }
     const problems: string[] = []
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
-    if (total === 0) {
-      problems.push(task.timeSpentInLogs > 0
-        ? 'журнал времени задачи не прочитан (нет доступа к записям времени?)'
-        : 'в задаче нет затраченного времени')
-    }
+    if (total === 0) problems.push('журнал времени задачи не прочитан (нет доступа к записям времени?)')
     const dates = [...new Set(entries.map(e => e.date).filter((d): d is string => !!d))].sort()
     const lastDate = dates.at(-1) ?? null
     if (total > 0 && !lastDate) problems.push('у записей времени нет даты — не на что выбрать ставку')
@@ -266,7 +342,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
       baseRate: rate.rate,
       rateDate: lastDate,
       ...markup,
-      ...placed(input, hourPrice, hours)
+      ...(task.workCost !== null ? fixedPlaced(input, hourPrice, hours, task.workCost) : placed(input, hourPrice, hours))
     })
   }
 }
@@ -275,11 +351,16 @@ function buildTimeRows(input: FillInput, result: FillResult): void {
   const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
     const entries = input.entries.filter(e => e.taskId === task.id)
-    if (entries.length === 0) {
-      result.errors.push({ taskId: task.id, message: task.timeSpentInLogs > 0
-        ? 'журнал времени задачи не прочитан (нет доступа к записям времени?)'
-        : 'в задаче нет записей затраченного времени' })
+    if (entries.length === 0 && task.timeSpentInLogs === 0) {
+      plannedTaskRow(input, task, result)
       continue
+    }
+    if (entries.length === 0) {
+      result.errors.push({ taskId: task.id, message: 'журнал времени задачи не прочитан (нет доступа к записям времени?)' })
+      continue
+    }
+    if (task.workCost !== null) {
+      result.warnings.push({ taskId: task.id, message: '«Стоимость работ» учитывается в типе «Задача — одна строка»; здесь строки — по записям времени' })
     }
     for (const entry of entries) {
       if (entry.seconds === 0) {
@@ -428,7 +509,8 @@ export interface ProductRowPayload {
 export function toProductRows(rows: DraftRow[], settings: AppSettings, sortStart = 0): ProductRowPayload[] {
   return rows.map((row, i) => ({
     productName: row.name,
-    price: grossPrice(row.price, row.taxRate),
+    // «Стоимость работ» — итог с налогом как есть: клиент платит ровно записанное.
+    price: row.fixedGross ?? grossPrice(row.price, row.taxRate),
     quantity: row.quantity,
     ...(row.taxRate === null ? {} : { taxRate: row.taxRate, taxIncluded: 'N' as const }),
     ...(settings.measureCode ? { measureCode: settings.measureCode } : {}),

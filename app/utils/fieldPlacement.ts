@@ -10,7 +10,7 @@ import type { RestCall } from './invoiceRequests'
 export interface FieldContext {
   mode: 'edit' | 'view'
   /** Компания — 4, контакт — 3; другое — поле открыто не там, где мы его поддерживаем. */
-  entityTypeId: 3 | 4 | null
+  entityTypeId: 3 | 4 | 31 | null
   /** ID элемента; 0 — элемент ещё не создан (форма создания). */
   itemId: number
   fieldName: string
@@ -47,7 +47,7 @@ export type WritePlan = { kind: 'form' } | { kind: 'item', call: RestCall } | { 
 export function writePlan(ctx: FieldContext, value: string): WritePlan {
   if (ctx.mode === 'edit') return { kind: 'form' }
   if (!ctx.entityTypeId || !ctx.itemId || !ctx.fieldName) {
-    return { kind: 'none', reason: 'Поле открыто вне карточки компании или контакта — изменить его здесь нельзя' }
+    return { kind: 'none', reason: 'Поле открыто вне карточки компании, контакта или счёта — изменить его здесь нельзя' }
   }
   return {
     kind: 'item',
