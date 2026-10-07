@@ -137,6 +137,35 @@ export function missingAppFields(existing: Record<AppFieldSpec['entity'], readon
   return APP_FIELDS.filter(f => !existing[f.entity].includes(f.name))
 }
 
+/**
+ * Подписи полей задачи: task.item.userfield.getlist подписей не отдаёт (документация метода), их
+ * отдаёт task.item.userfield.get по ID (`EDIT_FORM_LABEL`, `LIST_COLUMN_LABEL`). ID полей без
+ * подписи — для дочитывания одним пакетом.
+ */
+export function unlabeledFieldIds(raw: unknown, options: readonly UserFieldOption[]): number[] {
+  const want = new Set(options.filter(o => o.label === o.name).map(o => o.name))
+  const ids: number[] = []
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const id = Number(o.ID)
+    if (want.has(normalizeFieldName(o.FIELD_NAME)) && Number.isInteger(id) && id > 0) ids.push(id)
+  }
+  return ids
+}
+
+/** Подставить подписи из ответов task.item.userfield.get; порядок — по подписи, как parseUserFields. */
+export function withFieldLabels(options: readonly UserFieldOption[], details: readonly unknown[]): UserFieldOption[] {
+  const labels = new Map<string, string>()
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue
+    const o = d as Record<string, unknown>
+    const label = labelOf(o.EDIT_FORM_LABEL) || labelOf(o.LIST_COLUMN_LABEL) || labelOf(o.LIST_FILTER_LABEL)
+    if (label) labels.set(normalizeFieldName(o.FIELD_NAME), label)
+  }
+  return options.map(o => ({ ...o, label: labels.get(o.name) ?? o.label })).sort((a, b) => a.label.localeCompare(b.label, 'ru'))
+}
+
 /** Коды всех UF из ответа списка — для проверки «поле уже есть» (любой тип). */
 export function fieldNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
