@@ -10,6 +10,7 @@ import { readClientTasks, readLimitedBytes, type HookFetch } from './clientPorta
 import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
 import type { RestCall } from './b24Client'
 import { readOption } from './options'
+import { postProblem } from './problemChat'
 import { MAX_PDF_BYTES, PUBLIC_CACHE_MS, PUBLIC_COMMENTS_PER_INVOICE, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL, type CommentDeps, type DocumentDeps } from './publicInvoice'
 import { SlidingWindow } from './rateLimit'
 
@@ -17,12 +18,15 @@ const attempts = new SlidingWindow()
 const comments = new SlidingWindow()
 /** Сообщения в чат проблем: одно на ключ в час — порог неверных кодов не засыпет чат. */
 const noticeSent = new Map<string, number>()
+/** ID бота чата проблем по порталам (problemChat.ts); `null` — портал бота не даёт. */
+const botIds = new Map<string, number | null>()
 const NOTICE_WINDOW_MS = 60 * 60_000
 const MAX_NOTICE_KEYS = 1000
 
 /**
- * Сообщение в чат проблем портала: чат — из настроек (`problemChat.dialogId`), пишет токен
- * установщика (`im.message.add`, право `im`). Чат не выбран — молча ничего.
+ * Сообщение в чат проблем портала: чат — из настроек (`problemChat.dialogId`), пишет бот приложения
+ * (право `imbot`), без него — установщик (`im.message.add`, право `im`); problemChat.ts. Чат не
+ * выбран — молча ничего.
  */
 async function notifyProblemChat(call: RestCall, key: string, text: string): Promise<void> {
   const last = noticeSent.get(key)
@@ -31,7 +35,8 @@ async function notifyProblemChat(call: RestCall, key: string, text: string): Pro
   noticeSent.set(key, Date.now())
   const dialogId = parseSettings(await readOption(call, SETTINGS_KEY)).problemChat.dialogId
   if (!dialogId) return
-  await call('im.message.add', { DIALOG_ID: dialogId, MESSAGE: text, URL_PREVIEW: 'N' })
+  // Портал — из ключа (`pub-…:<домен>:<счёт>`): кеш бота свой у каждого портала.
+  await postProblem(key.split(':')[1] ?? '', call, dialogId, text, botIds)
 }
 
 /** Зависимости записи комментария: проверка доступа как у страницы плюс лимит комментариев счёта. */

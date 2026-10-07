@@ -94,3 +94,12 @@ describe('история чата', () => {
     expect(parseKbMessages('x')).toBeNull()
   })
 })
+
+describe('справка попадает в образ', () => {
+  it('.dockerignore исключает docs/, но пропускает docs/guide', () => {
+    const ignore = readFileSync(join(__dirname, '..', '.dockerignore'), 'utf8').split('\n').map(l => l.trim())
+    expect(ignore).not.toContain('docs')
+    expect(ignore).toContain('docs/*')
+    expect(ignore).toContain('!docs/guide')
+  })
+})

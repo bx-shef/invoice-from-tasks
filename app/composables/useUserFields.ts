@@ -2,7 +2,7 @@
 // создание полей приложения кнопкой (#34). Параметры — app/utils/userFieldRequests.ts, разбор —
 // shared/domain/userFields.ts. Создавать UF может только администратор — вкладка только для него.
 
-import { fieldNames, missingAppFields, parseUserFields, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
+import { fieldNames, missingAppFields, parseUserFields, unlabeledFieldIds, withFieldLabels, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
 import { fieldTypeCalls, registeredTypeIds } from '#shared/domain/appFieldTypes'
 import { absoluteHandler } from '~/utils/install'
 import { collectOffsetPages } from '~/utils/paging'
@@ -56,7 +56,16 @@ export function useUserFields() {
       MAX_USER_FIELDS,
       `пользовательских полей больше ${MAX_USER_FIELDS} — список не показываем`
     )
-    return { options: parseUserFields(raw), names: fieldNames(raw) }
+    const options = parseUserFields(raw)
+    // У задач список приходит без подписей — дочитываем их пакетом; сбой — остаются коды.
+    if (entity === 'task') {
+      const ids = unlabeledFieldIds(raw, options)
+      if (ids.length) {
+        const details = await b24.batch<unknown>(ids.map(ID => ['task.item.userfield.get', { ID }])).catch(() => [])
+        return { options: withFieldLabels(options, details), names: fieldNames(raw) }
+      }
+    }
+    return { options, names: fieldNames(raw) }
   }
 
   /** Все три списка; сбой одного не прячет другие — его ошибка в `errors`. */

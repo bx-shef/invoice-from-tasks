@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { APP_FIELDS, camelFieldKey, fieldNames, clientTaskIdOf, isFieldName, missingAppFields, normalizeFieldName, parseUserFields } from '#shared/domain/userFields'
+import { APP_FIELDS, camelFieldKey, fieldNames, clientTaskIdOf, isFieldName, missingAppFields, normalizeFieldName, parseUserFields, unlabeledFieldIds, withFieldLabels } from '#shared/domain/userFields'
 import { parseTask, tasksBoundTo } from '#shared/domain/tasks'
 import { defaultSettings, parseSettings, serializeSettings } from '#shared/domain/settings'
 import { taskListCall, TASK_SELECT } from '~/utils/invoiceRequests'
@@ -165,5 +165,19 @@ describe('пункты выпадающего списка', () => {
   it('сохранённое, которого нет в портале, — с пометкой; список не прочитан — без пометки', () => {
     expect(fieldItems(fields, 'UF_GONE').at(-1)).toEqual({ label: 'UF_GONE — нет в портале', value: 'UF_GONE' })
     expect(fieldItems(null, 'UF_GONE')).toEqual([{ label: 'Не выбрано', value: '' }, { label: 'UF_GONE', value: 'UF_GONE' }])
+  })
+})
+
+describe('подписи полей задачи', () => {
+  it('без подписи в списке — ID на дочитку; подпись из task.item.userfield.get, по-русски', () => {
+    const raw = [
+      { ID: '11', FIELD_NAME: 'UF_AUTO_477375119602', USER_TYPE_ID: 'string' },
+      { ID: '12', FIELD_NAME: 'UF_SOURCE_DOMAIN', USER_TYPE_ID: 'string', EDIT_FORM_LABEL: { ru: 'Домен клиента' } }
+    ]
+    const options = parseUserFields(raw)
+    expect(unlabeledFieldIds(raw, options)).toEqual([11])
+    const named = withFieldLabels(options, [{ FIELD_NAME: 'UF_AUTO_477375119602', EDIT_FORM_LABEL: { en: 'Client task', ru: 'ID задачи клиента' } }])
+    expect(named.map(o => o.label)).toEqual(['Домен клиента', 'ID задачи клиента'])
+    expect(withFieldLabels(options, [null, {}])).toHaveLength(2)
   })
 })

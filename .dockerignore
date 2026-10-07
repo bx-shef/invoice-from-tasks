@@ -7,4 +7,7 @@ node_modules
 .env.*
 !.env.example
 tests
-docs
+# Внутренняя документация в образ не идёт; публичная справка (docs/guide) — серверный ассет
+# `assets:kb` (nuxt.config.ts → nitro.serverAssets): без неё /api/kb/pages пуст, а ИИ-чат без справки.
+docs/*
+!docs/guide
