@@ -80,6 +80,36 @@ export function makeChatFn(config: LlmConfig, timeoutMs = CHAT_TIMEOUT_MS): Chat
   }
 }
 
+/** Потоковый транспорт: куски текста ответа по мере генерации. */
+export type ChatStreamFn = (req: ChatRequest) => AsyncIterable<string>
+
+/** Живой потоковый транспорт (ИИ-чат справки) — тот же клиент, `stream: true`. */
+export function makeChatStreamFn(config: LlmConfig, timeoutMs = CHAT_TIMEOUT_MS): ChatStreamFn {
+  if (!config.apiKey) {
+    // eslint-disable-next-line require-yield -- отказ до первого куска
+    return async function* () {
+      throw new Error('LLM provider not configured (missing API key)')
+    }
+  }
+  const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, timeout: timeoutMs, maxRetries: 0 })
+  return async function* (req) {
+    try {
+      const stream = await client.chat.completions.create({
+        model: config.model,
+        messages: req.messages,
+        temperature: 0.2,
+        stream: true
+      })
+      for await (const chunk of stream) {
+        const text = chunk.choices?.[0]?.delta?.content
+        if (text) yield text
+      }
+    } catch (e) {
+      throw normaliseError(e)
+    }
+  }
+}
+
 const TRANSIENT_PATTERNS = [
   /\b429\b/, /\b5\d\d\b/, /rate.?limit/i, /overloaded/i, /gateway.?timeout/i,
   /ECONNRESET/i, /ETIMEDOUT/i, /ENOTFOUND/i, /EAI_AGAIN/i, /socket hang up/i

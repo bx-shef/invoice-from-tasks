@@ -2,7 +2,7 @@
 // Без автоимпортов Nitro (конвенция CLAUDE.md): ошибки — свой класс, в HTTP-ответ их переводит
 // `requestContext.ts → aiHttpError`. Так модуль тестируется в node без Nitro.
 
-import { chatWithRetry, describeLlmFailure, makeChatFn, resolveLlmConfig, type ChatFn, type ChatRequest } from './llm'
+import { backoffMs, chatWithRetry, describeLlmFailure, isTransient, makeChatFn, makeChatStreamFn, resolveLlmConfig, type ChatFn, type ChatRequest, type ChatStreamFn } from './llm'
 import { AI_LIMITS, KB_CHAT_LIMITS, SlidingWindow } from './rateLimit'
 import type { FrameUser } from './frameAuth'
 
@@ -62,5 +62,40 @@ export async function askBitrixGpt(req: ChatRequest, chat?: ChatFn): Promise<str
     const failure = describeLlmFailure(e instanceof Error ? e.message : String(e))
     console.error(`[bitrixgpt] failure kind=${failure.kind}`)
     throw new AiGatewayError(502, failure.message)
+  }
+}
+
+let liveStream: ChatStreamFn | null = null
+
+/**
+ * Поток BitrixGPT по кускам (ИИ-чат справки). Временная ошибка ДО первого куска — повтор, как в
+ * `chatWithRetry`; после первого куска не повторяем — текст уже у сотрудника. Отказ —
+ * {@link AiGatewayError} 502 с понятным текстом.
+ */
+export async function* streamBitrixGpt(
+  req: ChatRequest,
+  deps: { stream?: ChatStreamFn, sleep?: (ms: number) => Promise<void>, maxAttempts?: number } = {}
+): AsyncGenerator<string> {
+  const fn = deps.stream ?? (liveStream ??= makeChatStreamFn(resolveLlmConfig(process.env)))
+  const sleep = deps.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
+  const maxAttempts = deps.maxAttempts ?? 3
+  for (let attempt = 1; ; attempt++) {
+    let started = false
+    try {
+      for await (const text of fn(req)) {
+        started = true
+        yield text
+      }
+      return
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      if (!started && isTransient(message) && attempt < maxAttempts) {
+        await sleep(backoffMs(attempt, Math.random()))
+        continue
+      }
+      const failure = describeLlmFailure(message)
+      console.error(`[bitrixgpt] stream failure kind=${failure.kind}`)
+      throw new AiGatewayError(502, failure.message)
+    }
   }
 }

@@ -33,5 +33,34 @@ export function useApi() {
     }
   }
 
-  return { post }
+  /**
+   * POST с потоковым ответом: куски текста — в `onChunk` по мере прихода. Ошибка до начала
+   * потока (лимит, пустой вопрос) — {@link ApiError} с текстом сервера.
+   */
+  async function postStream(url: string, body: unknown, onChunk: (text: string) => void, signal?: AbortSignal): Promise<void> {
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { ...await authHeaders(), 'Content-Type': 'application/json' },
+        signal
+      })
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') throw e
+      throw new ApiError(0, 'Сервер приложения не ответил')
+    }
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => null) as { statusMessage?: string, message?: string } | null
+      throw new ApiError(res.status, data?.statusMessage || data?.message || 'Сервер приложения не ответил', data)
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) onChunk(value)
+    }
+  }
+
+  return { post, postStream }
 }

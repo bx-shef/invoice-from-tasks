@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // ИИ-чат справки панелью справа (как HdChatOverlay в toolsai): приветствие с примерами, вопрос —
-// серым пузырём справа, ответ — текстом со ссылками на разделы. Ответ приходит целиком (POST
-// /api/kb/chat, BitrixGPT по фрагментам публичной справки), без потока. История — в памяти страницы.
+// серым пузырём справа, ответ — текстом со ссылками на разделы. Ответ печатается по мере генерации, как в skills-site:
+// POST /api/kb/chat отдаёт поток NDJSON — сначала страницы-источники, затем куски текста BitrixGPT
+// (shared/domain/kbStream.ts). История — в памяти страницы.
 import { renderHelp } from '~/utils/help'
-import type { HelpTurn } from '~/composables/useHelpChat'
+import { kbStreamParser, type KbStreamEvent } from '#shared/domain/kbStream'
 
 const props = defineProps<{ page?: string }>()
 const api = useApi()
@@ -25,15 +26,28 @@ async function send(text: string) {
   lastQuestion.value = q
   busy.value = true
   error.value = ''
+  const history = turns.value.map(t => ({ role: t.role, content: t.content }))
+  // ответ — живой объект в списке: куски дописываются в него, Vue перерисовывает по мере прихода
+  turns.value.push({ role: 'assistant', content: '' })
+  const answer = turns.value[turns.value.length - 1]!
+  const parser = kbStreamParser()
+  let failed = ''
+  const apply = (events: KbStreamEvent[]) => {
+    for (const ev of events) {
+      if (ev.type === 'sources') answer.sources = ev.sources
+      else if (ev.type === 'text') answer.content += ev.text
+      else failed = ev.message
+    }
+  }
   try {
-    const res = await api.post<{ answer: string, sources: HelpTurn['sources'] }>('/api/kb/chat', {
-      messages: turns.value.map(t => ({ role: t.role, content: t.content })),
-      page: topic.value?.slug ?? props.page
-    })
-    turns.value.push({ role: 'assistant', content: res.answer || 'Пустой ответ.', sources: res.sources })
+    await api.postStream('/api/kb/chat', { messages: history, page: topic.value?.slug ?? props.page }, chunk => apply(parser.push(chunk)))
+    apply(parser.flush())
+    if (failed && !answer.content) throw new Error(failed)
+    if (failed) answer.content += `\n\n_Ответ оборван: ${failed}_`
+    else if (!answer.content) answer.content = 'Пустой ответ.'
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
-    turns.value.pop()
+    turns.value.splice(-2, 2)
     question.value = q
   } finally {
     busy.value = false
@@ -64,7 +78,7 @@ watch(() => [open.value, ask.value] as const, ([isOpen, q]) => {
   }
 }, { immediate: true })
 
-watch(() => [turns.value.length, busy.value, error.value], () => {
+watch(() => [turns.value.length, turns.value[turns.value.length - 1]?.content.length, busy.value, error.value], () => {
   void nextTick(() => {
     if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
   })
@@ -160,10 +174,10 @@ watch(() => [turns.value.length, busy.value, error.value], () => {
         </div>
 
         <div
-          v-if="busy"
+          v-if="busy && !turns[turns.length - 1]?.content"
           class="hd-chat-wait"
         >
-          Ищу ответ в справке…
+          {{ turns[turns.length - 1]?.sources ? 'Нашёл страницы, пишу ответ…' : 'Ищу ответ в справке…' }}
         </div>
         <div
           v-if="error && !busy"
