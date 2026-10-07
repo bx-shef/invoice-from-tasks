@@ -32,7 +32,7 @@
     "@vueuse/nuxt": "^14.4.0",
     "markdown-it": "^14.3.2",
     "nuxt": "^4.5.2",
-    "openai": "^7.3.0",
+    "openai": "^7.27.0",
     "qrcode": "^1.5.4",
     "tailwindcss": "^4.3.3"
   },
