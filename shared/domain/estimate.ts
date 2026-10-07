@@ -20,13 +20,16 @@ export interface EstimateItem {
   hourPrice: number
 }
 
-export const ESTIMATE_SYSTEM_PROMPT = [
+/** Системный промпт оценки — редактируется в настройках («Промпты»); `null` в настройках — этот. */
+export const DEFAULT_ESTIMATE_PROMPT = [
   'Ты оцениваешь трудоёмкость задач по разработке и настройке Битрикс24 в часах.',
   'Исполнитель — опытный разработчик, который работает с очень хорошим ИИ-агентом для программирования: рутинный код, вёрстку, типовые интеграции и тесты агент пишет быстро, человек ставит задачу, проверяет и доводит.',
   'Оценивай реалистично и коротко: без завышений, без «запаса на риски» и без округления вверх до круглых чисел. Если задача мелкая — так и оценивай (0.25–1 ч). Цена часа дана только для понимания масштаба, сумму под неё не подгоняй.',
-  'Если описание пустое или непонятное — оцени по названию минимально разумно.',
-  'Ответ — только JSON: {"estimates":[{"key":"t123","hours":1.5}]}, по одному элементу на каждую задачу из запроса, hours — число часов с шагом 0.25.'
+  'Если описание пустое или непонятное — оцени по названию минимально разумно.'
 ].join('\n')
+
+/** Формат ответа — приложение добавляет само, в настройках его не правят. */
+export const ESTIMATE_FORMAT = 'Ответ — только JSON: {"estimates":[{"key":"t123","hours":1.5}]}, по одному элементу на каждую задачу из запроса, hours — число часов с шагом 0.25.'
 
 function cut(text: string, max: number): string {
   const flat = String(text ?? '').trim()
@@ -34,7 +37,7 @@ function cut(text: string, max: number): string {
 }
 
 /** Сообщения запроса оценки. */
-export function buildEstimateMessages(items: EstimateItem[]): ChatMessage[] {
+export function buildEstimateMessages(items: EstimateItem[], customPrompt?: string | null): ChatMessage[] {
   const payload = items.slice(0, MAX_ESTIMATE_ITEMS).map(i => ({
     key: i.key,
     title: cut(i.title, MAX_ESTIMATE_TITLE),
@@ -42,7 +45,7 @@ export function buildEstimateMessages(items: EstimateItem[]): ChatMessage[] {
     hourPrice: i.hourPrice
   }))
   return [
-    { role: 'system', content: ESTIMATE_SYSTEM_PROMPT },
+    { role: 'system', content: `${customPrompt?.trim() || DEFAULT_ESTIMATE_PROMPT}\n\n${ESTIMATE_FORMAT}` },
     { role: 'user', content: `Задачи (JSON):\n${JSON.stringify(payload)}` }
   ]
 }

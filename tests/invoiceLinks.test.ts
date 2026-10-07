@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { invoiceLinkUpdates, parseInvoiceLinkFields, publicInvoiceUrl, publicQrUrl, qrInvoiceId } from '../shared/domain/invoiceLinks'
+import { invoiceLinkUpdates, parseEconomicsFields, parseInvoiceLinkFields, publicInvoiceUrl, publicQrUrl, qrInvoiceId } from '../shared/domain/invoiceLinks'
 import { parseSettings } from '../shared/domain/settings'
 
 const SITE = 'https://app.example.by/'
@@ -45,5 +45,16 @@ describe('поля счёта для ссылок', () => {
     const p = parseSettings({ publicPage: { linkField: 'uf_crm_smart_invoice_link', qrField: 'bad field!' } }).publicPage
     expect(p.linkField).toBe('UF_CRM_SMART_INVOICE_LINK')
     expect(p.qrField).toBe('')
+  })
+})
+
+describe('поле «Экономика счёта» для выбора', () => {
+  it('только поля своего типа ift_economics (полный код rest_<ID>_…), не множественные', () => {
+    const raw = { fields: {
+      ufCrmSmartInvoiceShIftEcon: { type: 'rest_12_ift_economics', title: 'Экономика счёта', upperName: 'UF_CRM_SMART_INVOICE_SH_IFT_ECON' },
+      ufCrmSmartInvoiceLink: { type: 'url', title: 'Ссылка', upperName: 'UF_CRM_SMART_INVOICE_LINK' }
+    } }
+    expect(parseEconomicsFields(raw)).toEqual([{ name: 'UF_CRM_SMART_INVOICE_SH_IFT_ECON', label: 'Экономика счёта', type: 'rest_12_ift_economics' }])
+    expect(parseEconomicsFields(null)).toEqual([])
   })
 })

@@ -4,13 +4,20 @@ import { buildEstimateMessages, MAX_ESTIMATE_HOURS, parseEstimateItems, pickEsti
 import { moneyOf } from '#shared/domain/tasks'
 import type { DraftRow } from '#shared/domain/fill'
 
-const row = (taskId: number, formulaSum: number, sum: number, estimated = false) => ({ taskId, formulaSum, sum, estimated }) as unknown as DraftRow
+const row = (taskId: number, formulaSum: number, sum: number, estimated = false, extra: Partial<DraftRow> = {}) => ({ taskId, formulaSum, sum, estimated, taxRate: null, ...extra }) as unknown as DraftRow
 
 describe('экономика задач', () => {
   it('дельта = выставлено − формула, разница — % к формуле; строки задачи складываются', () => {
     const list = taskEconomics({ rows: [row(1, 1000, 800), row(2, 500, 300), row(2, 500, 700)], errors: [] }, 20)
     expect(list[0]).toMatchObject({ taskId: 1, formula: 1000, billed: 800, delta: -200, diffPercent: -20, flag: null })
     expect(list[1]).toMatchObject({ taskId: 2, formula: 1000, billed: 1000, delta: 0, diffPercent: 0, flag: null })
+  })
+
+  it('суммы с НДС: «Стоимость работ» — как записана, формула — плюс налог (случай владельца: 1500 при 20%)', () => {
+    const [e] = taskEconomics({ rows: [row(1979, 1292, 1250, true, { taxRate: 20, fixedGross: 1500 })], errors: [] }, 20)
+    expect(e).toMatchObject({ formula: 1550.4, billed: 1500, delta: -50.4 })
+    const [plain] = taskEconomics({ rows: [row(1, 100, 100, false, { taxRate: 20 })], errors: [] }, 20)
+    expect(plain).toMatchObject({ formula: 120, billed: 120, delta: 0 })
   })
 
   it('пометки по порогу: убыток и завышение СТРОГО больше порога; оценка ИИ и нет формулы — нет данных', () => {

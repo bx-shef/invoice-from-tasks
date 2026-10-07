@@ -3,6 +3,7 @@
 // UF задачи с доменом портала клиента (для публичной страницы счёта). Поля
 // приложения создаются только здесь, кнопкой — при установке и удалении приложение UF не трогает.
 import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
+import { parseEconomicsFields, type InvoiceFieldOption } from '#shared/domain/invoiceLinks'
 import type { AppSettings } from '#shared/domain/settings'
 import { fieldItems, withAppEconomyFields, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
 import type { FieldLists } from '~/composables/useUserFields'
@@ -34,6 +35,20 @@ function itemsFor(entity: keyof FieldLists, saved: string) {
   return fieldItems(list, saved)
 }
 
+const links = useInvoiceLinks()
+/** Поля счёта своего типа «Экономика счёта»; `null` — ещё не прочитаны. */
+const econFields = ref<InvoiceFieldOption[] | null>(null)
+async function loadEconFields() {
+  econFields.value = await links.rawFields().then(parseEconomicsFields, () => [])
+}
+onMounted(loadEconFields)
+const econItems = computed(() => {
+  const saved = settings.value.economics.invoiceField
+  const list = (econFields.value ?? []).map(f => ({ label: f.label === f.name ? f.name : `${f.label} (${f.name})`, value: f.name }))
+  if (saved && !list.some(i => i.value === saved)) list.push({ label: econFields.value ? `${saved} — нет в портале` : saved, value: saved })
+  return [{ label: 'Не записывать', value: '' }, ...list]
+})
+
 async function createFields() {
   if (!lists.value) return
   creating.value = true
@@ -51,7 +66,7 @@ async function createFields() {
     toast.add({ title: 'Не удалось создать поля', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
     creating.value = false
-    await load()
+    await Promise.all([load(), loadEconFields()])
   }
 }
 </script>
@@ -134,7 +149,7 @@ async function createFields() {
     </B24FormField>
     <B24FormField
       label="Дельта — поле задачи"
-      description="Выставлено − формула в деньгах без НДС: −1200 — мы в минусе, 200 — в плюсе"
+      description="Выставлено − формула в деньгах с НДС: −1200 — мы в минусе, 200 — в плюсе"
     >
       <B24SelectMenu
         v-model="settings.taskFields.delta"
@@ -144,6 +159,19 @@ async function createFields() {
         :loading="loading"
         class="w-96 max-w-full"
         data-testid="task-field-delta"
+      />
+    </B24FormField>
+    <B24FormField
+      label="Экономика счёта — поле счёта"
+      description="Сюда «Собрать строки» записывает итог: выставлено, по формуле, дельта. Поле создаёт кнопка ниже"
+    >
+      <B24SelectMenu
+        v-model="settings.economics.invoiceField"
+        :items="econItems"
+        value-key="value"
+        :loading="econFields === null"
+        class="w-96 max-w-full"
+        data-testid="economics-invoice-field"
       />
     </B24FormField>
     <B24FormField

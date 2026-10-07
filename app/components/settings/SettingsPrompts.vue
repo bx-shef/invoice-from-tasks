@@ -2,12 +2,13 @@
 // Промпты BitrixGPT: названия строк (свои или системные) и промпты консультаций.
 // «Восстановить системный» — это сброс в null: тогда действует актуальный системный промпт.
 import { DEFAULT_TASK_TITLE_PROMPT, DEFAULT_TIME_BLOCK_PROMPT } from '#shared/domain/prompts'
+import { DEFAULT_ESTIMATE_PROMPT } from '#shared/domain/estimate'
 import { LIMITS, type AppSettings } from '#shared/domain/settings'
 
 const settings = defineModel<AppSettings>({ required: true })
 
 /** Поле показывает свой промпт, а если его нет — системный (правка создаёт свой). */
-function promptModel(key: 'taskTitle' | 'timeBlock', fallback: string) {
+function promptModel(key: 'taskTitle' | 'timeBlock' | 'estimate', fallback: string) {
   return computed({
     get: () => settings.value.prompts[key] ?? fallback,
     set: (v: string) => { settings.value.prompts[key] = v.trim() && v.trim() !== fallback ? v : null }
@@ -15,6 +16,7 @@ function promptModel(key: 'taskTitle' | 'timeBlock', fallback: string) {
 }
 const taskTitle = promptModel('taskTitle', DEFAULT_TASK_TITLE_PROMPT)
 const timeBlock = promptModel('timeBlock', DEFAULT_TIME_BLOCK_PROMPT)
+const estimate = promptModel('estimate', DEFAULT_ESTIMATE_PROMPT)
 
 function addConsult() {
   if (settings.value.consultPrompts.length >= LIMITS.consultPrompts) return
@@ -75,6 +77,32 @@ function removeConsult(id: string) {
           label="Восстановить системный"
           :disabled="!settings.prompts.timeBlock"
           @click="settings.prompts.timeBlock = null"
+        />
+      </div>
+    </B24FormField>
+
+    <B24FormField
+      label="Оценка часов ИИ для задач без затраченного времени"
+      :description="settings.prompts.estimate ? 'Свой промпт' : 'Действует системный промпт: реалистично, без завышений, как для разработчика с хорошим ИИ-агентом'"
+    >
+      <template #hint>
+        <HelpLink anchor="economics" />
+      </template>
+      <div class="space-y-2">
+        <B24Textarea
+          v-model="estimate"
+          :rows="5"
+          autoresize
+          :maxlength="LIMITS.prompt"
+          class="w-full"
+          data-testid="prompt-estimate"
+        />
+        <B24Button
+          size="sm"
+          color="air-tertiary"
+          label="Восстановить системный"
+          :disabled="!settings.prompts.estimate"
+          @click="settings.prompts.estimate = null"
         />
       </div>
     </B24FormField>

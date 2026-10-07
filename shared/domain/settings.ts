@@ -124,6 +124,8 @@ export interface AppSettings {
   prompts: {
     taskTitle: string | null
     timeBlock: string | null
+    /** Оценка часов ИИ для задач без времени (estimate.ts); `null` — системный. */
+    estimate: string | null
   }
   consultPrompts: ConsultPrompt[]
 }
@@ -170,7 +172,7 @@ export function defaultSettings(): AppSettings {
     economics: { threshold: DEFAULT_ECONOMICS_THRESHOLD, invoiceField: '' },
     publicPage: { stages: [], closedText: DEFAULT_CLOSED_TEXT, templates: [], linkField: '', qrField: '', approvalStage: '', approvedField: '', approvedAtField: '' },
     problemChat: { dialogId: '', title: '' },
-    prompts: { taskTitle: null, timeBlock: null },
+    prompts: { taskTitle: null, timeBlock: null, estimate: null },
     consultPrompts: []
   }
 }
@@ -324,7 +326,8 @@ export function parseSettings(raw: unknown): AppSettings {
       : d.problemChat,
     prompts: {
       taskTitle: nullablePrompt(prompts.taskTitle),
-      timeBlock: nullablePrompt(prompts.timeBlock)
+      timeBlock: nullablePrompt(prompts.timeBlock),
+      estimate: nullablePrompt(prompts.estimate)
     },
     consultPrompts: parseConsultPrompts(o.consultPrompts)
   }

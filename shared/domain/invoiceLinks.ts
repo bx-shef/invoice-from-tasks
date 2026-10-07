@@ -74,3 +74,19 @@ export function invoiceLinkUpdates(
   }
   return out
 }
+
+/** Поля счёта своего типа «Экономика счёта» (`rest_<ID>_ift_economics` в crm.item.fields). */
+export function parseEconomicsFields(result: unknown): InvoiceFieldOption[] {
+  const fields = (result as { fields?: unknown } | null)?.fields
+  if (!fields || typeof fields !== 'object') return []
+  const out: InvoiceFieldOption[] = []
+  for (const value of Object.values(fields as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue
+    const f = value as Record<string, unknown>
+    const name = normalizeFieldName(f.upperName)
+    const type = typeof f.type === 'string' ? f.type.toLowerCase() : ''
+    if (!name.startsWith('UF_') || !type.endsWith('ift_economics') || f.isMultiple === true) continue
+    out.push({ name, label: typeof f.title === 'string' && f.title.trim() ? f.title.trim() : name, type })
+  }
+  return out
+}
