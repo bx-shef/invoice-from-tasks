@@ -4,7 +4,7 @@
 // приложения создаются только здесь, кнопкой — при установке и удалении приложение UF не трогает.
 import { APP_FIELDS, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
-import { fieldItems, withAppFields } from '~/utils/clientFieldSettings'
+import { fieldItems, withAppFields, withAppInvoiceFields } from '~/utils/clientFieldSettings'
 import type { FieldLists } from '~/composables/useUserFields'
 
 const settings = defineModel<AppSettings>({ required: true })
@@ -40,6 +40,7 @@ async function createFields() {
   try {
     const created = await userFields.createMissing(lists.value)
     settings.value.clientFields = withAppFields(settings.value.clientFields)
+    settings.value.publicPage = withAppInvoiceFields(settings.value.publicPage)
     toast.add({
       title: created.length ? `Создано полей: ${created.length}` : 'Поля приложения уже есть',
       description: 'Поля выбраны в настройках — сохраните настройки',
@@ -112,7 +113,7 @@ async function createFields() {
           v-for="f in APP_FIELDS"
           :key="`${f.entity}-${f.name}`"
         >
-          {{ f.entity === 'task' ? 'Задача' : f.entity === 'company' ? 'Компания' : 'Контакт' }}: «{{ f.label }}» ({{ f.name }})
+          {{ { task: 'Задача', company: 'Компания', contact: 'Контакт', invoice: 'Счёт' }[f.entity] }}: «{{ f.label }}» ({{ f.name }})
         </li>
       </ul>
     </div>

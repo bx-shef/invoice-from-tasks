@@ -143,6 +143,9 @@ const templateMenu = computed(() => templateItems(templateList.value, settings.v
       label="Стадия согласования"
       description="В этой стадии клиент видит расшифровку и пишет комментарии: каждый — дело на ответственного за счёт со сроком через час. Ответ клиенту — заметка к делу; закрытое дело клиент видит с отметкой. Среди стадий выше её быть не может"
     >
+      <template #hint>
+        <HelpLink anchor="approval-stage" />
+      </template>
       <B24SelectMenu
         v-model="settings.publicPage.approvalStage"
         :items="approvalItems"
@@ -186,6 +189,9 @@ const templateMenu = computed(() => templateItems(templateList.value, settings.v
       label="Чат проблем"
       description="Сюда приложение напишет о подозрительных входах (5 неверных кодов к счёту за час, блокировка после 100) и о комментариях клиента, которые не удалось записать. Групповой чат; поиск — с 3 символов"
     >
+      <template #hint>
+        <HelpLink anchor="problem-chat" />
+      </template>
       <B24Alert
         v-if="chatError"
         color="air-primary-alert"
@@ -238,8 +244,8 @@ const templateMenu = computed(() => templateItems(templateList.value, settings.v
     <p class="text-sm opacity-80">
       Ссылки для печатных форм: при открытии «Заполнить из задач» приложение записывает в выбранные
       поля счёта адрес расшифровки и адрес картинки с её QR-кодом (<code class="select-all">{{ qrExample }}</code>).
-      Поле картинки вставьте в шаблон документа как изображение. Поля типа «Строка» или «Ссылка»
-      создайте в настройках счетов CRM.
+      Поле картинки вставьте в шаблон документа как изображение. Поля создаёт кнопка «Создать поля приложения»
+      на вкладке «Поля клиента» — и сразу выбирает их здесь.
     </p>
     <B24FormField
       label="Поле счёта для ссылки на расшифровку"
@@ -258,6 +264,9 @@ const templateMenu = computed(() => templateItems(templateList.value, settings.v
       label="Поле счёта для картинки QR-кода"
       description="Не выбрано — адрес картинки не записывается"
     >
+      <template #hint>
+        <HelpLink anchor="qr-in-document" />
+      </template>
       <B24SelectMenu
         v-model="settings.publicPage.qrField"
         :items="qrItems"

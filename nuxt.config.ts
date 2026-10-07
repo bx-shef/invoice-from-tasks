@@ -40,6 +40,9 @@ export default defineNuxtConfig({
     // Accept-Encoding. В эталоне client-bank это делал его nginx; у нас его нет, а общий
     // nginx-proxy сам не сжимает (замер 2026-09-25: скрипт ушёл 95 КБ без Content-Encoding).
     compressPublicAssets: true,
+    // Публичная справка (docs/guide/NN-*.md) — серверный ассет `assets:kb`: её отдаёт /api/kb/pages и
+    // по ней ищет ИИ-чат. Каталог — только публичный: внутренние docs/*.md в образ не попадают.
+    serverAssets: [{ baseName: 'kb', dir: '../docs/guide' }],
     storage: {
       // Токены установки порталов (server/utils/tokenStore.ts). Путь относительно рабочего
       // каталога процесса; в Docker на `/app/.data` смонтирован том — см. docs/DEPLOY.md.

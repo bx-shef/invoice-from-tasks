@@ -25,6 +25,16 @@ export const AI_LIMITS = {
   portalRows: { max: 30_000, windowMs: 60 * 60_000 }
 } as const satisfies Record<string, WindowLimit>
 
+/**
+ * ИИ-чат справки — свой лимит, отдельно от AI_LIMITS (решение владельца 2026-10-07): вопросы в
+ * справку не отнимают обращения у заполнения счетов. 30 вопросов за 10 минут на сотрудника, 300 в
+ * час на портал.
+ */
+export const KB_CHAT_LIMITS = {
+  user: { max: 30, windowMs: 10 * 60_000 },
+  portal: { max: 300, windowMs: 60 * 60_000 }
+} as const satisfies Record<string, WindowLimit>
+
 /** Вес консультации в строках — как полный пакет названий. */
 export const CONSULT_WEIGHT = 25
 

@@ -5,6 +5,7 @@
 // изнутри портала его видно через `app.info`, а без него сервер отклоняет запросы из портала.
 import { settingsProblems } from '#shared/domain/settings'
 import { serverProblems, type ServerProblem } from '~/utils/serverHealth'
+import { helpRouteForPlace, placeFromOptions } from '~/utils/help'
 
 const b24 = useB24()
 const app = useAppSettings()
@@ -24,7 +25,14 @@ async function checkServer(): Promise<void> {
 }
 
 onMounted(async () => {
-  if (!await b24.init()) return
+  const frame = await b24.init()
+  if (!frame) return
+  // Слайдер справки (HelpLink): портал открыл главную страницу с `place = app-help-<якорь>`.
+  const help = helpRouteForPlace(placeFromOptions(frame.placement.options))
+  if (help) {
+    await navigateTo(help, { replace: true })
+    return
+  }
   b24.getOrThrow().parent.setTitle('Счёт из задач')
   try {
     await app.load()
@@ -44,6 +52,11 @@ onMounted(async () => {
       <p>
         Приложение заполняет товарную часть счёта по задачам и затраченному в них времени: ставки
         сотрудников, округление и наценки задаются здесь, в настройках.
+        <NuxtLink
+          to="/help"
+          class="underline"
+          data-testid="app-help"
+        >Справка и ИИ-помощник</NuxtLink>
       </p>
 
       <B24Alert

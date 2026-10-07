@@ -76,9 +76,20 @@ export function parseUserFields(raw: unknown, types: readonly string[] = TEXT_FI
 /** Приставка подписей полей приложения — по ней их видно в портале (просьба владельца, #34). */
 export const APP_FIELD_LABEL_PREFIX = '[sh::invoice-from-task]'
 
+/** Системные типы полей приложения (остальные — свои типы, appFieldTypes.ts). */
+export const SYSTEM_FIELD_TYPES = ['string', 'url', 'boolean', 'datetime'] as const
+export type SystemFieldType = typeof SYSTEM_FIELD_TYPES[number]
+
+/** Поля счёта: объект UF нового счёта в userfieldconfig — `CRM_SMART_INVOICE`, коды — `UF_CRM_SMART_INVOICE_…`. */
+export const INVOICE_UF_ENTITY = 'CRM_SMART_INVOICE'
+export const INVOICE_LINK_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_LINK'
+export const INVOICE_QR_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_QR'
+export const INVOICE_APPROVED_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_OK'
+export const INVOICE_APPROVED_AT_FIELD = 'UF_CRM_SMART_INVOICE_SH_IFT_OK_AT'
+
 /** Поле приложения: где создаётся, код, подпись и тип. */
 export interface AppFieldSpec {
-  entity: 'task' | 'company' | 'contact'
+  entity: 'task' | 'company' | 'contact' | 'invoice'
   /** Полный код с приставкой `UF_` (у CRM — `UF_CRM_`: её добавляет портал). */
   name: string
   label: string
@@ -86,7 +97,7 @@ export interface AppFieldSpec {
    * Тип: `string` — системный; иначе короткий код своего типа приложения (appFieldTypes.ts) —
    * полный `rest_<ID приложения>_<код>` строится при создании (`fullTypeId`).
    */
-  type: 'string' | typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE
+  type: SystemFieldType | typeof ACCESS_CODE_TYPE | typeof CLIENT_HOOK_TYPE
 }
 
 /** Коды полей своих типов у компании и контакта — одинаковые: публичная страница ищет по ним. */
@@ -100,7 +111,11 @@ export const APP_FIELDS: readonly AppFieldSpec[] = [
   ...(['company', 'contact'] as const).flatMap((entity): AppFieldSpec[] => [
     { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
     { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
-  ])
+  ]),
+  { entity: 'invoice', name: INVOICE_LINK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Ссылка на расшифровку`, type: 'url' },
+  { entity: 'invoice', name: INVOICE_QR_FIELD, label: `${APP_FIELD_LABEL_PREFIX} QR-код расшифровки`, type: 'url' },
+  { entity: 'invoice', name: INVOICE_APPROVED_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Согласовано клиентом`, type: 'boolean' },
+  { entity: 'invoice', name: INVOICE_APPROVED_AT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дата согласования`, type: 'datetime' }
 ]
 
 /**

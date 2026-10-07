@@ -1,4 +1,4 @@
-// Пользовательские поля для вкладки «Поля клиента»: списки UF задач, компаний и контактов и
+// Пользовательские поля для вкладки «Поля клиента»: списки UF задач, компаний, контактов и счёта и
 // создание полей приложения кнопкой (#34). Параметры — app/utils/userFieldRequests.ts, разбор —
 // shared/domain/userFields.ts. Создавать UF может только администратор — вкладка только для него.
 
@@ -33,8 +33,12 @@ export function useUserFields() {
     return registeredTypeIds(await b24.call<unknown>('userfieldtype.list'), Number.isInteger(appId) && appId > 0 ? appId : null)
   }
 
-  /** UF одной сущности, постранично. */
+  /** UF одной сущности, постранично; у счёта — из crm.item.fields (userfieldconfig.list просит своё право). */
   async function list(entity: FieldEntity): Promise<FieldList> {
+    if (entity === 'invoice') {
+      const fields = (await b24.call<{ fields?: Record<string, { upperName?: unknown }> }>('crm.item.fields', { entityTypeId: 31 }))?.fields ?? {}
+      return { options: [], names: Object.values(fields).map(f => String(f?.upperName ?? '')).filter(n => n.startsWith('UF_')) }
+    }
     let firstOfPrev = ''
     const raw = await collectOffsetPages(
       async (start) => {
@@ -57,9 +61,9 @@ export function useUserFields() {
 
   /** Все три списка; сбой одного не прячет другие — его ошибка в `errors`. */
   async function listAll(): Promise<{ lists: FieldLists, errors: string[] }> {
-    const entities: FieldEntity[] = ['task', 'company', 'contact']
+    const entities: FieldEntity[] = ['task', 'company', 'contact', 'invoice']
     const results = await Promise.allSettled(entities.map(list))
-    const lists: FieldLists = { task: { options: [], names: [] }, company: { options: [], names: [] }, contact: { options: [], names: [] } }
+    const lists: FieldLists = { task: { options: [], names: [] }, company: { options: [], names: [] }, contact: { options: [], names: [] }, invoice: { options: [], names: [] } }
     const errors: string[] = []
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') lists[entities[i]!] = r.value
@@ -76,7 +80,8 @@ export function useUserFields() {
     const missing = missingAppFields({
       task: lists.task.names,
       company: lists.company.names,
-      contact: lists.contact.names
+      contact: lists.contact.names,
+      invoice: lists.invoice.names
     })
     // Строковые поля — первыми: сбой своих типов не должен оставить их несозданными. Типы — до
     // первого поля своего типа: зарегистрировать, если их нет, и взять полные коды из ответа портала.

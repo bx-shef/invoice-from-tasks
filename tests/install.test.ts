@@ -43,8 +43,8 @@ describe('подписки на события', () => {
 
 describe('права и повторная установка', () => {
   it('показывает недостающие права', () => {
-    expect(missingScopes(['crm', 'task', 'placement'])).toEqual(['catalog', 'user_brief', 'im'])
-    expect(missingScopes(null)).toHaveLength(6)
+    expect(missingScopes(['crm', 'task', 'placement'])).toEqual(['catalog', 'user_brief', 'im', 'userfieldconfig'])
+    expect(missingScopes(null)).toHaveLength(7)
   })
 
   it('переустановка не регистрирует второй пункт меню', () => {

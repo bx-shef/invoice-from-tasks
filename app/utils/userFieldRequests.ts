@@ -1,7 +1,7 @@
 // Параметры REST-запросов пользовательских полей (#34): список UF задач, компаний и контактов
 // для выбора в настройках и создание полей приложения кнопкой. Методы — docs/REST_METHODS.md.
 
-import type { AppFieldSpec } from '#shared/domain/userFields'
+import { INVOICE_UF_ENTITY, SYSTEM_FIELD_TYPES, type AppFieldSpec } from '#shared/domain/userFields'
 import type { RestCall } from './invoiceRequests'
 
 export type FieldEntity = AppFieldSpec['entity']
@@ -24,7 +24,7 @@ export function userFieldListCall(entity: FieldEntity, start: number): RestCall 
 
 /** Нужен ли ID приложения (app.info) для создания поля: да — у полей своих типов. */
 export function needsAppId(spec: AppFieldSpec): boolean {
-  return spec.type !== 'string'
+  return !(SYSTEM_FIELD_TYPES as readonly string[]).includes(spec.type)
 }
 
 /**
@@ -36,7 +36,26 @@ export function needsAppId(spec: AppFieldSpec): boolean {
  */
 export function userFieldAddCall(spec: AppFieldSpec, typeId?: string): RestCall {
   if (needsAppId(spec) && !typeId) throw new Error(`для поля ${spec.name} не зарегистрирован тип ${spec.type}`)
-  const type = spec.type === 'string' ? 'string' : typeId!
+  const type = needsAppId(spec) ? typeId! : spec.type
+  if (spec.entity === 'invoice') {
+    // Новый счёт — объект UF `CRM_SMART_INVOICE`; метод — userfieldconfig.add (право `userfieldconfig`),
+    // код поля — целиком, с приставкой `UF_CRM_SMART_INVOICE_` (документация метода).
+    return {
+      method: 'userfieldconfig.add',
+      params: {
+        moduleId: 'crm',
+        field: {
+          entityId: INVOICE_UF_ENTITY,
+          fieldName: spec.name,
+          userTypeId: type,
+          xmlId: spec.name,
+          multiple: 'N',
+          mandatory: 'N',
+          editFormLabel: { ru: spec.label, en: spec.label }
+        }
+      }
+    }
+  }
   if (spec.entity === 'task') {
     return {
       method: 'task.item.userfield.add',
