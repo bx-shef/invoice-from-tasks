@@ -114,3 +114,30 @@ export function surroundOf<T extends { slug: string }>(pages: T[], slug: string)
 export function discussQuestion(title: string): string {
   return `Перескажи статью «${title}» и предложи задать по ней вопросы.`
 }
+
+/** Вопрос FAQ: якорь, текст вопроса и markdown ответа (до следующего `##`). */
+export interface FaqItem { id: string, q: string, answer: string }
+
+/**
+ * Страница «Вопросы и ответы» — списком раскрывающихся вопросов (как ::hd-faq в skills-site):
+ * каждый `## Вопрос {#id}` — пункт, текст до следующего `##` — ответ. Текст до первого вопроса
+ * не теряется: его отдают отдельно (`intro`).
+ */
+export function faqItemsOf(markdown: string): { intro: string, items: FaqItem[] } {
+  const items: FaqItem[] = []
+  const intro: string[] = []
+  let current: { id: string, q: string, lines: string[] } | null = null
+  let fence = false
+  for (const line of markdown.replace(/\r\n?/g, '\n').split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence
+    const m = fence ? null : /^##\s+(.+?)\s*#*\s*$/.exec(line)
+    if (m) {
+      if (current) items.push({ id: current.id, q: current.q, answer: current.lines.join('\n').trim() })
+      const { text, anchor } = headingOf(m[1]!)
+      current = { id: anchor, q: text, lines: [] }
+    } else if (current) current.lines.push(line)
+    else intro.push(line)
+  }
+  if (current) items.push({ id: current.id, q: current.q, answer: current.lines.join('\n').trim() })
+  return { intro: intro.join('\n').trim(), items }
+}
