@@ -20,14 +20,11 @@ const origin = ref('')
 const asking = ref(false)
 const busy = ref(false)
 const error = ref('')
-const source = ref<TaskSource>('deal')
+// Задачи — только привязанные к счёту (вариант «из сделки» убран, владелец 2026-10-09)
+const source: TaskSource = 'invoice'
 const mode = ref<FillMode>('task')
 const expanded = ref(false)
 
-const sourceItems = [
-  { label: 'Задачи связанной сделки', value: 'deal' },
-  { label: 'Задачи, привязанные к счёту', value: 'invoice' }
-]
 const modeItems = [
   { label: 'Задача — одна строка', value: 'task' },
   { label: 'Записи времени — строки', value: 'time' }
@@ -40,7 +37,6 @@ onMounted(async () => {
   ctx.value = fieldContext(frame.placement.options)
   econ.value = parseInvoiceEconomy(ctx.value.value)
   if (econ.value) {
-    source.value = econ.value.source
     mode.value = econ.value.mode
   }
 })
@@ -70,7 +66,7 @@ async function recalc() {
     if (!field) throw new Error('Не удалось определить поле «Экономика счёта»')
     app.settings.value.economics.invoiceField = field
     await fill.loadInvoice(ctx.value.itemId)
-    await fill.collect(source.value, mode.value)
+    await fill.collect(source, mode.value)
     if (fill.error.value || fill.problems.value.length) throw new Error(fill.error.value || fill.problems.value.join('; '))
     const res = await b24.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: 31, id: ctx.value.itemId })
     econ.value = parseInvoiceEconomy(res?.item?.[camelFieldKey(field)]) ?? econ.value
@@ -171,19 +167,24 @@ function when(iso: string): string {
     >
       Экономика ещё не посчитана
     </div>
+    <details class="text-xs opacity-70">
+      <summary class="cursor-pointer">
+        Как считается
+      </summary>
+      <p class="mt-1">
+        По каждой задаче, привязанной к счёту: <b>по формуле</b> — часы × ставка сотрудника + наценка,
+        с НДС (без времени — часы оценивает ИИ); <b>выставлено</b> — сумма строки этой задачи в счёте
+        с НДС. <b>Дельта</b> = выставлено − по формуле, <b>разница</b> — дельта в % от формулы.
+        Пометки: «убыток» — выставлено меньше формулы больше чем на порог, «завышение» — больше на
+        порог, «нет данных» — часы оценил ИИ или сравнить не с чем. Считается при «Собрать строки» в окне счёта
+        или кнопкой здесь.
+      </p>
+    </details>
 
     <div
       v-if="asking"
       class="flex flex-wrap items-end gap-2"
     >
-      <B24Select
-        v-model="source"
-        :items="sourceItems"
-        value-key="value"
-        size="sm"
-        class="w-56"
-        aria-label="Откуда задачи"
-      />
       <B24Select
         v-model="mode"
         :items="modeItems"

@@ -23,7 +23,8 @@ const config = useRuntimeConfig()
 const linksError = ref('')
 
 const invoiceId = ref<number | null>(null)
-const source = ref<TaskSource>('deal')
+// Задачи — только привязанные к счёту (владелец 2026-10-09: вариант «из сделки» убран)
+const source = ref<TaskSource>('invoice')
 const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
@@ -42,10 +43,6 @@ const MEASURES_WAIT = 10_000
 const measuresUnread = ref<UnreadReason>('failed')
 const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode, measuresUnread.value))
 
-const sourceItems = [
-  { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
-  { label: 'Задачи, привязанные к счёту', value: 'invoice', description: 'Задачи, у которых в CRM-привязке указан этот счёт' }
-]
 const modeItems = [
   { label: 'Задача — одна строка', value: 'task', description: 'Всё время задачи по ставке ответственного' },
   { label: 'Записи времени — строки', value: 'time', description: 'Каждая запись времени по ставке того, кто её внёс' }
@@ -60,7 +57,7 @@ const roundingText = computed(() => {
 
 // Сменили источник или тип — собранные строки к новым настройкам не относятся: сбрасываем
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
-watch([source, mode], () => fill.reset())
+watch(mode, () => fill.reset())
 const result = computed(() => fill.result.value)
 const taskTitles = computed(() => Object.fromEntries(fill.tasks.value.map(t => [t.id, t.title])))
 /**
@@ -241,18 +238,6 @@ async function consult(promptId: string) {
 
         <B24Card>
           <div class="grid gap-6 md:grid-cols-2">
-            <B24FormField
-              label="Откуда брать задачи"
-              description="Источники не смешиваются"
-            >
-              <B24RadioGroup
-                v-model="source"
-                :items="sourceItems"
-                value-key="value"
-                :disabled="locked"
-                data-testid="fill-source"
-              />
-            </B24FormField>
             <B24FormField label="Как считать">
               <B24RadioGroup
                 v-model="mode"
