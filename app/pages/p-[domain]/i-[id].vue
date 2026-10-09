@@ -506,13 +506,18 @@ const rowItems = computed(() => {
                     rel="noopener noreferrer"
                     class="underline"
                   >Задача исполнителя #{{ item.task.id }}</a>
-                  <div
-                    v-for="(r, j) in item.task.results"
-                    :key="j"
-                    class="whitespace-pre-line"
-                  >
-                    <b>Результат:</b> {{ r }}
-                  </div>
+                  <details v-if="item.task.results.length">
+                    <summary class="cursor-pointer text-xs opacity-70">
+                      Результат{{ item.task.results.length > 1 ? ` (${item.task.results.length})` : '' }}
+                    </summary>
+                    <p
+                      v-for="(r, j) in item.task.results"
+                      :key="j"
+                      class="whitespace-pre-line mt-1 pl-2 border-l-2 border-(--ui-color-design-plain-content-divider)"
+                    >
+                      {{ r }}
+                    </p>
+                  </details>
                   <details v-if="item.task.description">
                     <summary class="cursor-pointer text-xs opacity-70">
                       Описание задачи
@@ -558,13 +563,18 @@ const rowItems = computed(() => {
                       >
                       <span>Поставил: {{ item.task.clientTask.creatorName || '—' }}</span>
                     </div>
-                    <div
-                      v-for="(r, k) in item.task.clientTask.results"
-                      :key="k"
-                      class="whitespace-pre-line"
-                    >
-                      <b>Результат:</b> {{ r }}
-                    </div>
+                    <details v-if="item.task.clientTask.results.length">
+                      <summary class="cursor-pointer text-xs opacity-70">
+                        Результат{{ item.task.clientTask.results.length > 1 ? ` (${item.task.clientTask.results.length})` : '' }}
+                      </summary>
+                      <p
+                        v-for="(r, k) in item.task.clientTask.results"
+                        :key="k"
+                        class="whitespace-pre-line mt-1 pl-2 border-l-2 border-(--ui-color-design-plain-content-divider)"
+                      >
+                        {{ r }}
+                      </p>
+                    </details>
                     <details v-if="item.task.clientTask.description">
                       <summary class="cursor-pointer text-xs opacity-70">
                         Описание задачи

@@ -234,6 +234,13 @@ export function plainText(value: unknown): string {
   return value
     .replace(/\[\/?(?:b|i|u|s|url|img|quote|code|list|\*|color|size|font|user|table|tr|td|th|p|left|right|center|justify)(?:=[^\]]*)?\]|\[disk file id=[^\]]*\]/gi, '')
     .replace(/\r\n?/g, '\n')
+    // HTML-сущности из ответа портала (`&#91;`, `&nbsp;`) — страница выводит текстом, клиент видел их как есть
+    .replace(/&(#\d{1,6}|#x[0-9a-f]{1,6}|nbsp|amp|lt|gt|quot|apos);/gi, (_m, e: string) => {
+      const k = e.toLowerCase()
+      if (k.startsWith('#x')) return String.fromCodePoint(Number.parseInt(k.slice(2), 16))
+      if (k.startsWith('#')) return String.fromCodePoint(Number(k.slice(1)))
+      return ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'' } as Record<string, string>)[k] ?? _m
+    })
     .trim()
     .slice(0, MAX_PUBLIC_TEXT)
 }

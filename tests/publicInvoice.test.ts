@@ -54,6 +54,10 @@ describe('строки и задачи', () => {
     expect(clientTaskIdFor(rows, 10, { task: {} }, '')).toBeNull()
   })
 
+  it('текст: HTML-сущности портала раскрываются', () => {
+    expect(plainText('&#91;ссылка&#93;&nbsp;СГР &amp; ОПТ')).toBe('[ссылка] СГР & ОПТ')
+  })
+
   it('задача: состояние и дата — закрытия у принятой, иначе постановки', () => {
     const done = parsePublicTask({ task: { id: 1, status: '5', createdDate: '2026-09-01T10:00:00+03:00', closedDate: '2026-09-20T12:00:00+03:00' } }, 'https://m', null, null)
     expect(done).toMatchObject({ state: 'принята', date: '2026-09-20' })
