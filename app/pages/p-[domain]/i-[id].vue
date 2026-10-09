@@ -11,7 +11,7 @@ import CrossedEyeIcon from '@bitrix24/b24icons-vue/outline/CrossedEyeIcon'
 import { MAX_COMMENT_LENGTH } from '#shared/domain/approval'
 import { pdfFileName, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 
-useHead({ title: 'Расшифровка счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
+useHead({ title: 'Документы для счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
 
 // Ночная тема — по системе устройства (страницу открывают с телефона по QR, без портала)
 onMounted(() => {
@@ -141,7 +141,8 @@ async function sendComment() {
     })
     commentText.value = ''
     commentSent.value = true
-    await refreshApproval()
+    // Перечитывание счёта долгое (задачи, документы) — кнопку не держим: список обновится сам
+    void refreshApproval().catch(() => {})
   } catch (e) {
     const err = e as { data?: { error?: string }, statusMessage?: string }
     commentError.value = err.data?.error || err.statusMessage || 'Не удалось отправить комментарий'
@@ -220,10 +221,10 @@ const rowItems = computed(() => {
       >
         <div class="text-center space-y-1">
           <div class="text-xl">
-            Расшифровка счёта
+            Документы для счёта
           </div>
           <div class="text-sm opacity-70">
-            <b>№{{ invoiceId }}</b> · {{ domain }}
+            {{ domain }}
           </div>
         </div>
         <B24FormField
@@ -293,7 +294,7 @@ const rowItems = computed(() => {
       class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4"
     >
       <h1 class="sr-only">
-        Расшифровка счёта
+        Документы для счёта
       </h1>
 
       <B24Alert
@@ -312,10 +313,9 @@ const rowItems = computed(() => {
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="space-y-1">
               <div class="text-lg font-semibold leading-tight">
-                {{ invoice.title }}
+                Документы для счёта №{{ invoice.number || invoiceId }}{{ invoice.date ? ` от ${date(invoice.date)}` : '' }}
               </div>
               <div class="flex flex-wrap items-center gap-2 text-sm opacity-80">
-                <span v-if="invoice.date">от {{ date(invoice.date) }}</span>
                 <B24Badge
                   color="air-secondary-accent"
                   size="sm"
