@@ -62,3 +62,11 @@ describe('loadEncKey: имя переменной', () => {
     expect(() => loadEncKey({})).toThrow(/B24_TOKEN_ENC_KEY/)
   })
 })
+
+describe('sealClientHook: ключ неверного формата', () => {
+  it('говорит про формат, а не «не задан»', () => {
+    const r = sealClientHook('https://portal.standartno.by/rest/1/abcdef123/', 'bel.bitrix24.by', { CLIENT_HOOK_ENC_KEY: 'my-secret' })
+    expect(r).toMatchObject({ ok: false, status: 503 })
+    expect(r.ok ? '' : r.error).toMatch(/неверного формата/)
+  })
+})

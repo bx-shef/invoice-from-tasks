@@ -1,9 +1,22 @@
 <script setup lang="ts">
-// Справка (публичная документация docs/guide) и ИИ-чат по ней — по принципу toolsai. Страница
-// выбирается `?p=<slug>`, раздел — хэшем. Открывается из меню приложения и слайдером по ссылке
-// «Что это значит?» (HelpLink → app.vue → сюда). Чат — только во фрейме (модель платная).
+// Справка (публичная документация docs/guide) и ИИ-чат по ней — в раскладке сайта toolsai
+// (layouts/helpdesk.vue): шапка с поиском, слева меню страниц (B24DashboardSidebar: сворачивается
+// до иконок, на узком экране — панелью), по центру статья на белом листе, справа оглавление и
+// «Обсудить с ИИ». Страница выбирается `?p=<slug>`, раздел — хэшем. Открывается из меню приложения
+// и слайдером по ссылке «Что это значит?» (HelpLink → app.vue → сюда). Чат — только во фрейме
+// (модель платная). Стили — app/assets/css/help.css, всё под `.hd-shell`.
 import type { KbPage } from '#shared/domain/kb'
 import { renderHelp } from '~/utils/help'
+import { previewOf, surroundOf, tocOf } from '~/utils/helpLayout'
+import RocketIcon from '@bitrix24/b24icons-vue/outline/RocketIcon'
+import EditMIcon from '@bitrix24/b24icons-vue/outline/EditMIcon'
+import MoneyIcon from '@bitrix24/b24icons-vue/outline/MoneyIcon'
+import GlobeExtranetIcon from '@bitrix24/b24icons-vue/outline/GlobeExtranetIcon'
+import GraphsDiagramIcon from '@bitrix24/b24icons-vue/outline/GraphsDiagramIcon'
+import QuestionIcon from '@bitrix24/b24icons-vue/outline/QuestionIcon'
+import KnowledgeBaseIcon from '@bitrix24/b24icons-vue/outline/KnowledgeBaseIcon'
+import CopilotIcon from '@bitrix24/b24icons-vue/outline/CopilotIcon'
+import '~/assets/css/help.css'
 
 useHead({ title: 'Справка — Счёт из задач' })
 
@@ -13,16 +26,42 @@ const b24 = useB24()
 const pages = ref<KbPage[]>([])
 const loadError = ref('')
 const inFrame = ref(false)
+const { open: chatOpen, openChat, closeChat, discussPage } = useHelpChat()
 
 const slug = computed(() => String(route.query.p ?? '') || pages.value[0]?.slug || '')
 const page = computed(() => pages.value.find(p => p.slug === slug.value) ?? null)
 const html = computed(() => (page.value ? renderHelp(page.value.markdown) : ''))
+const toc = computed(() => (page.value ? tocOf(page.value.markdown) : []))
+const preview = computed(() => previewOf(toc.value))
+const surround = computed(() => surroundOf(pages.value, slug.value))
 
-/** Прокрутка к разделу из хэша — после отрисовки страницы. */
+const ICONS: Record<string, typeof RocketIcon> = {
+  '01-start': RocketIcon,
+  '02-fill': EditMIcon,
+  '03-rates': MoneyIcon,
+  '04-public': GlobeExtranetIcon,
+  '05-economics': GraphsDiagramIcon,
+  '90-faq': QuestionIcon
+}
+const menuItems = computed(() => pages.value.map(p => ({
+  label: p.title,
+  icon: ICONS[p.slug] ?? KnowledgeBaseIcon,
+  to: { path: '/help', query: { p: p.slug } },
+  active: p.slug === slug.value
+})))
+const footerItems = computed(() => [{ label: 'Спросить ИИ', icon: CopilotIcon, onSelect: () => openChat() }])
+
+const crumbs = computed(() => [
+  { label: 'Справка', to: { path: '/help', query: { p: pages.value[0]?.slug ?? '' } } },
+  { label: page.value?.title ?? '' }
+])
+
+/** Прокрутка к разделу из хэша — после отрисовки страницы; без хэша — к началу статьи. */
 async function scrollToHash() {
   await nextTick()
   const id = route.hash.slice(1)
   if (id) document.getElementById(decodeURIComponent(id))?.scrollIntoView({ block: 'start' })
+  else window.scrollTo({ top: 0 })
 }
 
 /** Ссылки справки вида `/help?p=…#…` — переходом внутри приложения, внешние — в новой вкладке. */
@@ -33,6 +72,9 @@ function onContentClick(e: MouseEvent) {
   if (href.startsWith('/help')) {
     e.preventDefault()
     void router.push(href)
+  } else if (href.startsWith('#')) {
+    e.preventDefault()
+    void router.push({ path: '/help', query: { p: slug.value }, hash: href })
   } else if (/^https?:/.test(href)) {
     a.setAttribute('target', '_blank')
     a.setAttribute('rel', 'noopener noreferrer')
@@ -52,71 +94,192 @@ watch(() => [route.query.p, route.hash], () => void scrollToHash())
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl p-4 sm:p-6 grid gap-6 md:grid-cols-[14rem_1fr]">
-    <nav
-      class="space-y-1 text-sm"
-      aria-label="Разделы справки"
+  <div
+    class="hd-shell"
+    :class="{ 'hd-shell--chat': chatOpen && inFrame }"
+  >
+    <B24DashboardGroup
+      unit="px"
+      storage="local"
+      storage-key="help-menu"
+      :b24ui="{ base: 'static block overflow-visible' }"
     >
-      <div class="font-semibold mb-2">
-        Справка
-      </div>
-      <NuxtLink
-        v-for="p in pages"
-        :key="p.slug"
-        :to="{ path: '/help', query: { p: p.slug } }"
-        class="block rounded px-2 py-1 hover:bg-(--ui-color-bg-content-secondary)"
-        :class="p.slug === slug ? 'font-medium bg-(--ui-color-bg-content-secondary)' : ''"
-        data-testid="help-nav"
-      >
-        {{ p.title }}
-      </NuxtLink>
-    </nav>
-
-    <main class="space-y-6 min-w-0">
-      <B24Alert
-        v-if="loadError"
-        color="air-primary-alert"
-        title="Справка не загрузилась"
-        :description="loadError"
-      />
-      <article
-        v-if="page"
-        class="space-y-3"
-        data-testid="help-page"
-      >
-        <h1 class="text-xl font-semibold">
-          {{ page.title }}
-        </h1>
-        <p
-          v-if="page.description"
-          class="opacity-70"
-        >
-          {{ page.description }}
-        </p>
-        <!-- eslint-disable vue/no-v-html -- markdown справки из репозитория, сырой HTML выключен (renderHelp) -->
-        <div
-
-          class="help-md"
-          @click="onContentClick"
-          v-html="html"
+      <header class="hd-header">
+        <B24DashboardSidebarToggle
+          color="air-tertiary"
+          aria-label="Меню справки"
         />
-        <!-- eslint-enable vue/no-v-html -->
-      </article>
+        <NuxtLink
+          :to="{ path: '/help', query: { p: pages[0]?.slug } }"
+          class="hd-logo"
+        >
+          <span class="hd-logo-brand">Счёт из задач</span>
+          <span class="hd-logo-word">Справка</span>
+        </NuxtLink>
+        <HelpSearch
+          :pages="pages"
+          :chat="inFrame"
+          class="hd-header-search"
+        />
+        <B24Button
+          v-if="inFrame"
+          color="air-tertiary"
+          :icon="CopilotIcon"
+          :active="chatOpen"
+          active-color="air-secondary-accent"
+          title="Спросить ИИ"
+          aria-label="Спросить ИИ"
+          @click="chatOpen ? closeChat() : openChat()"
+        />
+      </header>
 
-      <HelpChat
-        v-if="inFrame"
-        :page="page?.slug"
-      />
-    </main>
+      <div class="hd-body">
+        <B24DashboardSidebar
+          id="help-menu"
+          mode="slideover"
+          collapsible
+          :toggle="false"
+          :default-size="260"
+          :min-size="220"
+          :max-size="300"
+          :collapsed-size="64"
+          class="hd-sidebar"
+        >
+          <template #default="{ collapsed }">
+            <B24NavigationMenu
+              orientation="vertical"
+              :collapsed="collapsed"
+              :items="menuItems"
+              tooltip
+              aria-label="Разделы справки"
+            />
+          </template>
+          <template #footer="{ collapsed }">
+            <div
+              class="hd-menu-footer"
+              :class="{ 'hd-menu-footer--collapsed': collapsed }"
+            >
+              <B24NavigationMenu
+                v-if="inFrame"
+                orientation="vertical"
+                :collapsed="collapsed"
+                :items="footerItems"
+                tooltip
+                class="hd-menu-footer-nav"
+              />
+              <B24DashboardSidebarCollapse :title="collapsed ? 'Развернуть меню' : 'Свернуть меню'" />
+            </div>
+          </template>
+        </B24DashboardSidebar>
+
+        <div class="hd-page">
+          <div class="hd-article-layout">
+            <div class="hd-article">
+              <B24Alert
+                v-if="loadError"
+                color="air-primary-alert"
+                title="Справка не загрузилась"
+                :description="loadError"
+                class="hd-alert"
+              />
+              <article
+                v-if="page"
+                data-testid="help-page"
+              >
+                <div class="hd-article-head">
+                  <B24Breadcrumb
+                    :items="crumbs"
+                    class="hd-breadcrumbs"
+                    :b24ui="{ list: 'flex-nowrap min-w-0', item: 'min-w-0', link: 'min-w-0', linkLabel: 'truncate' }"
+                  />
+                </div>
+                <div class="hd-article-title-wrap">
+                  <h1>{{ page.title }}</h1>
+                </div>
+                <p
+                  v-if="page.description"
+                  class="hd-lead"
+                >
+                  {{ page.description }}
+                </p>
+
+                <div
+                  v-if="preview.length > 1"
+                  class="hd-toc-preview"
+                >
+                  <p>В статье:</p>
+                  <ul>
+                    <li
+                      v-for="l in preview"
+                      :key="l.id"
+                    >
+                      <NuxtLink :to="{ path: '/help', query: { p: slug }, hash: `#${l.id}` }">
+                        {{ l.text }}
+                      </NuxtLink>
+                    </li>
+                  </ul>
+                </div>
+
+                <!-- eslint-disable vue/no-v-html -- markdown справки из репозитория, сырой HTML выключен (renderHelp) -->
+                <div
+                  class="hd-md"
+                  @click="onContentClick"
+                  v-html="html"
+                />
+                <!-- eslint-enable vue/no-v-html -->
+
+                <nav
+                  v-if="surround[0] || surround[1]"
+                  class="hd-surround"
+                  aria-label="Соседние страницы"
+                >
+                  <NuxtLink
+                    v-if="surround[0]"
+                    :to="{ path: '/help', query: { p: surround[0].slug } }"
+                    class="hd-surround-link"
+                  >
+                    <span class="hd-surround-dir">← Назад</span>
+                    <span>{{ surround[0].title }}</span>
+                  </NuxtLink>
+                  <span v-else />
+                  <NuxtLink
+                    v-if="surround[1]"
+                    :to="{ path: '/help', query: { p: surround[1].slug } }"
+                    class="hd-surround-link hd-surround-link--next"
+                  >
+                    <span class="hd-surround-dir">Дальше →</span>
+                    <span>{{ surround[1].title }}</span>
+                  </NuxtLink>
+                </nav>
+              </article>
+            </div>
+            <aside
+              v-if="page"
+              class="hd-aside"
+            >
+              <HelpToc
+                v-if="toc.length"
+                :links="toc"
+                :slug="slug"
+              />
+              <B24Button
+                v-if="inFrame"
+                color="air-boost"
+                block
+                class="hd-discuss"
+                label="Обсудить с ИИ"
+                data-testid="help-discuss"
+                @click="discussPage(page.slug, page.title)"
+              />
+            </aside>
+          </div>
+        </div>
+      </div>
+    </B24DashboardGroup>
+
+    <template v-if="inFrame">
+      <HelpAskFloating />
+      <HelpChat :page="page?.slug" />
+    </template>
   </div>
 </template>
-
-<style scoped>
-.help-md :deep(h2) { font-size: 1.125rem; font-weight: 600; margin-top: 1.5rem; }
-.help-md :deep(h3) { font-weight: 600; margin-top: 1rem; }
-.help-md :deep(p), .help-md :deep(ul), .help-md :deep(ol) { margin-top: 0.5rem; }
-.help-md :deep(ul) { list-style: disc; padding-left: 1.25rem; }
-.help-md :deep(ol) { list-style: decimal; padding-left: 1.25rem; }
-.help-md :deep(a) { text-decoration: underline; }
-.help-md :deep(code) { font-family: ui-monospace, monospace; font-size: 0.9em; }
-</style>

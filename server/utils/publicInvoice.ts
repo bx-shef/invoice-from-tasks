@@ -309,7 +309,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
 
   // Задачи — одним пакетом; показываем только привязанные к этому счёту или его сделке.
   const codes = invoiceBindingCodes(invoice)
-  const select = ['ID', 'TITLE', 'DESCRIPTION', 'UF_CRM_TASK', ...[clientTaskField, taskDomain].filter(Boolean)]
+  const select = ['ID', 'TITLE', 'DESCRIPTION', 'STATUS', 'CREATED_DATE', 'CLOSED_DATE', 'UF_CRM_TASK', ...[clientTaskField, taskDomain].filter(Boolean)]
   const ids = rowTaskIds(list, MAX_PUBLIC_TASKS)
   const taskRaw = await batch(call, Object.fromEntries(ids.map(id => [`t${id}`, batchCommand('tasks.task.get', { taskId: id, select })])))
   const tasks: PublicTask[] = []

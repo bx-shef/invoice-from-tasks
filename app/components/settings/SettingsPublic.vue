@@ -2,7 +2,7 @@
 // Публичная страница счёта (#34, этап 3): в каких стадиях клиент видит расшифровку по коду
 // доступа, и что он видит в остальных. Адрес страницы — `/p-<домен портала>/i-<ID счёта>`.
 import { LIMITS, type AppSettings } from '#shared/domain/settings'
-import { APPROVED_AT_FIELD_TYPES, APPROVED_FIELD_TYPES, parseInvoiceLinkFields, publicQrUrl, type InvoiceFieldOption } from '#shared/domain/invoiceLinks'
+import { APPROVED_AT_FIELD_TYPES, APPROVED_FIELD_TYPES, parseInvoiceLinkFields, type InvoiceFieldOption } from '#shared/domain/invoiceLinks'
 import type { ChatOption } from '~/utils/chatOptions'
 import { publicInvoiceUrl, stageItems, templateItems, type StageOption, type TemplateOption } from '~/utils/invoiceStages'
 
@@ -67,13 +67,11 @@ const fieldError = ref('')
 const approvedList = ref<InvoiceFieldOption[]>([])
 const approvedAtList = ref<InvoiceFieldOption[]>([])
 const example = ref('')
-const qrExample = ref('')
 
 onMounted(async () => {
   const frame = b24.get()
   const portal = frame ? new URL(frame.getTargetOrigin()).hostname : 'ваш-портал.bitrix24.ru'
   example.value = publicInvoiceUrl(config.public.siteUrl || window.location.origin, portal, 123)
-  qrExample.value = publicQrUrl(config.public.siteUrl || window.location.origin, portal, 123)
   void links.rawFields().then((raw) => {
     fieldList.value = parseInvoiceLinkFields(raw)
     approvedList.value = parseInvoiceLinkFields(raw, APPROVED_FIELD_TYPES)
@@ -102,8 +100,6 @@ function fieldItems(saved: string, source: InvoiceFieldOption[] = fieldList.valu
   if (saved && !list.some(i => i.value === saved)) list.unshift({ label: `${saved} — нет в портале`, value: saved })
   return [{ label: 'Не записывать', value: '' }, ...list]
 }
-const linkItems = computed(() => fieldItems(settings.value.publicPage.linkField))
-const qrItems = computed(() => fieldItems(settings.value.publicPage.qrField))
 const approvedItems = computed(() => fieldItems(settings.value.publicPage.approvedField, approvedList.value))
 const approvedAtItems = computed(() => fieldItems(settings.value.publicPage.approvedAtField, approvedAtList.value))
 const templateMenu = computed(() => templateItems(templateList.value, settings.value.publicPage.templates))
@@ -241,41 +237,6 @@ const templateMenu = computed(() => templateItems(templateList.value, settings.v
       title="Не удалось прочитать поля счёта"
       :description="fieldError"
     />
-    <p class="text-sm opacity-80">
-      Ссылки для печатных форм: при открытии «Заполнить из задач» приложение записывает в выбранные
-      поля счёта адрес расшифровки и адрес картинки с её QR-кодом (<code class="select-all">{{ qrExample }}</code>).
-      Поле картинки вставьте в шаблон документа как изображение. Поля создаёт кнопка «Создать поля приложения»
-      на вкладке «Поля клиента» — и сразу выбирает их здесь.
-    </p>
-    <B24FormField
-      label="Поле счёта для ссылки на расшифровку"
-      description="Не выбрано — ссылка не записывается"
-    >
-      <B24SelectMenu
-        v-model="settings.publicPage.linkField"
-        :items="linkItems"
-        value-key="value"
-        :loading="!fieldList && !fieldError"
-        class="w-96 max-w-full"
-        data-testid="public-link-field"
-      />
-    </B24FormField>
-    <B24FormField
-      label="Поле счёта для картинки QR-кода"
-      description="Не выбрано — адрес картинки не записывается"
-    >
-      <template #hint>
-        <HelpLink anchor="qr-in-document" />
-      </template>
-      <B24SelectMenu
-        v-model="settings.publicPage.qrField"
-        :items="qrItems"
-        value-key="value"
-        :loading="!fieldList && !fieldError"
-        class="w-96 max-w-full"
-        data-testid="public-qr-field"
-      />
-    </B24FormField>
 
     <B24FormField
       label="Фраза для остальных стадий"

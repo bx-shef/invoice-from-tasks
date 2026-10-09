@@ -1,9 +1,13 @@
-// POST /api/kb/chat — ИИ-чат справки (по принципу toolsai): `{ messages, page? }` → ответ BitrixGPT
-// по фрагментам публичной справки и список страниц-источников. Только из фрейма портала (модель
-// платная) и в своём лимите — 30 вопросов за 10 минут на сотрудника (KB_CHAT_LIMITS). Вопросы и ответы в журнал не пишем.
+// POST /api/kb/chat — ИИ-чат справки (по принципу toolsai/skills-site): `{ messages, page? }` →
+// поток NDJSON (shared/domain/kbStream.ts): сначала страницы-источники, затем текст BitrixGPT по
+// мере генерации. Отвечает по фрагментам публичной справки. Только из фрейма портала (модель
+// платная) и в своём лимите — 30 вопросов за 10 минут на сотрудника (KB_CHAT_LIMITS). Вопросы и
+// ответы в журнал не пишем. Лимит и пустой вопрос — обычной HTTP-ошибкой до начала потока;
+// отказ модели посреди потока — событием `error`.
 
 import { kbSources, kbSystemPrompt, parseKbMessages, selectChunks } from '#shared/domain/kb'
-import { askBitrixGpt, enforceKbChatLimit } from '../../utils/aiGateway'
+import { encodeKbEvent } from '#shared/domain/kbStream'
+import { AiGatewayError, enforceKbChatLimit, streamBitrixGpt } from '../../utils/aiGateway'
 import { aiHttpError, loadKb, requireFrameUser } from '../../utils/requestContext'
 
 export default defineEventHandler(async (event) => {
@@ -18,9 +22,32 @@ export default defineEventHandler(async (event) => {
   console.info(`[kb] фрагментов: ${index.docs.length}, выбрано: ${chosen.map(c => c.url).join(', ') || '—'}`)
   try {
     enforceKbChatLimit(user)
-    const answer = await askBitrixGpt({ messages: [{ role: 'system', content: kbSystemPrompt(chosen) }, ...messages], json: false })
-    return { answer: answer.trim(), sources: kbSources(chosen, pages) }
   } catch (e) {
     throw aiHttpError(e)
   }
+
+  const answer = streamBitrixGpt({ messages: [{ role: 'system', content: kbSystemPrompt(chosen) }, ...messages], json: false })
+  const enc = new TextEncoder()
+  setResponseHeaders(event, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    // nginx-proxy иначе копит ответ целиком и отдаёт разом — поток пропадает
+    'X-Accel-Buffering': 'no'
+  })
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(enc.encode(encodeKbEvent({ type: 'sources', sources: kbSources(chosen, pages) })))
+      try {
+        for await (const text of answer) controller.enqueue(enc.encode(encodeKbEvent({ type: 'text', text })))
+      } catch (e) {
+        const message = e instanceof AiGatewayError ? e.message : 'BitrixGPT не ответил'
+        controller.enqueue(enc.encode(encodeKbEvent({ type: 'error', message })))
+      }
+      controller.close()
+    },
+    async cancel() {
+      // сотрудник закрыл окно — останавливаем генерацию у провайдера
+      await answer.return(undefined)
+    }
+  })
 })

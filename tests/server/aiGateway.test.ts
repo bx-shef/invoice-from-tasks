@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AiGatewayError, askBitrixGpt, enforceAiLimit, enforceKbChatLimit } from '../../server/utils/aiGateway'
+import { AiGatewayError, askBitrixGpt, enforceAiLimit, enforceKbChatLimit, streamBitrixGpt } from '../../server/utils/aiGateway'
 import type { FrameUser } from '../../server/utils/frameAuth'
 import { AI_LIMITS, KB_CHAT_LIMITS, SlidingWindow } from '../../server/utils/rateLimit'
 
@@ -89,5 +89,37 @@ describe('enforceKbChatLimit', () => {
     for (let i = 0; i < KB_CHAT_LIMITS.user.max; i++) enforceKbChatLimit(user(7))
     expect(() => enforceKbChatLimit(user(7))).toThrow(/30 за 10 минут/)
     expect(() => enforceAiLimit(user(7))).not.toThrow()
+  })
+})
+
+describe('streamBitrixGpt', () => {
+  const req = { messages: [{ role: 'user' as const, content: 'q' }], json: false }
+  const collect = async (it: AsyncIterable<string>) => {
+    const out: string[] = []
+    for await (const t of it) out.push(t)
+    return out
+  }
+
+  it('повторяет временную ошибку до первого куска', async () => {
+    let calls = 0
+    const stream = async function* () {
+      calls++
+      if (calls === 1) throw new Error('503 overloaded')
+      yield 'а'
+      yield 'б'
+    }
+    expect(await collect(streamBitrixGpt(req, { stream, sleep: async () => {} }))).toEqual(['а', 'б'])
+    expect(calls).toBe(2)
+  })
+
+  it('после первого куска не повторяет — отказ 502', async () => {
+    let calls = 0
+    const stream = async function* () {
+      calls++
+      yield 'а'
+      throw new Error('503 overloaded')
+    }
+    await expect(collect(streamBitrixGpt(req, { stream, sleep: async () => {} }))).rejects.toMatchObject({ statusCode: 502 })
+    expect(calls).toBe(1)
   })
 })

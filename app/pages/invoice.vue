@@ -23,7 +23,8 @@ const config = useRuntimeConfig()
 const linksError = ref('')
 
 const invoiceId = ref<number | null>(null)
-const source = ref<TaskSource>('deal')
+// Задачи — только привязанные к счёту (владелец 2026-10-09: вариант «из сделки» убран)
+const source = ref<TaskSource>('invoice')
 const mode = ref<FillMode>('task')
 const origin = ref('')
 const consulting = ref('')
@@ -42,10 +43,6 @@ const MEASURES_WAIT = 10_000
 const measuresUnread = ref<UnreadReason>('failed')
 const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode, measuresUnread.value))
 
-const sourceItems = [
-  { label: 'Задачи связанной сделки', value: 'deal', description: 'Задачи, привязанные к сделке, из которой выставлен счёт' },
-  { label: 'Задачи, привязанные к счёту', value: 'invoice', description: 'Задачи, у которых в CRM-привязке указан этот счёт' }
-]
 const modeItems = [
   { label: 'Задача — одна строка', value: 'task', description: 'Всё время задачи по ставке ответственного' },
   { label: 'Записи времени — строки', value: 'time', description: 'Каждая запись времени по ставке того, кто её внёс' }
@@ -60,7 +57,7 @@ const roundingText = computed(() => {
 
 // Сменили источник или тип — собранные строки к новым настройкам не относятся: сбрасываем
 // предпросмотр, иначе кнопки записи записали бы строки, собранные по старому выбору (находка /code-review).
-watch([source, mode], () => fill.reset())
+watch(mode, () => fill.reset())
 const result = computed(() => fill.result.value)
 const taskTitles = computed(() => Object.fromEntries(fill.tasks.value.map(t => [t.id, t.title])))
 /**
@@ -125,8 +122,9 @@ onMounted(async () => {
   } catch {
     return
   }
-  // Ссылки для печатных форм — независимо от расчёта: сбой не мешает заполнению счёта.
-  void links.sync(invoiceId.value, new URL(origin.value).hostname, config.public.siteUrl || window.location.origin, app.settings.value.publicPage)
+  // Адрес картинки QR — в поле счёта для шаблона документа (ссылку на расшифровку больше не пишем,
+  // её показывает «Экономика счёта»). Независимо от расчёта: сбой не мешает заполнению счёта.
+  void links.sync(invoiceId.value, new URL(origin.value).hostname, config.public.siteUrl || window.location.origin, { linkField: '', qrField: app.settings.value.publicPage.qrField })
     .catch((e: unknown) => {
       linksError.value = e instanceof Error ? e.message : String(e)
     })
@@ -226,7 +224,7 @@ async function consult(promptId: string) {
         <B24Alert
           v-if="linksError"
           color="air-primary-warning"
-          title="Ссылки расшифровки в счёт не записаны"
+          title="Адрес QR-кода в счёт не записан"
           :description="`${linksError}. Заполнение счёта это не затрагивает.`"
           data-testid="invoice-links-error"
         />
@@ -241,18 +239,6 @@ async function consult(promptId: string) {
 
         <B24Card>
           <div class="grid gap-6 md:grid-cols-2">
-            <B24FormField
-              label="Откуда брать задачи"
-              description="Источники не смешиваются"
-            >
-              <B24RadioGroup
-                v-model="source"
-                :items="sourceItems"
-                value-key="value"
-                :disabled="locked"
-                data-testid="fill-source"
-              />
-            </B24FormField>
             <B24FormField label="Как считать">
               <B24RadioGroup
                 v-model="mode"

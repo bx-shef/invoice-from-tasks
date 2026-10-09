@@ -54,6 +54,17 @@ describe('строки и задачи', () => {
     expect(clientTaskIdFor(rows, 10, { task: {} }, '')).toBeNull()
   })
 
+  it('текст: HTML-сущности портала раскрываются', () => {
+    expect(plainText('&#91;ссылка&#93;&nbsp;СГР &amp; ОПТ')).toBe('[ссылка] СГР & ОПТ')
+  })
+
+  it('задача: состояние и дата — закрытия у принятой, иначе постановки', () => {
+    const done = parsePublicTask({ task: { id: 1, status: '5', createdDate: '2026-09-01T10:00:00+03:00', closedDate: '2026-09-20T12:00:00+03:00' } }, 'https://m', null, null)
+    expect(done).toMatchObject({ state: 'принята', date: '2026-09-20' })
+    const open = parsePublicTask({ task: { id: 2, status: '4', createdDate: '2026-09-01T10:00:00+03:00', closedDate: '2026-09-20T12:00:00+03:00' } }, 'https://m', null, null)
+    expect(open).toMatchObject({ state: 'требует принятия', date: '2026-09-01' })
+  })
+
   it('задача: текст без BB-кода, ссылки на нашу и клиентскую задачу', () => {
     const t = parsePublicTask({ task: { id: '10', title: 'Лендинг', description: '[B]Сделать[/B] [URL=https://x]макет[/URL]', ufSourceDomain: 'client.bitrix24.ru' } }, 'https://my.bitrix24.by', '77', [{ text: 'Готово' }, { text: '' }], 'UF_SOURCE_DOMAIN')
     expect(t).toEqual({
@@ -62,6 +73,8 @@ describe('строки и задачи', () => {
       description: 'Сделать макет',
       results: ['Готово'],
       url: 'https://my.bitrix24.by/company/personal/user/0/tasks/task/view/10/',
+      state: '',
+      date: '',
       clientTaskId: '77',
       clientTaskUrl: 'https://client.bitrix24.ru/company/personal/user/0/tasks/task/view/77/'
     })

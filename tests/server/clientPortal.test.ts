@@ -138,7 +138,7 @@ describe('задача клиента — разбор недоверенног�
 })
 
 describe('attachClientTasks', () => {
-  const task = (clientTaskId: string, host: string | null): PublicTask => ({ id: 1, title: '', description: '', results: [], url: '', clientTaskId, clientTaskUrl: host ? `https://${host}/company/personal/user/0/tasks/task/view/${clientTaskId}/` : null })
+  const task = (clientTaskId: string, host: string | null): PublicTask => ({ id: 1, title: '', description: '', results: [], state: '', date: '', url: '', clientTaskId, clientTaskUrl: host ? `https://${host}/company/personal/user/0/tasks/task/view/${clientTaskId}/` : null })
   const client = (hook: string | null) => ({ kind: 'company' as const, id: 3, title: '', accessCode: null, hook })
   const view = { title: 'К', description: '', results: [], creatorName: '', creatorIcon: null, state: 'принята', acceptedAt: null }
 

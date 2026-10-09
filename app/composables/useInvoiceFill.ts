@@ -41,6 +41,7 @@ import { findRate, invoiceClients } from '#shared/domain/rates'
 import { MAX_ESTIMATE_ITEMS, type EstimateItem } from '#shared/domain/estimate'
 import { invoiceEconomy, taskEconomics, taskFieldValues, type TaskEconomy } from '#shared/domain/economics'
 import { camelFieldKey } from '#shared/domain/userFields'
+import { parseEconomicsFields } from '#shared/domain/invoiceLinks'
 import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
@@ -376,7 +377,17 @@ export function useInvoiceFill() {
         problems.push(`поля задач: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
-    const field = settings.value.economics.invoiceField
+    // Поле в настройках не выбрано — берём поле «Экономика счёта» самого счёта (владелец 2026-10-09:
+    // заполнил товары, а экономика пуста). Полей такого типа несколько — без настройки не угадываем.
+    let field = settings.value.economics.invoiceField
+    if (!field) {
+      try {
+        const found = parseEconomicsFields(await b24.call<unknown>('crm.item.fields', { entityTypeId: INVOICE_ENTITY_TYPE_ID }))
+        if (found.length === 1) field = found[0]!.name
+      } catch {
+        // нет поля — нечего писать; поля задач уже записаны
+      }
+    }
     if (field) {
       const titles = new Map(tasks.value.map(t => [t.id, t.title]))
       const value = invoiceEconomy(economics.value, { at: new Date(), currency: inv.currencyId, source, mode, threshold: settings.value.economics.threshold, titles })
