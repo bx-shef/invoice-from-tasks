@@ -6,8 +6,9 @@
 // и слайдером по ссылке «Что это значит?» (HelpLink → app.vue → сюда). Чат — только во фрейме
 // (модель платная). Стили — app/assets/css/help.css, всё под `.hd-shell`.
 import type { KbPage } from '#shared/domain/kb'
-import { renderHelp } from '~/utils/help'
-import { previewOf, surroundOf, tocOf } from '~/utils/helpLayout'
+import { FAQ_SLUG, renderHelp } from '~/utils/help'
+import { faqItemsOf, previewOf, surroundOf, tocOf } from '~/utils/helpLayout'
+import HomeIcon from '@bitrix24/b24icons-vue/outline/HomeIcon'
 import RocketIcon from '@bitrix24/b24icons-vue/outline/RocketIcon'
 import EditMIcon from '@bitrix24/b24icons-vue/outline/EditMIcon'
 import MoneyIcon from '@bitrix24/b24icons-vue/outline/MoneyIcon'
@@ -28,12 +29,20 @@ const loadError = ref('')
 const inFrame = ref(false)
 const { open: chatOpen, openChat, closeChat, discussPage } = useHelpChat()
 
-const slug = computed(() => String(route.query.p ?? '') || pages.value[0]?.slug || '')
+// Без `?p` — главная справки (как в skills-site): плитки разделов, частые вопросы, «Спросить ИИ»
+const slug = computed(() => String(route.query.p ?? ''))
+const isHome = computed(() => !slug.value)
 const page = computed(() => pages.value.find(p => p.slug === slug.value) ?? null)
 const html = computed(() => (page.value ? renderHelp(page.value.markdown) : ''))
 const toc = computed(() => (page.value ? tocOf(page.value.markdown) : []))
 const preview = computed(() => previewOf(toc.value))
 const surround = computed(() => surroundOf(pages.value, slug.value))
+const isFaq = computed(() => slug.value === FAQ_SLUG)
+const faqPage = computed(() => pages.value.find(p => p.slug === FAQ_SLUG) ?? null)
+const faq = computed(() => (faqPage.value ? faqItemsOf(faqPage.value.markdown) : { intro: '', items: [] }))
+const faqHtml = computed(() => faq.value.items.map(i => ({ ...i, html: renderHelp(i.answer) })))
+/** Разделы на главной — всё, кроме FAQ (он идёт своим блоком ниже). */
+const tiles = computed(() => pages.value.filter(p => p.slug !== FAQ_SLUG))
 
 const ICONS: Record<string, typeof RocketIcon> = {
   '01-start': RocketIcon,
@@ -43,16 +52,16 @@ const ICONS: Record<string, typeof RocketIcon> = {
   '05-economics': GraphsDiagramIcon,
   '90-faq': QuestionIcon
 }
-const menuItems = computed(() => pages.value.map(p => ({
+const menuItems = computed(() => [{ label: 'Главная', icon: HomeIcon, to: { path: '/help' }, active: isHome.value }, ...pages.value.map(p => ({
   label: p.title,
   icon: ICONS[p.slug] ?? KnowledgeBaseIcon,
   to: { path: '/help', query: { p: p.slug } },
   active: p.slug === slug.value
-})))
+}))])
 const footerItems = computed(() => [{ label: 'Спросить ИИ', icon: CopilotIcon, onSelect: () => openChat() }])
 
 const crumbs = computed(() => [
-  { label: 'Справка', to: { path: '/help', query: { p: pages.value[0]?.slug ?? '' } } },
+  { label: 'Справка', to: { path: '/help' } },
   { label: page.value?.title ?? '' }
 ])
 
@@ -60,7 +69,10 @@ const crumbs = computed(() => [
 async function scrollToHash() {
   await nextTick()
   const id = route.hash.slice(1)
-  if (id) document.getElementById(decodeURIComponent(id))?.scrollIntoView({ block: 'start' })
+  const el = id ? document.getElementById(decodeURIComponent(id)) : null
+  // Вопрос FAQ из «Что это значит?» — раскрыт сразу
+  if (el instanceof HTMLDetailsElement) el.open = true
+  if (el) el.scrollIntoView({ block: 'start' })
   else window.scrollTo({ top: 0 })
 }
 
@@ -182,8 +194,101 @@ watch(() => [route.query.p, route.hash], () => void scrollToHash())
                 :description="loadError"
                 class="hd-alert"
               />
+              <section
+                v-if="isHome && pages.length"
+                class="hd-home"
+                data-testid="help-home"
+              >
+                <div class="hd-hero">
+                  <div
+                    class="hd-hero-glow"
+                    aria-hidden="true"
+                  />
+                  <h1 class="hd-hero-title">
+                    <span class="hd-hero-brand">Счёт из задач</span>
+                    <span class="hd-hero-word">Справка</span>
+                  </h1>
+                  <p class="hd-hero-text">
+                    Как заполнить счёт по задачам, задать ставки и показать клиенту расшифровку
+                  </p>
+                </div>
+
+                <div class="hd-grid">
+                  <NuxtLink
+                    v-for="(t, i) in tiles"
+                    :key="t.slug"
+                    :to="{ path: '/help', query: { p: t.slug } }"
+                    class="hd-tile"
+                    :class="`hd-tone-${(i % 6) + 1}`"
+                  >
+                    <div class="hd-tile-cover">
+                      <span class="hd-tile-badge"><component :is="ICONS[t.slug] ?? KnowledgeBaseIcon" /></span>
+                      <component
+                        :is="ICONS[t.slug] ?? KnowledgeBaseIcon"
+                        class="hd-tile-mark"
+                      />
+                    </div>
+                    <div class="hd-tile-body">
+                      <h3 class="hd-tile-title">{{ t.title }}</h3>
+                      <p class="hd-tile-text">{{ t.description }}</p>
+                    </div>
+                    <span
+                      class="hd-tile-go"
+                      aria-hidden="true"
+                    >→</span>
+                  </NuxtLink>
+                </div>
+
+                <h2 class="hd-section-title">
+                  Частые вопросы
+                </h2>
+                <div class="hd-faq">
+                  <details
+                    v-for="item in faqHtml.slice(0, 5)"
+                    :key="item.id"
+                    class="hd-faq-item"
+                  >
+                    <summary>{{ item.q }}</summary>
+                    <!-- eslint-disable vue/no-v-html -- markdown справки, сырой HTML выключен (renderHelp) -->
+                    <div
+                      class="hd-faq-answer hd-md"
+                      @click="onContentClick"
+                      v-html="item.html"
+                    />
+                    <!-- eslint-enable vue/no-v-html -->
+                  </details>
+                </div>
+                <div class="hd-section-more">
+                  <NuxtLink
+                    :to="{ path: '/help', query: { p: FAQ_SLUG } }"
+                    class="hd-btn-pill"
+                  >
+                    Все вопросы
+                  </NuxtLink>
+                </div>
+
+                <div
+                  v-if="inFrame"
+                  class="hd-promo"
+                >
+                  <div>
+                    <h3 class="hd-promo-title">
+                      Не нашли ответ?
+                    </h3>
+                    <p class="hd-promo-text">
+                      ИИ-помощник ответит по этой справке и даст ссылки на разделы
+                    </p>
+                  </div>
+                  <B24Button
+                    color="air-boost"
+                    label="Спросить ИИ"
+                    @click="openChat()"
+                  />
+                </div>
+              </section>
+
               <article
-                v-if="page"
+                v-else-if="page"
                 data-testid="help-page"
               >
                 <div class="hd-article-head">
@@ -204,7 +309,7 @@ watch(() => [route.query.p, route.hash], () => void scrollToHash())
                 </p>
 
                 <div
-                  v-if="preview.length > 1"
+                  v-if="preview.length > 1 && !isFaq"
                   class="hd-toc-preview"
                 >
                   <p>В статье:</p>
@@ -222,6 +327,26 @@ watch(() => [route.query.p, route.hash], () => void scrollToHash())
 
                 <!-- eslint-disable vue/no-v-html -- markdown справки из репозитория, сырой HTML выключен (renderHelp) -->
                 <div
+                  v-if="isFaq"
+                  class="hd-faq"
+                  data-testid="help-faq"
+                >
+                  <details
+                    v-for="item in faqHtml"
+                    :id="item.id"
+                    :key="item.id"
+                    class="hd-faq-item"
+                  >
+                    <summary>{{ item.q }}</summary>
+                    <div
+                      class="hd-faq-answer hd-md"
+                      @click="onContentClick"
+                      v-html="item.html"
+                    />
+                  </details>
+                </div>
+                <div
+                  v-else
                   class="hd-md"
                   @click="onContentClick"
                   v-html="html"
@@ -254,11 +379,11 @@ watch(() => [route.query.p, route.hash], () => void scrollToHash())
               </article>
             </div>
             <aside
-              v-if="page"
+              v-if="page && !isHome"
               class="hd-aside"
             >
               <HelpToc
-                v-if="toc.length"
+                v-if="toc.length && !isFaq"
                 :links="toc"
                 :slug="slug"
               />

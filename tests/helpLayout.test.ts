@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { discussQuestion, helpHref, previewOf, searchHelp, searchSectionsOf, surroundOf, tocOf } from '~/utils/helpLayout'
+import { discussQuestion, faqItemsOf, helpHref, previewOf, searchHelp, searchSectionsOf, surroundOf, tocOf } from '~/utils/helpLayout'
 import { renderHelp } from '~/utils/help'
 
 const md = [
@@ -78,5 +78,18 @@ describe('навигация справки', () => {
     expect(helpHref('90-faq', 'approval-answer')).toBe('/help?p=90-faq#approval-answer')
     expect(helpHref('02-fill')).toBe('/help?p=02-fill')
     expect(discussQuestion('Заполнение')).toBe('Перескажи статью «Заполнение» и предложи задать по ней вопросы.')
+  })
+})
+
+describe('faqItemsOf', () => {
+  it('режет FAQ на вопросы с якорями, вступление отдельно, ## в коде — не вопрос', () => {
+    const md = 'Вступление.\n\n## Почему? {#why}\n\nПотому.\n\n```\n## не вопрос\n```\n\n## Как {#how}\nТак.'
+    expect(faqItemsOf(md)).toEqual({
+      intro: 'Вступление.',
+      items: [
+        { id: 'why', q: 'Почему?', answer: 'Потому.\n\n```\n## не вопрос\n```' },
+        { id: 'how', q: 'Как', answer: 'Так.' }
+      ]
+    })
   })
 })
