@@ -135,13 +135,27 @@ export function rateBasis(row: DraftRow, ctx: PreviewContext): string {
   return `ставка ${formatMoney(row.baseRate)}${converted} + наценка ${formatNumber(row.markupPercent)}% (${markupLabel(row)})`
 }
 
+/**
+ * Подстрока расчёта. Обычная строка — «часы × цена часа = сумма» (расчёт). Строка с «Стоимостью
+ * работ» из задачи — фикс: сумма взята из поля задачи, формула — только для сравнения; иначе
+ * «11,33 ч × 161,50 = 425,00» читалось как ошибка счёта (замечание владельца).
+ */
+export function calcText(row: DraftRow, ctx: PreviewContext): string {
+  const who = ctx.userLabel(row.userId)
+  if (row.fixedGross !== undefined) {
+    const formula = row.formulaSum !== undefined ? ` · по формуле ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.formulaSum)}` : ''
+    return `${who} · фикс: «Стоимость работ» ${formatMoney(row.fixedGross)} с налогом = ${formatMoney(row.sum)} без налога${formula}`
+  }
+  return `${who} · расчёт: ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.sum)}`
+}
+
 /** Строка предпросмотра; `unit` — краткое обозначение единицы («ч»), пусто — без неё. */
 export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): PreviewLine {
   const input: CellInput = { row, amounts: lineAmounts(row), unit }
   return {
     row,
     cells: PREVIEW_COLUMNS.map(column => column.cell(input)),
-    calc: `${ctx.userLabel(row.userId)} · ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.sum)}`,
+    calc: calcText(row, ctx),
     basis: rateBasis(row, ctx),
     rateTitle: `Ставка на ${formatRuDate(row.rateDate)}`
   }

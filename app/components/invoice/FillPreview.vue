@@ -153,6 +153,12 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
           <tr class="text-left opacity-70">
             <th
               scope="col"
+              class="py-2 pr-2 text-right font-medium"
+            >
+              №
+            </th>
+            <th
+              scope="col"
               class="py-2 pr-3 font-medium"
             >
               Название строки
@@ -170,12 +176,15 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
         </thead>
         <tbody>
           <tr
-            v-for="line in lines"
+            v-for="(line, n) in lines"
             :key="line.row.key"
             class="align-top border-t border-(--ui-color-divider-less)"
             :class="{ 'bg-(--ui-color-design-tinted-warning-bg)': outlierIds.has(line.row.taskId) }"
             :data-outlier="outlierIds.has(line.row.taskId) || undefined"
           >
+            <td class="py-2 pr-2 text-right opacity-60 tabular-nums">
+              {{ n + 1 }}
+            </td>
             <td class="py-2 pr-3">
               {{ line.row.name }}
               <span class="block text-xs opacity-60">{{ line.calc }}</span>
@@ -205,7 +214,7 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
           >
             <th
               scope="row"
-              :colspan="PREVIEW_COLUMNS.length"
+              :colspan="PREVIEW_COLUMNS.length + 1"
               class="pr-3 text-right"
               :class="[footerPadding(item.strong, i), item.strong ? 'font-semibold' : 'font-normal']"
             >

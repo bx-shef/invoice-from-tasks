@@ -88,7 +88,10 @@ function hoursText(h: number): string {
       <table class="w-full text-sm">
         <thead class="bg-(--ui-color-bg-content-secondary)">
           <tr class="text-left text-xs opacity-70">
-            <th class="py-2 pl-3 pr-3 font-medium">
+            <th class="py-2 pl-3 pr-2 text-right font-medium">
+              №
+            </th>
+            <th class="py-2 pr-3 font-medium">
               Задача
             </th>
             <th class="py-2 pr-3 text-right font-medium">
@@ -107,14 +110,17 @@ function hoursText(h: number): string {
         </thead>
         <tbody>
           <tr
-            v-for="e in items"
+            v-for="(e, n) in items"
             :key="e.taskId"
             class="border-t border-(--ui-color-divider-less) border-l-4"
             :class="e.flag ? FLAG[e.flag].bar : 'border-l-transparent'"
             :data-flag="e.flag ?? ''"
             data-testid="economics-row"
           >
-            <td class="py-2 pl-3 pr-3 align-top">
+            <td class="py-2 pl-3 pr-2 text-right align-top opacity-60 tabular-nums">
+              {{ n + 1 }}
+            </td>
+            <td class="py-2 pr-3 align-top">
               <InvoiceTaskLink
                 :origin="origin"
                 :task-id="e.taskId"
