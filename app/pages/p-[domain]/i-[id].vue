@@ -197,6 +197,14 @@ function rowMeta(task: PublicInvoiceView['tasks'][number] | undefined): { state:
   return { state: task?.state ?? '', date: task?.date ?? '', done: task?.state === 'принята' }
 }
 
+/** Результаты, раскрытые целиком (по умолчанию — первые 6 строк). */
+const fullResult = ref(new Set<number>())
+function toggleResult(id: number) {
+  const next = new Set(fullResult.value)
+  if (!next.delete(id)) next.add(id)
+  fullResult.value = next
+}
+
 /** Строка счёта без служебной приставки «[87-119884] » — номера задач и так видны рядом. */
 function rowTitle(name: string): string {
   return name.replace(/^\[[^\]]*\]\s*/, '') || name
@@ -526,9 +534,20 @@ const rowItems = computed(() => {
                     >✓</span>
                     Результат работы
                   </div>
-                  <p class="whitespace-pre-line text-lg leading-relaxed line-clamp-6">
+                  <p
+                    class="whitespace-pre-line text-lg leading-relaxed break-words"
+                    :class="{ 'line-clamp-6': !fullResult.has(item.task.id) }"
+                  >
                     {{ lastResult(item.task) }}
                   </p>
+                  <button
+                    v-if="lastResult(item.task).split('\n').length > 6 || lastResult(item.task).length > 300"
+                    type="button"
+                    class="underline text-(--ui-color-accent-main-primary)"
+                    @click="toggleResult(item.task.id)"
+                  >
+                    {{ fullResult.has(item.task.id) ? 'Свернуть' : 'Показать полностью' }}
+                  </button>
                   <details v-if="allResults(item.task).length > 1">
                     <summary class="cursor-pointer opacity-80">
                       Все результаты ({{ allResults(item.task).length }})
