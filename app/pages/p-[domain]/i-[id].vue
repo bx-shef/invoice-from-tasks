@@ -11,7 +11,7 @@ import CrossedEyeIcon from '@bitrix24/b24icons-vue/outline/CrossedEyeIcon'
 import { MAX_COMMENT_LENGTH } from '#shared/domain/approval'
 import { pdfFileName, type PublicInvoiceView } from '#shared/domain/publicInvoice'
 
-useHead({ title: 'Расшифровка счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
+useHead({ title: 'Документы для счёта', meta: [{ name: 'robots', content: 'noindex, nofollow' }] })
 
 // Ночная тема — по системе устройства (страницу открывают с телефона по QR, без портала)
 onMounted(() => {
@@ -38,6 +38,13 @@ const invoice = ref<PublicInvoiceView | null>(null)
 const closedText = ref('')
 
 async function open() {
+  // Автозаполнение браузера не шлёт input до первого касания — берём значение прямо из поля
+  const el = document.getElementById('access-code') as HTMLInputElement | null
+  if (el?.value && el.value !== code.value) code.value = el.value
+  if (code.value.trim().length !== 10) {
+    error.value = 'Код доступа — 10 символов'
+    return
+  }
   busy.value = true
   error.value = ''
   try {
@@ -141,7 +148,8 @@ async function sendComment() {
     })
     commentText.value = ''
     commentSent.value = true
-    await refreshApproval()
+    // Перечитывание счёта долгое (задачи, документы) — кнопку не держим: список обновится сам
+    void refreshApproval().catch(() => {})
   } catch (e) {
     const err = e as { data?: { error?: string }, statusMessage?: string }
     commentError.value = err.data?.error || err.statusMessage || 'Не удалось отправить комментарий'
@@ -189,6 +197,14 @@ function rowMeta(task: PublicInvoiceView['tasks'][number] | undefined): { state:
   return { state: task?.state ?? '', date: task?.date ?? '', done: task?.state === 'принята' }
 }
 
+/** Результаты задачи: сначала клиента (его задача — то, что он ставил), затем наши; без дублей. */
+function allResults(task: PublicInvoiceView['tasks'][number]): string[] {
+  return [...new Set([...(task.clientTask?.results ?? []), ...task.results])]
+}
+function lastResult(task: PublicInvoiceView['tasks'][number]): string {
+  return allResults(task)[0] ?? ''
+}
+
 /** Строки счёта — пункты аккордеона: раскрывается задача строки (наша и задача клиента отдельно). */
 const rowItems = computed(() => {
   const rows = invoice.value?.rows ?? []
@@ -220,10 +236,10 @@ const rowItems = computed(() => {
       >
         <div class="text-center space-y-1">
           <div class="text-xl">
-            Расшифровка счёта
+            Документы для счёта
           </div>
-          <div class="text-sm opacity-70">
-            <b>№{{ invoiceId }}</b> · {{ domain }}
+          <div class="text-base opacity-80">
+            {{ domain }}
           </div>
         </div>
         <B24FormField
@@ -257,7 +273,7 @@ const rowItems = computed(() => {
           >
             <template #trailing>
               <B24Button
-                size="sm"
+                size="md"
                 color="air-tertiary-no-accent"
                 :icon="showCode ? CrossedEyeIcon : ObserverIcon"
                 :aria-label="showCode ? 'Скрыть код' : 'Показать код'"
@@ -276,12 +292,12 @@ const rowItems = computed(() => {
           block
           label="Открыть"
           :loading="busy"
-          :disabled="busy || code.trim().length !== 10"
+          :disabled="busy"
           data-testid="public-open"
         />
         <p
           v-if="error"
-          class="text-sm text-center text-(--ui-color-accent-main-alert)"
+          class="text-base text-center text-(--ui-color-accent-main-alert)"
           data-testid="public-error"
         >
           {{ error }}
@@ -290,10 +306,10 @@ const rowItems = computed(() => {
     </div>
     <div
       v-else
-      class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4"
+      class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4 text-base"
     >
       <h1 class="sr-only">
-        Расшифровка счёта
+        Документы для счёта
       </h1>
 
       <B24Alert
@@ -311,20 +327,19 @@ const rowItems = computed(() => {
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="space-y-1">
-              <div class="text-lg font-semibold leading-tight">
-                {{ invoice.title }}
+              <div class="text-xl font-semibold leading-tight">
+                Документы для счёта №{{ invoice.number || invoiceId }}{{ invoice.date ? ` от ${date(invoice.date)}` : '' }}
               </div>
-              <div class="flex flex-wrap items-center gap-2 text-sm opacity-80">
-                <span v-if="invoice.date">от {{ date(invoice.date) }}</span>
+              <div class="flex flex-wrap items-center gap-2 text-base opacity-80">
                 <B24Badge
                   color="air-secondary-accent"
-                  size="sm"
+                  size="md"
                   :label="invoice.stage"
                 />
               </div>
             </div>
-            <div class="text-right">
-              <div class="text-xs uppercase opacity-60">
+            <div class="w-full sm:w-auto flex sm:block items-baseline justify-between gap-3 sm:text-right border-t sm:border-0 border-(--ui-color-design-plain-content-divider) pt-2 sm:pt-0">
+              <div class="text-sm uppercase opacity-75">
                 Итого
               </div>
               <div class="text-2xl font-semibold whitespace-nowrap">
@@ -332,12 +347,12 @@ const rowItems = computed(() => {
               </div>
             </div>
           </div>
-          <div class="grid gap-3 sm:grid-cols-2 text-sm">
+          <div class="grid gap-3 sm:grid-cols-2 text-base">
             <div
               v-if="invoice.myCompany"
               class="rounded-lg bg-(--ui-color-bg-content-secondary) p-3"
             >
-              <div class="text-xs opacity-60">
+              <div class="text-sm opacity-75">
                 Исполнитель
               </div>
               <div class="font-medium">
@@ -348,7 +363,7 @@ const rowItems = computed(() => {
               v-if="invoice.company || invoice.contacts.length"
               class="rounded-lg bg-(--ui-color-bg-content-secondary) p-3"
             >
-              <div class="text-xs opacity-60">
+              <div class="text-sm opacity-75">
                 Заказчик
               </div>
               <div
@@ -384,7 +399,7 @@ const rowItems = computed(() => {
             <div class="font-medium">
               {{ invoice.approval.mark.approved ? 'Счёт согласован' : 'Счёт ждёт вашего согласования' }}
             </div>
-            <div class="text-sm opacity-70">
+            <div class="text-base opacity-80">
               {{ invoice.approval.mark.approved
                 ? (invoice.approval.mark.approvedAt ? dateTime(invoice.approval.mark.approvedAt) : '')
                 : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
@@ -407,7 +422,7 @@ const rowItems = computed(() => {
           class="space-y-2"
           data-testid="public-documents"
         >
-          <div class="text-xs uppercase opacity-60">
+          <div class="text-sm uppercase opacity-75">
             Документы
           </div>
           <div class="flex flex-wrap gap-3">
@@ -415,7 +430,7 @@ const rowItems = computed(() => {
               v-for="d in invoice.documents"
               :key="d.id"
               type="button"
-              class="hd-card w-36 p-2 space-y-2 text-left hover:shadow-md transition-shadow disabled:opacity-60"
+              class="hd-card w-36 p-2 space-y-2 text-left hover:shadow-md transition-shadow disabled:opacity-75"
               :aria-label="`Скачать ${d.title} (PDF)`"
               :disabled="downloading !== null"
               data-testid="public-document"
@@ -430,25 +445,25 @@ const rowItems = computed(() => {
               >
               <div
                 v-else
-                class="w-full aspect-[3/4] rounded bg-(--ui-color-bg-content-secondary) flex items-center justify-center text-xs opacity-60"
+                class="w-full aspect-[3/4] rounded bg-(--ui-color-bg-content-secondary) flex items-center justify-center text-sm opacity-75"
               >
                 PDF
               </div>
-              <div class="text-xs font-medium leading-tight">
+              <div class="text-sm font-medium leading-tight">
                 {{ downloading === d.id ? 'Скачиваю…' : d.title }}
               </div>
             </button>
           </div>
           <p
             v-if="docError"
-            class="text-sm text-(--ui-color-accent-main-alert)"
+            class="text-base text-(--ui-color-accent-main-alert)"
           >
             {{ docError }}
           </p>
         </section>
 
         <section class="space-y-2">
-          <div class="text-xs uppercase opacity-60">
+          <div class="text-sm uppercase opacity-75">
             Работы
           </div>
           <!-- Строка — чтобы вспомнить: №, что за задача, состояние, дата, цена. Подробности — по раскрытию. -->
@@ -464,14 +479,14 @@ const rowItems = computed(() => {
                 class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left"
                 data-testid="public-row"
               >
-                <span class="text-sm opacity-50 tabular-nums">{{ item.n }}</span>
+                <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                 <span class="min-w-0">
-                  <span class="block font-medium leading-snug">{{ item.task?.title || item.row.name }}</span>
-                  <span class="flex flex-wrap items-center gap-2 text-xs opacity-70 mt-0.5">
+                  <span class="block text-lg font-medium leading-snug">{{ item.task?.title || item.row.name }}</span>
+                  <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
                     <B24Badge
                       v-if="item.state"
                       :color="item.done ? 'air-primary-success' : 'air-secondary'"
-                      size="xs"
+                      size="md"
                       :label="item.state"
                     />
                     <span v-if="item.date">{{ date(item.date) }}</span>
@@ -480,121 +495,124 @@ const rowItems = computed(() => {
                 </span>
                 <span
                   v-if="item.row.sum !== null"
-                  class="whitespace-nowrap font-semibold tabular-nums"
+                  class="whitespace-nowrap text-lg font-semibold tabular-nums"
                 >{{ money(item.row.sum, invoice.currencyId) }}</span>
                 <span
                   v-else
-                  class="whitespace-nowrap text-xs opacity-60"
+                  class="whitespace-nowrap text-sm opacity-75"
                 >без строки</span>
               </div>
             </template>
             <template #body="{ item }">
+              <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
               <div
                 v-if="item.task"
-                class="space-y-3 text-sm pb-2"
+                class="space-y-3 text-base pb-3"
               >
                 <div
-                  class="space-y-1"
+                  v-if="lastResult(item.task)"
+                  class="pub-result p-4 space-y-2"
                   data-testid="public-task"
                 >
-                  <div class="text-xs opacity-60">
-                    В счёте: {{ item.row.name }}
+                  <div class="flex items-center gap-2 text-lg font-semibold">
+                    <span
+                      class="size-7 rounded-md border-2 border-(--ui-color-accent-main-primary) text-(--ui-color-accent-main-primary) flex items-center justify-center text-sm"
+                      aria-hidden="true"
+                    >✓</span>
+                    Результат работы
                   </div>
-                  <a
-                    :href="item.task.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="underline"
-                  >Задача исполнителя #{{ item.task.id }}</a>
-                  <details v-if="item.task.results.length">
-                    <summary class="cursor-pointer text-xs opacity-70">
-                      Результат{{ item.task.results.length > 1 ? ` (${item.task.results.length})` : '' }}
+                  <p class="whitespace-pre-line text-lg leading-relaxed line-clamp-6">
+                    {{ lastResult(item.task) }}
+                  </p>
+                  <details v-if="allResults(item.task).length > 1">
+                    <summary class="cursor-pointer opacity-80">
+                      Все результаты ({{ allResults(item.task).length }})
                     </summary>
                     <p
-                      v-for="(r, j) in item.task.results"
+                      v-for="(r, j) in allResults(item.task).slice(1)"
                       :key="j"
-                      class="whitespace-pre-line mt-1 pl-2 border-l-2 border-(--ui-color-design-plain-content-divider)"
+                      class="whitespace-pre-line mt-2 pt-2 border-t border-(--ui-color-design-plain-content-divider)"
                     >
                       {{ r }}
                     </p>
                   </details>
-                  <details v-if="item.task.description">
-                    <summary class="cursor-pointer text-xs opacity-70">
-                      Описание задачи
-                    </summary>
-                    <p class="whitespace-pre-line opacity-80 mt-1">
-                      {{ item.task.description }}
-                    </p>
-                  </details>
                 </div>
                 <div
-                  v-if="item.task.clientTaskId"
-                  class="rounded-lg bg-(--ui-color-bg-content-secondary) p-3 space-y-1"
-                  data-testid="public-client-task"
+                  v-else
+                  data-testid="public-task"
+                />
+
+                <div
+                  v-if="item.task.clientTask?.creatorName"
+                  class="pub-tile p-4 space-y-2"
                 >
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-xs opacity-60">Ваша задача</span>
-                    <a
+                  <div class="opacity-75">
+                    Поставил
+                  </div>
+                  <div class="flex items-center gap-3 text-lg">
+                    <img
+                      v-if="item.task.clientTask.creatorIcon"
+                      :src="item.task.clientTask.creatorIcon"
+                      alt=""
+                      referrerpolicy="no-referrer"
+                      class="size-10 rounded-full object-cover"
+                    >
+                    <span
+                      v-else
+                      class="size-10 rounded-full bg-(--ui-color-accent-main-primary) text-white flex items-center justify-center"
+                      aria-hidden="true"
+                    >{{ item.task.clientTask.creatorName.slice(0, 1) }}</span>
+                    {{ item.task.clientTask.creatorName }}
+                  </div>
+                </div>
+
+                <div class="pub-tile p-4 space-y-2">
+                  <div class="opacity-75">
+                    В счёте
+                  </div>
+                  <div>{{ item.row.name }}</div>
+                  <div class="flex flex-wrap gap-2 pt-1">
+                    <B24Button
                       v-if="item.task.clientTaskUrl"
-                      :href="item.task.clientTaskUrl"
+                      :to="item.task.clientTaskUrl"
                       target="_blank"
-                      rel="noopener noreferrer"
-                      class="underline font-medium"
-                    >#{{ item.task.clientTaskId }}</a>
-                    <span v-else>#{{ item.task.clientTaskId }}</span>
-                    <B24Badge
-                      v-if="item.task.clientTask"
-                      :color="item.task.clientTask.acceptedAt ? 'air-primary-success' : 'air-secondary'"
-                      size="xs"
-                      :label="item.task.clientTask.acceptedAt ? `принята ${date(item.task.clientTask.acceptedAt)}` : item.task.clientTask.state"
+                      color="air-primary"
+                      size="md"
+                      :label="`Ваша задача #${item.task.clientTaskId}`"
+                      data-testid="public-client-task"
+                    />
+                    <span
+                      v-else-if="item.task.clientTaskId"
+                      class="opacity-80"
+                      data-testid="public-client-task"
+                    >Ваша задача #{{ item.task.clientTaskId }}</span>
+                    <B24Button
+                      :to="item.task.url"
+                      target="_blank"
+                      color="air-secondary"
+                      size="md"
+                      :label="`Задача исполнителя #${item.task.id}`"
                     />
                   </div>
-                  <template v-if="item.task.clientTask">
-                    <div class="font-medium">
-                      {{ item.task.clientTask.title }}
-                    </div>
-                    <div class="flex items-center gap-2 text-xs opacity-80">
-                      <img
-                        v-if="item.task.clientTask.creatorIcon"
-                        :src="item.task.clientTask.creatorIcon"
-                        alt=""
-                        referrerpolicy="no-referrer"
-                        class="size-5 rounded-full object-cover"
-                      >
-                      <span>Поставил: {{ item.task.clientTask.creatorName || '—' }}</span>
-                    </div>
-                    <details v-if="item.task.clientTask.results.length">
-                      <summary class="cursor-pointer text-xs opacity-70">
-                        Результат{{ item.task.clientTask.results.length > 1 ? ` (${item.task.clientTask.results.length})` : '' }}
-                      </summary>
-                      <p
-                        v-for="(r, k) in item.task.clientTask.results"
-                        :key="k"
-                        class="whitespace-pre-line mt-1 pl-2 border-l-2 border-(--ui-color-design-plain-content-divider)"
-                      >
-                        {{ r }}
-                      </p>
-                    </details>
-                    <details v-if="item.task.clientTask.description">
-                      <summary class="cursor-pointer text-xs opacity-70">
-                        Описание задачи
-                      </summary>
-                      <p class="whitespace-pre-line opacity-80 mt-1">
-                        {{ item.task.clientTask.description }}
-                      </p>
-                    </details>
-                  </template>
+                  <details v-if="item.task.clientTask?.description || item.task.description">
+                    <summary class="cursor-pointer opacity-80">
+                      Описание задачи
+                    </summary>
+                    <p class="whitespace-pre-line mt-2 opacity-90">
+                      {{ item.task.clientTask?.description || item.task.description }}
+                    </p>
+                  </details>
                 </div>
               </div>
             </template>
           </B24Accordion>
           <p
             v-if="invoice.truncated"
-            class="text-sm opacity-70"
+            class="text-base opacity-80"
           >
             Показаны первые позиции счёта; итог — по всему счёту.
           </p>
-          <div class="flex justify-between px-3 pt-1 font-semibold">
+          <div class="flex justify-between px-3 pt-1 text-xl font-semibold">
             <span>Итого</span>
             <span class="tabular-nums">{{ money(invoice.total, invoice.currencyId) }}</span>
           </div>
@@ -608,7 +626,7 @@ const rowItems = computed(() => {
           <div class="font-medium">
             {{ invoice.approval.mark.approved ? 'Вопросы по счёту' : 'Есть замечания?' }}
           </div>
-          <p class="text-sm opacity-70">
+          <p class="text-base opacity-80">
             Напишите, что поправить, — менеджер получит задачу и ответит здесь же.
           </p>
           <form
@@ -634,13 +652,13 @@ const rowItems = computed(() => {
             />
             <p
               v-if="commentError"
-              class="text-sm text-(--ui-color-accent-main-alert)"
+              class="text-base text-(--ui-color-accent-main-alert)"
             >
               {{ commentError }}
             </p>
             <p
               v-else-if="commentSent"
-              class="text-sm text-(--ui-color-accent-main-success)"
+              class="text-base text-(--ui-color-accent-main-success)"
             >
               Комментарий отправлен
             </p>
@@ -648,15 +666,15 @@ const rowItems = computed(() => {
           <article
             v-for="c in invoice.approval.comments"
             :key="c.id"
-            class="rounded border border-(--ui-color-design-plain-content-divider) p-3 space-y-2 text-sm"
+            class="rounded border border-(--ui-color-design-plain-content-divider) p-3 space-y-2 text-base"
             data-testid="public-comment"
           >
-            <div class="flex justify-between gap-2 text-xs opacity-70">
+            <div class="flex justify-between gap-2 text-sm opacity-80">
               <span>{{ dateTime(c.created) }}</span>
               <B24Badge
                 v-if="c.closed"
                 color="air-primary-success"
-                size="sm"
+                size="md"
                 label="Закрыто"
               />
             </div>
@@ -688,6 +706,17 @@ const rowItems = computed(() => {
   border: 1px solid var(--ui-color-design-plain-content-divider, rgb(0 0 0 / 0.08));
   border-radius: 14px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+}
+
+/* Карточки раскрытой задачи — как в мобильном Б24 */
+.pub-result {
+  border: 2px solid var(--ui-color-accent-main-primary, #2066b0);
+  border-radius: 18px;
+  background: var(--ui-color-bg-content-primary, #fff);
+}
+.pub-tile {
+  border-radius: 18px;
+  background: var(--ui-color-bg-content-secondary, #f5f7f8);
 }
 
 /* Фон входа — мягкий градиент Б24 (без фото: страница лёгкая и на телефоне); ночью — тёмный */

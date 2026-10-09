@@ -21,6 +21,8 @@ export function rowTaskRef(name: string): { taskId: number, clientTaskId: string
 export interface PublicInvoiceItem {
   id: number
   title: string
+  /** Номер счёта (`accountNumber`, «70») — не ID элемента; пусто — номер не присвоен. */
+  number: string
   stageId: string
   /** Дата выставления (`begindate`), `YYYY-MM-DD` или `''`. */
   date: string
@@ -53,6 +55,7 @@ export function parsePublicInvoice(result: unknown): PublicInvoiceItem | null {
   return {
     id,
     title: typeof o.title === 'string' ? o.title : '',
+    number: typeof o.accountNumber === 'string' || typeof o.accountNumber === 'number' ? String(o.accountNumber).trim() : '',
     stageId: typeof o.stageId === 'string' ? o.stageId : '',
     date: typeof o.begindate === 'string' ? o.begindate.slice(0, 10) : '',
     currencyId: typeof o.currencyId === 'string' ? o.currencyId : '',
@@ -318,6 +321,8 @@ export interface PublicInvoiceView {
   /** Позиций больше, чем показано (MAX_PUBLIC_ROWS): итог — по всему счёту. */
   truncated: boolean
   title: string
+  /** Номер счёта для клиента (`accountNumber`); пусто — показываем ID. */
+  number: string
   date: string
   stage: string
   currencyId: string

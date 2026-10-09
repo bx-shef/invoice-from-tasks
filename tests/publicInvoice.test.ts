@@ -14,8 +14,8 @@ describe('приставка строки', () => {
 
 describe('счёт и клиенты', () => {
   it('счёт: стадия, дата, клиент', () => {
-    expect(parsePublicInvoice({ item: { id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', begindate: '2026-10-01T03:00:00+03:00', currencyId: 'BYN', opportunity: '120.5', companyId: 3, contactIds: [7, 7, 0], mycompanyId: 1 } }))
-      .toEqual({ id: 5, title: 'Счёт №5', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1, dealId: null, assignedById: null })
+    expect(parsePublicInvoice({ item: { id: 5, title: 'Счёт №5', accountNumber: ' 70 ', stageId: 'DT31_1:N', begindate: '2026-10-01T03:00:00+03:00', currencyId: 'BYN', opportunity: '120.5', companyId: 3, contactIds: [7, 7, 0], mycompanyId: 1 } }))
+      .toEqual({ id: 5, title: 'Счёт №5', number: '70', stageId: 'DT31_1:N', date: '2026-10-01', currencyId: 'BYN', opportunity: 120.5, companyId: 3, contactIds: [7], myCompanyId: 1, dealId: null, assignedById: null })
     expect(parsePublicInvoice({ item: {} })).toBeNull()
   })
 

@@ -343,6 +343,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
   const view: PublicInvoiceView = {
     truncated: rowsRead.truncated,
     title: invoice.title,
+    number: invoice.number,
     date: invoice.date,
     stage: stageName(stages, invoice.stageId),
     currencyId: invoice.currencyId,
