@@ -130,6 +130,10 @@ export interface PublicTask {
   description: string
   results: string[]
   url: string
+  /** Состояние словами клиента (как у его задачи): «принята», «требует принятия», «поставлена»… */
+  state: string
+  /** Дата для строки: закрытия, если закрыта, иначе постановки (`YYYY-MM-DD`); нет — `''`. */
+  date: string
   /** Номер задачи у клиента и ссылка на неё в его портале (если известен домен). */
   clientTaskId: string | null
   clientTaskUrl: string | null
@@ -234,6 +238,15 @@ export function plainText(value: unknown): string {
     .slice(0, MAX_PUBLIC_TEXT)
 }
 
+/** Состояние и дата задачи для строки страницы — ответ tasks.task.get (camelCase или UPPER). */
+function taskStateAndDate(o: Record<string, unknown>): { state: string, date: string } {
+  const n = Number(o.status ?? o.STATUS)
+  const status = Number.isInteger(n) && n > 0 ? n : null
+  const day = (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : ''
+  const closed = status === TASK_COMPLETED ? day(o.closedDate ?? o.CLOSED_DATE) : ''
+  return { state: status === null ? '' : clientTaskState(status), date: closed || day(o.createdDate ?? o.CREATED_DATE) }
+}
+
 /** @param taskDomainField поле задачи с доменом портала клиента (настройка `clientFields.taskDomain`) */
 export function parsePublicTask(result: unknown, portalOrigin: string, clientTaskId: string | null, results: unknown, taskDomainField = ''): PublicTask | null {
   const raw = result && typeof result === 'object' && 'task' in result ? (result as { task: unknown }).task : result
@@ -248,6 +261,7 @@ export function parsePublicTask(result: unknown, portalOrigin: string, clientTas
     description: plainText(o.description ?? o.DESCRIPTION),
     results: list.map(r => plainText((r as Record<string, unknown> | null)?.text)).filter(Boolean),
     url: `${portalOrigin}${taskPath(id)}`,
+    ...taskStateAndDate(o),
     clientTaskId,
     clientTaskUrl: clientTaskId && clientDomain && /^\d+$/.test(clientTaskId) ? `https://${clientDomain}${taskPath(Number(clientTaskId))}` : null
   }
