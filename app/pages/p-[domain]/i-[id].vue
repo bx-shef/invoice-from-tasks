@@ -38,6 +38,13 @@ const invoice = ref<PublicInvoiceView | null>(null)
 const closedText = ref('')
 
 async function open() {
+  // Автозаполнение браузера не шлёт input до первого касания — берём значение прямо из поля
+  const el = document.getElementById('access-code') as HTMLInputElement | null
+  if (el?.value && el.value !== code.value) code.value = el.value
+  if (code.value.trim().length !== 10) {
+    error.value = 'Код доступа — 10 символов'
+    return
+  }
   busy.value = true
   error.value = ''
   try {
@@ -277,7 +284,7 @@ const rowItems = computed(() => {
           block
           label="Открыть"
           :loading="busy"
-          :disabled="busy || code.trim().length !== 10"
+          :disabled="busy"
           data-testid="public-open"
         />
         <p
