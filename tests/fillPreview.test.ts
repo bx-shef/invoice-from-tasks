@@ -95,11 +95,14 @@ describe('столбцы — как в товарной части счёта', 
 
   it('строка со «Стоимостью работ» — фикс, формула только для сравнения', () => {
     const line = previewLine({ ...row, sum: 425, price: 425, fixedGross: 510, formulaSum: 830.08 }, 'ч', ctx)
+    expect(line.kind).toBe('fixed')
+    expect(line.detail.startsWith('«Стоимость работ» 510,00')).toBe(true)
     expect(line.calc).toBe('Игорь Шевчик · фикс: «Стоимость работ» 510,00 с налогом = 425,00 без налога · по формуле 5,5 ч (списано 5 ч 01 мин) × 170,00 = 830,08')
   })
 
   it('подстроки: кто, часы × цена часа = сумма без налога; откуда цена часа; дата ставки', () => {
     const line = previewLine(row, 'ч', ctx)
+    expect([line.kind, line.detail]).toEqual(['calc', '5,5 ч (списано 5 ч 01 мин) × 170,00 = 935,00'])
     expect(line.calc).toBe('Игорь Шевчик · расчёт: 5,5 ч (списано 5 ч 01 мин) × 170,00 = 935,00')
     expect(line.basis).toBe('ставка 170,00 + наценка 0% (на всё)')
     expect(line.rateTitle).toBe('Ставка на 28.09.2026')

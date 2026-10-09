@@ -110,6 +110,10 @@ export interface PreviewLine {
   cells: string[]
   /** Подстрока: «сотрудник · часы × цена часа = сумма без налога». */
   calc: string
+  /** Откуда сумма строки: `calc` — часы × цена часа, `fixed` — «Стоимость работ» из задачи. */
+  kind: 'calc' | 'fixed'
+  /** Расчёт без «сотрудник · расчёт:» — для значка рядом в таблице. */
+  detail: string
   /** Подстрока: откуда цена часа — ставка (и курс), наценка. */
   basis: string
   /** Подсказка к ставке: на какую дату она выбрана. */
@@ -156,6 +160,8 @@ export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): P
     row,
     cells: PREVIEW_COLUMNS.map(column => column.cell(input)),
     calc: calcText(row, ctx),
+    kind: row.fixedGross !== undefined ? 'fixed' : 'calc',
+    detail: calcText(row, ctx).replace(/^.*? · (?:расчёт|фикс): /, ''),
     basis: rateBasis(row, ctx),
     rateTitle: `Ставка на ${formatRuDate(row.rateDate)}`
   }

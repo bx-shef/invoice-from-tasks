@@ -146,7 +146,7 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
         {{ note }}
       </p>
       <table
-        class="w-full text-sm"
+        class="fill-table w-full text-sm"
         data-testid="fill-preview"
       >
         <thead>
@@ -179,16 +179,28 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             v-for="(line, n) in lines"
             :key="line.row.key"
             class="align-top border-t border-(--ui-color-divider-less)"
-            :class="{ 'bg-(--ui-color-design-tinted-warning-bg)': outlierIds.has(line.row.taskId) }"
+            :class="{ 'fill-outlier': outlierIds.has(line.row.taskId) }"
             :data-outlier="outlierIds.has(line.row.taskId) || undefined"
           >
             <td class="py-2 pr-2 text-right opacity-60 tabular-nums">
               {{ n + 1 }}
             </td>
             <td class="py-2 pr-3">
-              {{ line.row.name }}
-              <span class="block text-xs opacity-60">{{ line.calc }}</span>
-              <span class="block text-xs opacity-60">
+              <span class="font-medium">{{ line.row.name }}</span>
+              <span class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                <B24Badge
+                  :color="line.kind === 'fixed' ? 'air-primary-copilot' : 'air-secondary-accent'"
+                  size="xs"
+                  :label="line.kind === 'fixed' ? 'фикс' : 'расчёт'"
+                  :title="line.kind === 'fixed' ? 'Сумма — «Стоимость работ» из задачи' : 'Сумма — часы × цена часа'"
+                />
+                <span class="opacity-75">{{ line.detail }}</span>
+                <span
+                  v-if="outlierIds.has(line.row.taskId)"
+                  class="text-(--ui-color-accent-main-warning) font-medium"
+                >· время больше обычного</span>
+              </span>
+              <span class="block text-xs opacity-60 mt-0.5">
                 <span :title="line.rateTitle">{{ line.basis }}</span> ·
                 <InvoiceTaskLink
                   :origin="origin"
@@ -240,3 +252,36 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Таблица — карточкой: шапка на мягком фоне, строки с воздухом */
+.fill-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--ui-color-design-plain-content-divider, rgb(0 0 0 / 0.08));
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--ui-color-bg-content-primary, #fff);
+}
+.fill-table thead th {
+  background: var(--ui-color-bg-content-secondary, #f5f7f8);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.fill-table th:first-child,
+.fill-table td:first-child {
+  padding-left: 12px;
+}
+.fill-table th:last-child,
+.fill-table td:last-child {
+  padding-right: 12px;
+}
+.fill-table tbody td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+/* Строка с подозрительным временем — полоса слева, а не заливка всей строки */
+.fill-outlier td:first-child {
+  box-shadow: inset 4px 0 0 var(--ui-color-accent-main-warning, #f7a700);
+}
+</style>
