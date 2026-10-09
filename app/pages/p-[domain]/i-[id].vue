@@ -330,7 +330,7 @@ const rowItems = computed(() => {
                 />
               </div>
             </div>
-            <div class="text-right">
+            <div class="w-full sm:w-auto flex sm:block items-baseline justify-between gap-3 sm:text-right border-t sm:border-0 border-(--ui-color-design-plain-content-divider) pt-2 sm:pt-0">
               <div class="text-xs uppercase opacity-60">
                 Итого
               </div>
