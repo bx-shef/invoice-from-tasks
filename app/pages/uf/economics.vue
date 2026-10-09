@@ -7,6 +7,7 @@
 import type { FillMode, TaskSource } from '#shared/domain/fill'
 import { parseInvoiceEconomy, type InvoiceEconomy } from '#shared/domain/economics'
 import { camelFieldKey } from '#shared/domain/userFields'
+import { publicInvoiceUrl, publicQrUrl } from '#shared/domain/invoiceLinks'
 import { formatMoney } from '~/utils/fillPreview'
 import { fieldContext, type FieldContext } from '~/utils/fieldPlacement'
 
@@ -24,6 +25,11 @@ const error = ref('')
 const source: TaskSource = 'invoice'
 const mode = ref<FillMode>('task')
 const expanded = ref(false)
+const config = useRuntimeConfig()
+/** Ссылки расшифровки и картинки QR — считаем из домена и ID счёта, в поля не пишем (владелец 2026-10-09). */
+const links = ref<{ page: string, qr: string } | null>(null)
+/** Отметка «Согласовано клиентом» и её дата — из скрытых полей счёта (настройки публичной страницы). */
+const approval = ref<{ approved: boolean, at: string } | null>(null)
 
 const modeItems = [
   { label: 'Задача — одна строка', value: 'task' },
@@ -39,6 +45,13 @@ onMounted(async () => {
   if (econ.value) {
     mode.value = econ.value.mode
   }
+  const id = ctx.value.itemId
+  if (id && ctx.value.entityTypeId === 31) {
+    const site = config.public.siteUrl || window.location.origin
+    const portal = new URL(origin.value).hostname
+    links.value = { page: publicInvoiceUrl(site, portal, id), qr: publicQrUrl(site, portal, id) }
+    void loadApproval(id)
+  }
 })
 
 const verdict = computed(() => {
@@ -49,6 +62,21 @@ const verdict = computed(() => {
   return { label: 'В ноль', color: 'air-secondary' as const }
 })
 const flagged = computed(() => econ.value?.tasks.filter(t => t.flag) ?? [])
+
+async function loadApproval(id: number) {
+  try {
+    await app.load()
+    const { approvedField, approvedAtField } = app.settings.value.publicPage
+    if (!approvedField && !approvedAtField) return
+    const res = await b24.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: 31, id })
+    const item = res?.item ?? {}
+    const flag = approvedField ? item[camelFieldKey(approvedField)] : undefined
+    const at = approvedAtField ? item[camelFieldKey(approvedAtField)] : undefined
+    approval.value = { approved: flag === true || flag === 'Y' || flag === 1 || flag === '1', at: typeof at === 'string' ? at : '' }
+  } catch {
+    // не прочитали — блок согласования просто не показываем
+  }
+}
 
 /** Пересчёт: тот же сбор, что в окне счёта, — он сам пишет поля задач и это поле (saveEconomics). */
 async function recalc() {
@@ -96,6 +124,34 @@ function when(iso: string): string {
     class="p-2 text-sm space-y-2"
     data-testid="economics-field"
   >
+    <div
+      v-if="links"
+      class="space-y-0.5 text-xs"
+    >
+      <div>
+        <span class="opacity-70">Расшифровка: </span>
+        <a
+          :href="links.page"
+          target="_blank"
+          rel="noopener"
+          class="underline break-all"
+        >{{ links.page }}</a>
+      </div>
+      <div>
+        <span class="opacity-70">QR-код (картинка для шаблона документа): </span>
+        <a
+          :href="links.qr"
+          target="_blank"
+          rel="noopener"
+          class="underline break-all"
+        >{{ links.qr }}</a>
+      </div>
+      <div v-if="approval">
+        <span class="opacity-70">Согласовано клиентом: </span>
+        <b v-if="approval.approved">да{{ approval.at ? `, ${when(approval.at)}` : '' }}</b>
+        <span v-else>нет</span>
+      </div>
+    </div>
     <template v-if="econ">
       <div class="flex flex-wrap items-center gap-2">
         <B24Badge

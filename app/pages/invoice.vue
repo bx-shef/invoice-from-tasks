@@ -122,8 +122,9 @@ onMounted(async () => {
   } catch {
     return
   }
-  // Ссылки для печатных форм — независимо от расчёта: сбой не мешает заполнению счёта.
-  void links.sync(invoiceId.value, new URL(origin.value).hostname, config.public.siteUrl || window.location.origin, app.settings.value.publicPage)
+  // Адрес картинки QR — в поле счёта для шаблона документа (ссылку на расшифровку больше не пишем,
+  // её показывает «Экономика счёта»). Независимо от расчёта: сбой не мешает заполнению счёта.
+  void links.sync(invoiceId.value, new URL(origin.value).hostname, config.public.siteUrl || window.location.origin, { linkField: '', qrField: app.settings.value.publicPage.qrField })
     .catch((e: unknown) => {
       linksError.value = e instanceof Error ? e.message : String(e)
     })
@@ -223,7 +224,7 @@ async function consult(promptId: string) {
         <B24Alert
           v-if="linksError"
           color="air-primary-warning"
-          title="Ссылки расшифровки в счёт не записаны"
+          title="Адрес QR-кода в счёт не записан"
           :description="`${linksError}. Заполнение счёта это не затрагивает.`"
           data-testid="invoice-links-error"
         />

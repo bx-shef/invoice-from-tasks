@@ -1,7 +1,7 @@
 // Выбор полей клиента в настройках (#34): пункты выпадающего списка и подстановка созданных полей.
 // Чистые функции для SettingsClientFields.vue.
 
-import { APP_FIELDS, INVOICE_APPROVED_AT_FIELD, INVOICE_APPROVED_FIELD, INVOICE_ECONOMICS_FIELD, INVOICE_LINK_FIELD, INVOICE_QR_FIELD, TASK_DELTA_FIELD, TASK_DIFF_PERCENT_FIELD, TASK_WORK_COST_FIELD, type UserFieldOption } from '#shared/domain/userFields'
+import { APP_FIELDS, INVOICE_APPROVED_AT_FIELD, INVOICE_APPROVED_FIELD, INVOICE_ECONOMICS_FIELD, INVOICE_QR_FIELD, TASK_DELTA_FIELD, TASK_DIFF_PERCENT_FIELD, TASK_WORK_COST_FIELD, type UserFieldOption } from '#shared/domain/userFields'
 import type { AppSettings } from '#shared/domain/settings'
 
 /** Пункт списка: «Подпись (UF_CODE)»; `value: ''` — «Не выбрано». */
@@ -35,8 +35,7 @@ const SETTING_OF: Record<string, keyof AppSettings['clientFields']> = {
  * существующие). Выбранное администратором другое поле не трогаем.
  */
 /** Поля счёта приложения → ключ настроек публичной страницы. */
-const PUBLIC_SETTING_OF: Record<string, 'linkField' | 'qrField' | 'approvedField' | 'approvedAtField'> = {
-  [INVOICE_LINK_FIELD]: 'linkField',
+const PUBLIC_SETTING_OF: Record<string, 'qrField' | 'approvedField' | 'approvedAtField'> = {
   [INVOICE_QR_FIELD]: 'qrField',
   [INVOICE_APPROVED_FIELD]: 'approvedField',
   [INVOICE_APPROVED_AT_FIELD]: 'approvedAtField'

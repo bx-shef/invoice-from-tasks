@@ -95,12 +95,13 @@ describe('списки UF', () => {
 
 describe('поля счёта приложения', () => {
   it('создаются userfieldconfig.add в CRM_SMART_INVOICE полным кодом, системным типом', () => {
-    const qr = APP_FIELDS.find(f => f.name === 'UF_CRM_SMART_INVOICE_SH_IFT_QR')!
-    expect(userFieldAddCall(qr)).toEqual({
+    const ok = APP_FIELDS.find(f => f.name === 'UF_CRM_SMART_INVOICE_SH_IFT_OK')!
+    expect(userFieldAddCall(ok)).toEqual({
       method: 'userfieldconfig.add',
-      params: { moduleId: 'crm', field: { entityId: 'CRM_SMART_INVOICE', fieldName: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', userTypeId: 'url', xmlId: 'UF_CRM_SMART_INVOICE_SH_IFT_QR', multiple: 'N', mandatory: 'N', editFormLabel: { ru: qr.label, en: qr.label } } }
+      params: { moduleId: 'crm', field: { entityId: 'CRM_SMART_INVOICE', fieldName: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', userTypeId: 'boolean', xmlId: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', multiple: 'N', mandatory: 'N', editFormLabel: { ru: ok.label, en: ok.label } } }
     })
-    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['url', false], ['boolean', false], ['datetime', false], ['ift_economics', true]])
+    // ссылка полем больше не создаётся (владелец 2026-10-09) — её показывает «Экономика счёта»; QR — для шаблона
+    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['boolean', false], ['datetime', false], ['ift_economics', true]])
     for (const f of APP_FIELDS.filter(f => f.entity === 'invoice')) expect(f.name.length).toBeLessThanOrEqual(50)
   })
 
@@ -114,7 +115,7 @@ describe('поля счёта приложения', () => {
 
   it('после создания — выбраны в настройках публичной страницы, если там пусто', () => {
     const page = withAppInvoiceFields({ ...defaultSettings().publicPage, qrField: 'UF_CRM_SMART_INVOICE_MY' })
-    expect(page).toMatchObject({ linkField: 'UF_CRM_SMART_INVOICE_SH_IFT_LINK', qrField: 'UF_CRM_SMART_INVOICE_MY', approvedField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', approvedAtField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK_AT' })
+    expect(page).toMatchObject({ linkField: '', qrField: 'UF_CRM_SMART_INVOICE_MY', approvedField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', approvedAtField: 'UF_CRM_SMART_INVOICE_SH_IFT_OK_AT' })
   })
 })
 

@@ -121,7 +121,9 @@ export const APP_FIELDS: readonly AppFieldSpec[] = [
     { entity, name: ACCESS_CODE_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Код доступа к расшифровке счёта`, type: ACCESS_CODE_TYPE },
     { entity, name: CLIENT_HOOK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Вебхук Битрикс24 клиента`, type: CLIENT_HOOK_TYPE }
   ]),
-  { entity: 'invoice', name: INVOICE_LINK_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Ссылка на расшифровку`, type: 'url' },
+  // Поля «Ссылка на расшифровку» больше нет (владелец 2026-10-09): ссылку показывает «Экономика
+  // счёта». QR остаётся — его адрес подставляет в шаблон документа картинка с замещающим текстом
+  // {UfCrmSmartInvoiceShIftQr} (как печать {MyCompanyUfStamp}); в карточке поле можно скрыть.
   { entity: 'invoice', name: INVOICE_QR_FIELD, label: `${APP_FIELD_LABEL_PREFIX} QR-код расшифровки`, type: 'url' },
   { entity: 'invoice', name: INVOICE_APPROVED_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Согласовано клиентом`, type: 'boolean' },
   { entity: 'invoice', name: INVOICE_APPROVED_AT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дата согласования`, type: 'datetime' },
