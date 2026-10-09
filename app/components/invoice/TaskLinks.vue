@@ -13,19 +13,23 @@ defineProps<{
 </script>
 
 <template>
-  <B24Alert
-    color="air-primary-warning"
-    :title="title"
+  <!-- Мягкая плашка вместо яркой: предупреждение, а не ошибка — не кричит над таблицей -->
+  <div
+    class="rounded-lg border-l-4 border-(--ui-color-accent-main-warning) bg-(--ui-color-bg-content-secondary) px-4 py-3 text-sm space-y-1"
+    role="note"
   >
-    <template #description>
+    <div class="font-semibold">
+      {{ title }}
+    </div>
+    <div class="leading-relaxed">
       <span
         v-for="link in links"
         :key="link.taskId"
-        class="mr-1"
+        class="mr-2 inline-block"
       ><InvoiceTaskLink
         :origin="origin"
         :task-id="link.taskId"
       />{{ link.text }}</span>
-    </template>
-  </B24Alert>
+    </div>
+  </div>
 </template>
