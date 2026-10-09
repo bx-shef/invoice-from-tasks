@@ -197,6 +197,11 @@ function rowMeta(task: PublicInvoiceView['tasks'][number] | undefined): { state:
   return { state: task?.state ?? '', date: task?.date ?? '', done: task?.state === 'принята' }
 }
 
+/** Строка счёта без служебной приставки «[87-119884] » — номера задач и так видны рядом. */
+function rowTitle(name: string): string {
+  return name.replace(/^\[[^\]]*\]\s*/, '') || name
+}
+
 /** Результаты задачи: сначала клиента (его задача — то, что он ставил), затем наши; без дублей. */
 function allResults(task: PublicInvoiceView['tasks'][number]): string[] {
   return [...new Set([...(task.clientTask?.results ?? []), ...task.results])]
@@ -481,7 +486,7 @@ const rowItems = computed(() => {
               >
                 <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                 <span class="min-w-0">
-                  <span class="block text-lg font-medium leading-snug">{{ item.task?.title || item.row.name }}</span>
+                  <span class="block text-lg font-medium leading-snug">{{ rowTitle(item.row.name) }}</span>
                   <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
                     <B24Badge
                       v-if="item.state"
@@ -568,9 +573,9 @@ const rowItems = computed(() => {
 
                 <div class="pub-tile p-4 space-y-2">
                   <div class="opacity-75">
-                    В счёте
+                    Задача
                   </div>
-                  <div>{{ item.row.name }}</div>
+                  <div>{{ item.task.title || item.row.name }}</div>
                   <div class="flex flex-wrap gap-2 pt-1">
                     <B24Button
                       v-if="item.task.clientTaskUrl"
