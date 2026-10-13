@@ -17,6 +17,7 @@ export type FieldLists = Record<FieldEntity, FieldList>
 
 export function useUserFields() {
   const b24 = useB24()
+  const links = useInvoiceLinks()
   const config = useRuntimeConfig()
 
   /**
@@ -34,16 +35,17 @@ export function useUserFields() {
   }
 
   /** UF одной сущности, постранично; у счёта — из crm.item.fields (userfieldconfig.list просит своё право). */
-  async function list(entity: FieldEntity): Promise<FieldList> {
+  async function list(entity: FieldEntity, firstPage?: unknown, fresh = false): Promise<FieldList> {
     if (entity === 'invoice') {
-      const fields = (await b24.call<{ fields?: Record<string, { upperName?: unknown }> }>('crm.item.fields', { entityTypeId: 31 }))?.fields ?? {}
+      const fields = ((await links.rawFields(fresh)) as { fields?: Record<string, { upperName?: unknown }> } | null)?.fields ?? {}
       return { options: [], names: Object.values(fields).map(f => String(f?.upperName ?? '')).filter(n => n.startsWith('UF_')) }
     }
     let firstOfPrev = ''
     const raw = await collectOffsetPages(
       async (start) => {
         const { method, params } = userFieldListCall(entity, start)
-        const res = await b24.call<unknown>(method, params)
+        // Первая страница уже пришла общим пакетом (listAll) — не просим её второй раз
+        const res = start === 0 && firstPage !== undefined ? firstPage : await b24.call<unknown>(method, params)
         const page = Array.isArray(res) ? res : []
         // Старый метод мог бы не понять `start` и отдавать ту же страницу — тогда конец списка
         // (`total` у task.item.userfield.getlist всегда 0, документация), а не круг до потолка.
@@ -69,9 +71,17 @@ export function useUserFields() {
   }
 
   /** Все три списка; сбой одного не прячет другие — его ошибка в `errors`. */
-  async function listAll(): Promise<{ lists: FieldLists, errors: string[] }> {
+  async function listAll(fresh = false): Promise<{ lists: FieldLists, errors: string[] }> {
     const entities: FieldEntity[] = ['task', 'company', 'contact', 'invoice']
-    const results = await Promise.allSettled(entities.map(list))
+    // Первые страницы задач, компаний и контактов — одним пакетом; не пришла — list спросит сам
+    // (и покажет ошибку портала). Поля счёта — общим запросом страницы (useInvoiceLinks).
+    const paged = entities.filter(e => e !== 'invoice')
+    const firsts = await b24.batchSettled<unknown>(paged.map((e) => {
+      const { method, params } = userFieldListCall(e, 0)
+      return [method, params]
+    }))
+    const first = new Map<FieldEntity, unknown>(paged.map((e, i) => [e, firsts[i] ?? undefined]))
+    const results = await Promise.allSettled(entities.map(e => list(e, first.get(e), fresh)))
     const lists: FieldLists = { task: { options: [], names: [] }, company: { options: [], names: [] }, contact: { options: [], names: [] }, invoice: { options: [], names: [] } }
     const errors: string[] = []
     results.forEach((r, i) => {

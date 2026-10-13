@@ -15,12 +15,12 @@ export function useRateClients() {
   async function load(codes: string[]): Promise<void> {
     const calls = clientNamesCalls(codes.filter(code => !names.value[code]))
     if (!calls.length) return
-    // allSettled: нет доступа к контактам — названия компаний всё равно показываем.
+    // Одним пакетом; нет доступа к контактам — названия компаний всё равно показываем (batchSettled).
     // Сбой — не ошибка: названия — удобство, без них форма работает на «Компания #ID».
-    const results = await Promise.allSettled(calls.map(c => b24.call(c.method, c.params)))
+    const results = await b24.batchSettled<unknown>(calls.map(c => [c.method, c.params]))
     const next = { ...names.value }
     results.forEach((res, i) => {
-      if (res.status === 'fulfilled') Object.assign(next, parseClientNames(calls[i]!, res.value))
+      if (res !== null) Object.assign(next, parseClientNames(calls[i]!, res))
     })
     names.value = next
   }

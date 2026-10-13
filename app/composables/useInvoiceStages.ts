@@ -8,12 +8,9 @@ export function useInvoiceStages() {
 
   async function list(): Promise<StageOption[]> {
     const entities = invoiceStageEntities(await b24.call<unknown>('crm.status.entity.types'))
-    const out: StageOption[] = []
-    for (const e of entities) {
-      const raw = await b24.call<unknown>('crm.status.list', { filter: { ENTITY_ID: e.id }, order: { SORT: 'ASC' } })
-      out.push(...stageOptions(raw, e.category, entities.length > 1))
-    }
-    return out
+    // Стадии всех воронок счёта — одним пакетом, а не запросом на воронку
+    const raws = await b24.batch<unknown>(entities.map(e => ['crm.status.list', { filter: { ENTITY_ID: e.id }, order: { SORT: 'ASC' } }]))
+    return entities.flatMap((e, i) => stageOptions(raws[i], e.category, entities.length > 1))
   }
 
   /** Шаблоны генератора документов — для выбора, какие PDF показывать клиенту (этап 5). */
