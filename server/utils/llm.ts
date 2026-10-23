@@ -208,7 +208,29 @@ const FAILURE_MESSAGES: Record<LlmFailureKind, string> = {
  * Текст отказа для сотрудника. Сырой текст провайдера наружу НЕ отдаём: он может цитировать
  * присланные данные (описания задач). В журнал — только класс.
  */
-export function describeLlmFailure(raw: string): { kind: LlmFailureKind, message: string } {
+export function describeLlmFailure(raw: string): { kind: LlmFailureKind, message: string, code: string } {
+  const code = failureCode(raw)
+  // Ключ Вайбкода «только чтение» (замер владельца 2026-10-23): чем лечить — ясно, говорим прямо
+  if (/READONLY/.test(raw ?? '')) {
+    return { kind: 'auth', code, message: 'Ключ ИИ (Вайбкод) в режиме «только чтение» — переключите его на «чтение и запись» в vibecode.bitrix24.tech/keys.' }
+  }
   const kind = FAILURE_PATTERNS.find(([, re]) => re.test(raw ?? ''))?.[0] ?? 'unknown'
-  return { kind, message: FAILURE_MESSAGES[kind] }
+  return { kind, code, message: code ? `${FAILURE_MESSAGES[kind]} Код: ${code}.` : FAILURE_MESSAGES[kind] }
+}
+
+/**
+ * Код отказа провайдера для сотрудника и журнала: HTTP-статус, сетевой код и код ошибки вида
+ * `WRITE_BLOCKED_READONLY_KEY` / `invalid_request_error`. Только такие токены — не текст: текст
+ * провайдера может цитировать присланные данные. Нет кода — пусто («причина не определена»).
+ */
+export function failureCode(raw: string): string {
+  const text = raw ?? ''
+  const parts: string[] = []
+  const status = /^(\d{3})\b/.exec(text)?.[1]
+  if (status) parts.push(status)
+  const net = /\b(E[A-Z]{3,}|socket hang up)\b/.exec(text)?.[1]
+  if (net) parts.push(net)
+  const named = /\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[a-z]+(?:_[a-z]+)*_(?:error|exceeded|invalid|not_found|unsupported))\b/.exec(text)?.[1]
+  if (named && !parts.includes(named)) parts.push(named)
+  return parts.join(' ').slice(0, 80)
 }

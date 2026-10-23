@@ -60,7 +60,7 @@ export async function askBitrixGpt(req: ChatRequest, chat?: ChatFn): Promise<str
     return await chatWithRetry(fn, req)
   } catch (e) {
     const failure = describeLlmFailure(e instanceof Error ? e.message : String(e))
-    console.error(`[bitrixgpt] failure kind=${failure.kind}`)
+    console.error(`[bitrixgpt] failure kind=${failure.kind} code=${failure.code || '-'}`)
     throw new AiGatewayError(502, failure.message)
   }
 }
@@ -94,7 +94,7 @@ export async function* streamBitrixGpt(
         continue
       }
       const failure = describeLlmFailure(message)
-      console.error(`[bitrixgpt] stream failure kind=${failure.kind}`)
+      console.error(`[bitrixgpt] stream failure kind=${failure.kind} code=${failure.code || '-'}`)
       throw new AiGatewayError(502, failure.message)
     }
   }
