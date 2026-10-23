@@ -32,7 +32,7 @@ function removeConsult(id: string) {
   <div class="space-y-6">
     <B24Alert
       color="air-secondary"
-      description="Промпты используются, когда в общих настройках выбрано «Название строки → через BitrixGPT». Формат ответа (JSON) приложение добавляет само — его в промпте описывать не нужно."
+      description="Промпты используются, когда в общих настройках выбрано «Название строки → через ИИ». Формат ответа (JSON) приложение добавляет само — его в промпте описывать не нужно."
     />
 
     <B24FormField
@@ -112,7 +112,7 @@ function removeConsult(id: string) {
         Консультации
       </h3>
       <p class="text-sm opacity-70">
-        Промпт запускается из карточки счёта над данными счёта и задач; ответ BitrixGPT сохраняется записью в ленте счёта.
+        Промпт запускается из карточки счёта над данными счёта и задач; ответ ИИ сохраняется записью в ленте счёта.
       </p>
       <div
         v-for="p in settings.consultPrompts"
@@ -135,7 +135,7 @@ function removeConsult(id: string) {
         </div>
         <B24Textarea
           v-model="p.text"
-          placeholder="Что спросить у BitrixGPT"
+          placeholder="Что спросить у ИИ"
           :rows="3"
           autoresize
           :maxlength="LIMITS.prompt"

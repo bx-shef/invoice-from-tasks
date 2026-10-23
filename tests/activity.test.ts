@@ -13,12 +13,12 @@ describe('дело с ответом консультации — конфигу
       fields: { completed: true, originatorId: ACTIVITY_ORIGINATOR, responsibleId: 5 },
       layout: {
         icon: { code: 'ai-process' },
-        header: { title: 'Консультация BitrixGPT: Риски' },
+        header: { title: 'Консультация ИИ: Риски' },
         body: {
           logo: { code: 'ai-copilot' },
           blocks: {
             answer: { type: 'largeText', properties: { value: 'Всё хорошо' } },
-            disclaimer: { type: 'text', properties: { value: 'Ответ сформирован BitrixGPT и может быть неточным.', size: 'xs', color: 'base_60' } }
+            disclaimer: { type: 'text', properties: { value: 'Ответ сформирован ИИ и может быть неточным.', size: 'xs', color: 'base_60' } }
           }
         }
       }

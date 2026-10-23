@@ -14,7 +14,7 @@ const roundingItems = ROUNDING_STEPS.map(step => ({ label: ROUNDING_LABELS[step]
 const directionItems = ROUNDING_DIRECTIONS.map(direction => ({ label: ROUNDING_DIRECTION_LABELS[direction], value: direction }))
 const namingItems = [
   { label: 'Как есть из задачи', value: 'plain', description: 'Тип 1 — заголовок задачи, тип 2 — описание записи времени' },
-  { label: 'Через BitrixGPT', value: 'ai', description: 'Короткое понятное клиенту название по заголовку, описанию и отчёту' }
+  { label: 'Через ИИ', value: 'ai', description: 'Короткое понятное клиенту название по заголовку, описанию и отчёту' }
 ]
 const priceModeItems = [
   { label: 'Цена часа × часы', value: 'hour', description: 'Цена — ставка часа с наценкой, количество — часы' },

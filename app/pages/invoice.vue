@@ -261,7 +261,7 @@ async function consult(promptId: string) {
                 @click="collect"
               />
               <span class="text-sm opacity-70">
-                Названия: {{ app.settings.value.naming === 'ai' ? 'BitrixGPT' : 'как есть из задач' }} · округление:
+                Названия: {{ app.settings.value.naming === 'ai' ? 'ИИ' : 'как есть из задач' }} · округление:
                 {{ roundingText }} · в счёт: {{ app.settings.value.priceMode === 'sum' ? 'сумма строки × 1' : 'цена часа × часы' }}
               </span>
             </div>
@@ -360,7 +360,7 @@ async function consult(promptId: string) {
         <B24Card v-if="app.settings.value.consultPrompts.length">
           <template #header>
             <h2 class="font-semibold">
-              Консультация BitrixGPT
+              Консультация ИИ
             </h2>
           </template>
           <p class="text-sm opacity-70 mb-3">

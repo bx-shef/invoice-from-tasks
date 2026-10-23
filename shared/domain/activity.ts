@@ -17,7 +17,7 @@ import { parseAnswer, type AnswerBlock, type AnswerSpan } from './answer'
 /** Предел текста ответа в деле — стена текста в ленте всё равно не читается. */
 export const MAX_ACTIVITY_TEXT = 20_000
 /** Текст записи, если модель ответила пустотой: у блока `largeText` значение обязательно. */
-export const EMPTY_ANSWER = 'BitrixGPT вернул пустой ответ.'
+export const EMPTY_ANSWER = 'ИИ вернул пустой ответ.'
 /** Предел заголовка записи. */
 export const MAX_ACTIVITY_TITLE = 255
 /** Источник данных дела (`originatorId`) — по нему дела приложения находятся в списке дел счёта. */
@@ -125,12 +125,12 @@ export function buildConsultActivity(input: ConsultActivityInput): ConsultActivi
     },
     layout: {
       icon: { code: AI_ICON },
-      header: { title: neutralizeMarkup(`Консультация BitrixGPT: ${input.promptTitle}`).slice(0, MAX_ACTIVITY_TITLE) },
+      header: { title: neutralizeMarkup(`Консультация ИИ: ${input.promptTitle}`).slice(0, MAX_ACTIVITY_TITLE) },
       body: {
         logo: { code: AI_LOGO },
         blocks: {
           answer: { type: 'largeText', properties: { value: answerToBBCode(input.answer) } },
-          disclaimer: { type: 'text', properties: { value: 'Ответ сформирован BitrixGPT и может быть неточным.', size: 'xs', color: 'base_60' } }
+          disclaimer: { type: 'text', properties: { value: 'Ответ сформирован ИИ и может быть неточным.', size: 'xs', color: 'base_60' } }
         }
       }
     }

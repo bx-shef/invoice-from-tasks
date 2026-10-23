@@ -28,7 +28,7 @@ const tag = (span: AnswerSpan) => (span.bold ? 'strong' : span.italic ? 'em' : '
           {{ title }}
         </h3>
         <B24Badge
-          label="BitrixGPT"
+          label="ИИ"
           color="air-primary-copilot"
           size="sm"
           class="ms-auto"
@@ -41,7 +41,7 @@ const tag = (span: AnswerSpan) => (span.bold ? 'strong' : span.italic ? 'em' : '
         v-if="!blocks.length"
         class="opacity-70"
       >
-        BitrixGPT вернул пустой ответ.
+        ИИ вернул пустой ответ.
       </p>
       <template
         v-for="(block, i) in blocks"
@@ -122,7 +122,7 @@ const tag = (span: AnswerSpan) => (span.bold ? 'strong' : span.italic ? 'em' : '
         Ответ не сохранился в ленте счёта: {{ notSaved }}
       </p>
       <p class="text-xs opacity-70">
-        Ответ сформирован BitrixGPT и может быть неточным.{{ notSaved ? '' : ' Он сохранён в ленте счёта.' }}
+        Ответ сформирован ИИ и может быть неточным.{{ notSaved ? '' : ' Он сохранён в ленте счёта.' }}
       </p>
     </template>
   </B24Card>

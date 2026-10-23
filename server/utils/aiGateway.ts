@@ -34,7 +34,7 @@ export function enforceAiLimit(user: FrameUser, opts: AiLimitOptions = {}): void
     [`pr:${user.portal.memberId}`, AI_LIMITS.portalRequests, 1],
     [`pw:${user.portal.memberId}`, AI_LIMITS.portalRows, rows]
   ], opts.now ?? Date.now())
-  if (!ok) throw new AiGatewayError(429, 'Слишком много обращений к BitrixGPT. Попробуйте позже.')
+  if (!ok) throw new AiGatewayError(429, 'Слишком много обращений к ИИ. Попробуйте позже.')
 }
 
 const kbWindows = new SlidingWindow()

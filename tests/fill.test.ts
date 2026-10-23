@@ -318,7 +318,7 @@ describe('applyNames — названия от BitrixGPT', () => {
     const { rows } = buildRows(input({ mode: 'time' }))
     const named = applyNames(rows, { e101: 'Вёрстка шапки сайта' })
     expect(named.rows[0]?.name).toBe('Вёрстка шапки сайта')
-    expect(named.errors).toEqual([{ taskId: 10, entryId: 102, message: 'BitrixGPT не вернул название строки' }])
+    expect(named.errors).toEqual([{ taskId: 10, entryId: 102, message: 'ИИ не вернул название строки' }])
   })
 })
 
@@ -447,13 +447,13 @@ describe('ID задачи в названии строки (настройка t
     expect(finishRows(built, names, true).errors).toEqual([{ taskId: 5, message: 'нет ставки' }])
     // Обе стороны непусты: сначала ошибки сборки, потом названий.
     const partial = finishRows(built, { [built.rows[0]!.key]: 'Только первая' }, true)
-    expect(partial.errors.map(e => e.message)).toEqual(['нет ставки', 'BitrixGPT не вернул название строки'])
+    expect(partial.errors.map(e => e.message)).toEqual(['нет ставки', 'ИИ не вернул название строки'])
   })
 
   it('finishRows: BitrixGPT не вернул название — ошибка строки, как у applyNames', () => {
     const built = buildRows(input({ mode: 'time' }))
     const res = finishRows(built, { [built.rows[0]!.key]: 'Только первая' }, true)
-    expect(res.errors).toEqual([{ taskId: 10, entryId: built.rows[1]!.entryId, message: 'BitrixGPT не вернул название строки' }])
+    expect(res.errors).toEqual([{ taskId: 10, entryId: built.rows[1]!.entryId, message: 'ИИ не вернул название строки' }])
     expect(res.outliers).toBe(built.outliers)
   })
 })
