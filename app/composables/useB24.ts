@@ -96,6 +96,33 @@ export function useB24() {
   }
 
   /**
+   * Пакет ЧТЕНИЙ, где сбой одной команды не роняет остальные (названия, списки для select): результат
+   * каждой команды по порядку, `null` — команда не удалась (нет права, нет метода). Порции — по
+   * {@link BATCH_MAX}; сбой всего пакета (сеть) — тоже `null` у каждой его команды.
+   */
+  async function batchSettled<T = unknown>(calls: BatchCall[]): Promise<Array<T | null>> {
+    const out: Array<T | null> = []
+    for (let i = 0; i < calls.length; i += BATCH_MAX) {
+      const part = calls.slice(i, i + BATCH_MAX)
+      try {
+        const res = await getOrThrow().actions.v2.batch.make({
+          calls: part,
+          options: { isHaltOnError: false, returnAjaxResult: true }
+        }) as Result<AjaxResult<T>[]>
+        const data = res.getData()
+        const items = (Array.isArray(data) ? data : []) as unknown as BatchItem<T>[]
+        part.forEach((_, idx) => {
+          const item = items[idx]
+          out.push(item?.isSuccess ? (item.getData()?.result as T) ?? null : null)
+        })
+      } catch {
+        out.push(...part.map(() => null))
+      }
+    }
+    return out
+  }
+
+  /**
    * Один вызов REST v3 (`/rest/api/…`). Владелец: «если можем — берём REST v3»; сейчас в v3 есть
    * только методы задач (docs/REST_METHODS.md, «REST v3»). Фильтр — массив троек
    * `[поле, оператор, значение]`, связанные объекты — через точку в `select`.
@@ -106,5 +133,5 @@ export function useB24() {
     return res.getData()?.result as T
   }
 
-  return { ready, init, get, getOrThrow, call, callList, batch, callV3 }
+  return { ready, init, get, getOrThrow, call, callList, batch, batchSettled, callV3 }
 }

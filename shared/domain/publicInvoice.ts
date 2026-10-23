@@ -333,7 +333,12 @@ export interface PublicInvoiceView {
   rows: PublicRow[]
   tasks: PublicTask[]
   /** Режим согласования: комментарии клиента и ответы. Не в стадии согласования — нет. */
-  approval?: { comments: ApprovalComment[], mark: ApprovalMark } | null
+  approval?: {
+    comments: ApprovalComment[]
+    mark: ApprovalMark
+    /** Решения клиента по задачам; `null` — в счёте нет поля решений (кнопок по задачам нет). */
+    decisions?: Record<number, 'yes' | 'no'> | null
+  } | null
 }
 
 /** ID задач из строк счёта — без дублей, не больше `max` (у каждой — свои запросы в портал). */

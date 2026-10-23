@@ -19,9 +19,9 @@ const loadErrors = ref<string[]>([])
 const loading = ref(true)
 const creating = ref(false)
 
-async function load() {
+async function load(fresh = false) {
   loading.value = true
-  const res = await userFields.listAll()
+  const res = await userFields.listAll(fresh)
   // Хоть один список не прочитался — не помечаем поля «нет в портале» (сбой ≠ поля нет).
   lists.value = res.errors.length ? null : res.lists
   loadErrors.value = res.errors
@@ -38,10 +38,10 @@ function itemsFor(entity: keyof FieldLists, saved: string) {
 const links = useInvoiceLinks()
 /** Поля счёта своего типа «Экономика счёта»; `null` — ещё не прочитаны. */
 const econFields = ref<InvoiceFieldOption[] | null>(null)
-async function loadEconFields() {
-  econFields.value = await links.rawFields().then(parseEconomicsFields, () => [])
+async function loadEconFields(fresh = false) {
+  econFields.value = await links.rawFields(fresh).then(parseEconomicsFields, () => [])
 }
-onMounted(loadEconFields)
+onMounted(() => loadEconFields())
 const econItems = computed(() => {
   const saved = settings.value.economics.invoiceField
   const list = (econFields.value ?? []).map(f => ({ label: f.label === f.name ? f.name : `${f.label} (${f.name})`, value: f.name }))
@@ -66,7 +66,8 @@ async function createFields() {
     toast.add({ title: 'Не удалось создать поля', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
     creating.value = false
-    await Promise.all([load(), loadEconFields()])
+    await load(true)
+    await loadEconFields()
   }
 }
 </script>

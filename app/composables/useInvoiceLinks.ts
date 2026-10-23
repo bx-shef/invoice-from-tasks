@@ -5,12 +5,24 @@
 import { INVOICE_ENTITY_TYPE_ID } from '#shared/domain/tasks'
 import { invoiceLinkUpdates, parseInvoiceLinkFields, publicInvoiceUrl, publicQrUrl, type InvoiceFieldOption } from '#shared/domain/invoiceLinks'
 
+/** Поля счёта на время страницы: вкладки настроек читают их трижды — запрос один. */
+let fieldsCache: Promise<unknown> | null = null
+
 export function useInvoiceLinks() {
   const b24 = useB24()
 
-  /** Все поля счёта (crm.item.fields) — настройки разбирают их по типам (parseInvoiceLinkFields). */
-  async function rawFields(): Promise<unknown> {
-    return b24.call<unknown>('crm.item.fields', { entityTypeId: INVOICE_ENTITY_TYPE_ID })
+  /**
+   * Все поля счёта (crm.item.fields) — настройки разбирают их по типам (parseInvoiceLinkFields).
+   * `fresh` — перечитать (после «Создать поля»); сбой из кеша не держим.
+   */
+  async function rawFields(fresh = false): Promise<unknown> {
+    if (fresh || !fieldsCache) {
+      fieldsCache = b24.call<unknown>('crm.item.fields', { entityTypeId: INVOICE_ENTITY_TYPE_ID })
+      fieldsCache.catch(() => {
+        fieldsCache = null
+      })
+    }
+    return fieldsCache
   }
 
   /** Поля счёта типа строка или ссылка — для выбора в настройках. */
