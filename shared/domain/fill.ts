@@ -445,7 +445,7 @@ export function applyNames(rows: DraftRow[], names: Record<string, string>): { r
   const out = rows.map((row) => {
     const name = clampName(typeof names[row.key] === 'string' ? names[row.key]! : '')
     if (!name) {
-      errors.push({ taskId: row.taskId, ...(row.entryId ? { entryId: row.entryId } : {}), message: 'BitrixGPT не вернул название строки' })
+      errors.push({ taskId: row.taskId, ...(row.entryId ? { entryId: row.entryId } : {}), message: 'ИИ не вернул название строки' })
       return row
     }
     return { ...row, name }

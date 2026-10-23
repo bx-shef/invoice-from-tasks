@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
       try {
         for await (const text of answer) controller.enqueue(enc.encode(encodeKbEvent({ type: 'text', text })))
       } catch (e) {
-        const message = e instanceof AiGatewayError ? e.message : 'BitrixGPT не ответил'
+        const message = e instanceof AiGatewayError ? e.message : 'ИИ не ответил'
         controller.enqueue(enc.encode(encodeKbEvent({ type: 'error', message })))
       }
       controller.close()

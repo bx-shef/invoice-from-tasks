@@ -79,3 +79,11 @@ describe('отказы BitrixGPT для сотрудника', () => {
     expect(describeLlmFailure('странное').kind).toBe('unknown')
   })
 })
+
+describe('resolveLlmConfig: LLM_* важнее прежних имён', () => {
+  it('DeepSeek через LLM_*; без них — BITRIXGPT_* и VIBE_API_KEY как раньше', () => {
+    expect(resolveLlmConfig({ LLM_BASE_URL: 'https://api.deepseek.com/v1', LLM_API_KEY: 'sk-1', LLM_MODEL: 'deepseek-chat', BITRIXGPT_API_KEY: 'old' }))
+      .toEqual({ baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-1', model: 'deepseek-chat' })
+    expect(resolveLlmConfig({ VIBE_API_KEY: 'vibe_1' }).apiKey).toBe('vibe_1')
+  })
+})

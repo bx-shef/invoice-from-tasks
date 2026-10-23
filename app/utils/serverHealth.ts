@@ -26,10 +26,10 @@ export function serverProblems(health: unknown): ServerProblem[] {
   const config = (health as { config?: HealthConfig } | null)?.config
   if (!config || typeof config !== 'object') return []
   const out: ServerProblem[] = []
-  if (config.appCode === false) out.push({ variable: 'B24_APP_CODE', effect: 'сервер отклоняет запросы из портала: BitrixGPT, сохранение настроек и ставок', blocking: true })
-  if (config.oauth === false) out.push({ variable: 'B24_CLIENT_ID, B24_CLIENT_SECRET', effect: 'установка не сохраняется на сервере: не работают BitrixGPT и запись ставок не-администраторами', blocking: true })
+  if (config.appCode === false) out.push({ variable: 'B24_APP_CODE', effect: 'сервер отклоняет запросы из портала: ИИ, сохранение настроек и ставок', blocking: true })
+  if (config.oauth === false) out.push({ variable: 'B24_CLIENT_ID, B24_CLIENT_SECRET', effect: 'установка не сохраняется на сервере: не работают ИИ и запись ставок не-администраторами', blocking: true })
   if (config.tokenKey === false) out.push({ variable: 'B24_TOKEN_ENC_KEY', effect: 'установка не сохраняется на сервере', blocking: true })
-  if (config.bitrixGpt === false) out.push({ variable: 'VIBE_API_KEY', effect: 'не работают названия строк через BitrixGPT и консультации', blocking: false })
+  if (config.bitrixGpt === false) out.push({ variable: 'LLM_API_KEY', effect: 'не работают названия строк через ИИ и консультации', blocking: false })
   if (config.clientHookKey === false) out.push({ variable: 'CLIENT_HOOK_ENC_KEY', effect: 'поле «Вебхук клиента» не сохраняет вебхук — задачи клиента не читаются', blocking: false })
   return out
 }

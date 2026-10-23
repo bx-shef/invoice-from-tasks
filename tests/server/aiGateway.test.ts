@@ -49,7 +49,7 @@ describe('enforceAiLimit', () => {
       enforceAiLimit(user(1), { window, now: 0 })
       expect.unreachable()
     } catch (e) {
-      expect(e).toMatchObject({ statusCode: 429, message: expect.stringMatching(/BitrixGPT/) })
+      expect(e).toMatchObject({ statusCode: 429, message: expect.stringMatching(/обращений к ИИ/) })
     }
     expect(() => enforceAiLimit(user(1), { window, now: AI_LIMITS.userRows.windowMs + 1 })).not.toThrow()
   })

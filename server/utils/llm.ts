@@ -27,10 +27,12 @@ export const BITRIXGPT_DEFAULTS = {
  * только для них (замер ai-price-import, их .env.example).
  */
 export function resolveLlmConfig(env: Record<string, string | undefined>): LlmConfig {
+  // LLM_* — общие имена (любой OpenAI-совместимый провайдер: DeepSeek и др., владелец 2026-10-23);
+  // BITRIXGPT_* и VIBE_API_KEY — прежние, работают как раньше.
   return {
-    baseURL: env.BITRIXGPT_BASE_URL?.trim() || BITRIXGPT_DEFAULTS.baseURL,
-    apiKey: env.BITRIXGPT_API_KEY?.trim() || env.VIBE_API_KEY?.trim() || '',
-    model: env.BITRIXGPT_MODEL?.trim() || BITRIXGPT_DEFAULTS.model
+    baseURL: env.LLM_BASE_URL?.trim() || env.BITRIXGPT_BASE_URL?.trim() || BITRIXGPT_DEFAULTS.baseURL,
+    apiKey: env.LLM_API_KEY?.trim() || env.BITRIXGPT_API_KEY?.trim() || env.VIBE_API_KEY?.trim() || '',
+    model: env.LLM_MODEL?.trim() || env.BITRIXGPT_MODEL?.trim() || BITRIXGPT_DEFAULTS.model
   }
 }
 
@@ -195,11 +197,11 @@ const FAILURE_PATTERNS: Array<[LlmFailureKind, RegExp]> = [
 ]
 
 const FAILURE_MESSAGES: Record<LlmFailureKind, string> = {
-  'auth': 'BitrixGPT отклонил доступ приложения (ключ не задан или недействителен). Сообщите администратору приложения.',
-  'quota': 'Исчерпан лимит обращений к BitrixGPT. Попробуйте позже или сообщите администратору приложения.',
-  'too-long': 'Слишком много текста для BitrixGPT. Уменьшите число задач или сократите описания.',
-  'unavailable': 'BitrixGPT временно недоступен. Попробуйте через несколько минут.',
-  'unknown': 'BitrixGPT не ответил: причина не определена. Попробуйте ещё раз.'
+  'auth': 'ИИ отклонил доступ приложения (ключ не задан или недействителен). Сообщите администратору приложения.',
+  'quota': 'Исчерпан лимит обращений к ИИ. Попробуйте позже или сообщите администратору приложения.',
+  'too-long': 'Слишком много текста для ИИ. Уменьшите число задач или сократите описания.',
+  'unavailable': 'ИИ временно недоступен. Попробуйте через несколько минут.',
+  'unknown': 'ИИ не ответил: причина не определена. Попробуйте ещё раз.'
 }
 
 /**

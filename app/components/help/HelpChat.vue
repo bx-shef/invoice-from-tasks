@@ -121,7 +121,7 @@ watch(() => [turns.value.length, turns.value[turns.value.length - 1]?.content.le
           <h2 class="hd-chat-welcome-title">
             ИИ-помощник по справке
           </h2>
-          <p>BitrixGPT отвечает только по этой справке и даёт ссылки на разделы. Например:</p>
+          <p>ИИ отвечает только по этой справке и даёт ссылки на разделы. Например:</p>
           <ul>
             <li
               v-for="q in examples"
