@@ -5,8 +5,8 @@
 // запросов. Опции `keepAuthFresh` из документации в установленной версии 2.2.0 ещё нет (проверено
 // по типам пакета), поэтому свежесть токена перед запросом к серверу обеспечивает useApi.ts.
 
-import { initializeB24Frame, type AjaxResult, type B24Frame, type Result } from '@bitrix24/b24jssdk'
-import { sdkRestrictionParams } from '~/config/b24'
+import { ApiVersion, initializeB24Frame, type AjaxResult, type B24Frame, type Result } from '@bitrix24/b24jssdk'
+import { PORTAL_TIMEOUT_MS, sdkRestrictionParams } from '~/config/b24'
 import { B24CallError, unwrapBatchPart, type BatchCall, type BatchItem } from '~/utils/b24Batch'
 
 let frame: B24Frame | undefined
@@ -29,6 +29,14 @@ export function useB24() {
     // Без автоповторов записи при сетевых сбоях — см. sdkRestrictionParams (config/b24.ts).
     inFlight = initializeB24Frame({ restrictionParams: sdkRestrictionParams() })
       .then((f) => {
+        // Предел ожидания — через HTTP-клиент SDK (его документация: getHttpClient(…).ajaxClient)
+        for (const v of [ApiVersion.v2, ApiVersion.v3]) {
+          try {
+            f.getHttpClient(v).ajaxClient.defaults.timeout = PORTAL_TIMEOUT_MS
+          } catch {
+            // нет клиента этой версии — остаётся по умолчанию
+          }
+        }
         frame = f
         ready.value = true
         return f
