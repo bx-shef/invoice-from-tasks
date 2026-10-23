@@ -87,3 +87,23 @@ describe('resolveLlmConfig: LLM_* важнее прежних имён', () => {
     expect(resolveLlmConfig({ VIBE_API_KEY: 'vibe_1' }).apiKey).toBe('vibe_1')
   })
 })
+
+describe('describeLlmFailure: код отказа виден, текст провайдера — нет', () => {
+  it('ключ Вайбкода «только чтение» — прямая подсказка', () => {
+    const f = describeLlmFailure('403 {"error":{"code":"WRITE_BLOCKED_READONLY_KEY","message":"Key is in read-only mode"}}')
+    expect(f.kind).toBe('auth')
+    expect(f.message).toMatch(/только чтение.*\/keys/)
+    expect(f.code).toBe('403 WRITE_BLOCKED_READONLY_KEY')
+  })
+
+  it('неизвестная ошибка — с кодом, без текста задачи', () => {
+    const f = describeLlmFailure('400 invalid_request_error: response_format не поддерживается для «Секретная задача»')
+    expect(f.kind).toBe('unknown')
+    expect(f.message).toBe('ИИ не ответил: причина не определена. Попробуйте ещё раз. Код: 400 invalid_request_error.')
+    expect(f.message).not.toContain('Секретная')
+  })
+
+  it('без кода — прежний текст', () => {
+    expect(describeLlmFailure('что-то странное').message).toBe('ИИ не ответил: причина не определена. Попробуйте ещё раз.')
+  })
+})
