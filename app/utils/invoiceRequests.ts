@@ -73,6 +73,24 @@ export function elapsedListCall(taskId: number, page: number): PositionalRestCal
   }
 }
 
+/**
+ * Первая страница записей времени — командой пакета (batch, владелец 2026-10-23: «зачем столько
+ * запросов»). Позиционные параметры — ключами 0…4 (замер 2026-10-23: batch их принимает). ⚠ Фильтр
+ * не пустой: пустой объект не попадает в строку команды, параметры съезжают — портал отвечает
+ * «filter must not contain key 0»; `>ID: 0` — без ограничения.
+ */
+export function elapsedBatchCall(taskId: number): [string, Record<string, unknown>] {
+  return ['task.elapseditem.getlist', { 0: taskId, 1: { ID: 'asc' }, 2: { '>ID': 0 }, 3: ['*'], 4: { NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: 1 } } }]
+}
+
+/**
+ * Результаты задачи командой пакета: tasks.task.result.list через v2 (`/rest/`) — у v3 пакета нет
+ * (docs/REST_METHODS.md, «Версия REST»). Ответ v2 — массив `{ id, text, … }`.
+ */
+export function resultBatchCall(taskId: number): [string, Record<string, unknown>] {
+  return ['tasks.task.result.list', { taskId }]
+}
+
 /** Результаты задачи: tasks.task.result.list (REST v3), фильтр по `taskId` обязателен. */
 export function resultListCall(taskId: number): RestCall {
   return {

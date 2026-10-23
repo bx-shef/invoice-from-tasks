@@ -31,9 +31,10 @@ import {
   productRowListCall,
   PRODUCT_ROWS_PAGE,
   replaceRowsCall,
-  resultListCall,
   TASK_LIST_OPTIONS,
-  taskListCall
+  taskListCall,
+  elapsedBatchCall,
+  resultBatchCall
 } from '~/utils/invoiceRequests'
 import { collectNumberedPages, collectOffsetPages } from '~/utils/paging'
 import { writeBlocker, type InvoiceCheck, type WriteBlock } from '~/utils/writeConfirm'
@@ -222,17 +223,36 @@ export function useInvoiceFill() {
   }
 
   /**
-   * Отчёты (результаты) задачи — контекст для названий в режиме ИИ. REST v3: фильтр по `taskId`
-   * обязателен (документация метода). Не обязательны: сбой не останавливает.
+   * Записи времени всех задач: первые страницы — пакетами по 50 задач (раньше — запрос на задачу).
+   * Полная страница — у задачи может быть больше — дочитываем её постранично (fetchEntries).
+   * Пакет не прошёл — по-старому, по задаче.
    */
-  async function fetchResults(taskId: number): Promise<string> {
+  async function fetchAllEntries(taskIds: number[]): Promise<TimeEntry[]> {
+    let firsts: unknown[]
     try {
-      const { method, params } = resultListCall(taskId)
-      const res = await b24.callV3<unknown>(method, params)
-      return listRows(res, 'items', 'results').map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')
+      firsts = await b24.batch<unknown>(taskIds.map(elapsedBatchCall))
     } catch {
-      return ''
+      return (await mapLimit(taskIds, READ_CONCURRENCY, fetchEntries)).flat()
     }
+    const out: TimeEntry[] = []
+    const more: number[] = []
+    taskIds.forEach((id, i) => {
+      const rows = listRows(firsts[i])
+      if (rows.length >= ELAPSED_PAGE) more.push(id)
+      else for (const row of rows) {
+        const entry = parseTimeEntry(row)
+        if (entry) out.push(entry)
+      }
+    })
+    out.push(...(await mapLimit(more, READ_CONCURRENCY, fetchEntries)).flat())
+    return out
+  }
+
+  /** Результаты всех задач одним пакетом (v2, docs/REST_METHODS.md); сбой задачи — без отчёта. */
+  async function fetchAllResults(taskIds: number[]): Promise<Map<number, string>> {
+    const ids = [...new Set(taskIds)]
+    const res = await b24.batchSettled<unknown>(ids.map(resultBatchCall))
+    return new Map(ids.map((id, i) => [id, listRows(res[i], 'items', 'results').map(r => String(r.text ?? r.TEXT ?? '')).filter(Boolean).join('\n')]))
   }
 
   /**
@@ -285,7 +305,7 @@ export function useInvoiceFill() {
     collectedFrom.value = inv
     try {
       tasks.value = await fetchTasks(source, inv)
-      const entries = (await mapLimit(tasks.value, READ_CONCURRENCY, task => fetchEntries(task.id))).flat()
+      const entries = await fetchAllEntries(tasks.value.map(t => t.id))
 
       const involved = new Set<number>()
       tasks.value.forEach(t => t.responsibleId && involved.add(t.responsibleId))
@@ -406,9 +426,10 @@ export function useInvoiceFill() {
     if (mode === 'time') {
       return built.rows.map(r => clipNamingItem({ key: r.key, title: byTask.get(r.taskId)?.title ?? '', text: r.name }))
     }
-    return mapLimit(built.rows, READ_CONCURRENCY, async (r) => {
+    const results = await fetchAllResults(built.rows.map(r => r.taskId))
+    return built.rows.map((r) => {
       const task = byTask.get(r.taskId)
-      return clipNamingItem({ key: r.key, title: task?.title ?? r.name, text: task?.description ?? '', result: await fetchResults(r.taskId) })
+      return clipNamingItem({ key: r.key, title: task?.title ?? r.name, text: task?.description ?? '', result: results.get(r.taskId) ?? '' })
     })
   }
 
