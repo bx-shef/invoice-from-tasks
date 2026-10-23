@@ -37,6 +37,13 @@ export const EVENTS_HANDLER_PATH = '/api/b24/events'
  * повторит его кнопкой. Задаётся один раз при создании фрейма: переключение на каждую запись
  * портило настройки ограничителя SDK (он запоминает их как исходные) и было гонкой.
  */
+/**
+ * Предел ожидания ответа портала на любой запрос из фрейма (#27): дольше — «портал не ответил»,
+ * кнопки снова доступны. Один на чтение и запись (у SDK один HTTP-клиент на версию API); запись
+ * по таймауту не повторяется (retryOnNetworkError: false), итог — по перечитанному счёту.
+ */
+export const PORTAL_TIMEOUT_MS = 60_000
+
 export function sdkRestrictionParams(): Partial<RestrictionParams> {
   return {
     retryOnNetworkError: false,
