@@ -3,6 +3,7 @@
 // в настройках; поля приложения создаются ТОЛЬКО кнопкой в настройках (решение владельца, #34) —
 // при установке и удалении приложение UF не трогает.
 
+import { INVOICE_DECISIONS_FIELD } from './decisions'
 import { ACCESS_CODE_TYPE, CLIENT_HOOK_TYPE, ECONOMICS_TYPE } from './appFieldTypes'
 
 /** Код UF: `UF_` и заглавные латиница, цифры, `_`; предел — 50 символов (документация crm.*.userfield.add). */
@@ -127,6 +128,8 @@ export const APP_FIELDS: readonly AppFieldSpec[] = [
   { entity: 'invoice', name: INVOICE_QR_FIELD, label: `${APP_FIELD_LABEL_PREFIX} QR-код расшифровки`, type: 'url' },
   { entity: 'invoice', name: INVOICE_APPROVED_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Согласовано клиентом`, type: 'boolean' },
   { entity: 'invoice', name: INVOICE_APPROVED_AT_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Дата согласования`, type: 'datetime' },
+  // Решения клиента по каждой задаче (JSON, shared/domain/decisions.ts); есть поле — на странице кнопки по задачам
+  { entity: 'invoice', name: INVOICE_DECISIONS_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Решения клиента по задачам`, type: 'string' },
   { entity: 'invoice', name: INVOICE_ECONOMICS_FIELD, label: `${APP_FIELD_LABEL_PREFIX} Экономика счёта`, type: ECONOMICS_TYPE }
 ]
 

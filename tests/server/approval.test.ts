@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { failNotice, loadPublicInvoice, postPublicApprove, postPublicComment, PROBLEM_FAILS_NOTICE, PUBLIC_FAILS_PER_INVOICE, type CommentDeps } from '../../server/utils/publicInvoice'
+import { failNotice, loadPublicInvoice, postPublicApprove, postPublicDecide, postPublicComment, PROBLEM_FAILS_NOTICE, PUBLIC_FAILS_PER_INVOICE, type CommentDeps } from '../../server/utils/publicInvoice'
 import type { PublicInvoiceView } from '#shared/domain/publicInvoice'
 
 const CODE = 'ABCDEFGHJK'
 
-interface Over { stage?: string, approved?: string, todoError?: string, updateError?: string, fields?: boolean }
+interface Over { stage?: string, approved?: string, todoError?: string, updateError?: string, fields?: boolean, decisions?: string | null }
 
 /** Подставной портал: счёт 5 в стадии согласования DT31_1:S, компания с кодом, два дела и заметка. */
 function portal(over: Over = {}) {
@@ -20,7 +20,7 @@ function portal(over: Over = {}) {
   const writes: Array<[string, Record<string, unknown>]> = []
   const call = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
     if (method === 'crm.item.get') {
-      return { item: { id: 5, title: 'Счёт №5', stageId: over.stage ?? 'DT31_1:S', assignedById: 12, companyId: 3, contactIds: [], opportunity: 10, ufCrmSmartInvoiceOk: over.approved ?? 'N' } }
+      return { item: { id: 5, title: 'Счёт №5', stageId: over.stage ?? 'DT31_1:S', assignedById: 12, companyId: 3, contactIds: [], opportunity: 10, ufCrmSmartInvoiceOk: over.approved ?? 'N', ...(over.decisions === undefined ? {} : { ufCrmSmartInvoiceShIftTasks: over.decisions }) } }
     }
     if (method === 'batch') {
       const cmd = params.cmd as Record<string, string>
@@ -160,5 +160,52 @@ describe('чат проблем о неверных кодах', () => {
     for (let i = 0; i < PROBLEM_FAILS_NOTICE; i++) await loadPublicInvoice(req({ code: 'ZZZZZZZZZZ' }), d)
     expect(d.notices).toHaveLength(1)
     expect(d.notices[0]?.[0]).toMatch(/:fails$/)
+  })
+})
+
+describe('решения клиента по задачам', () => {
+  /** Страница уже собрана: задачи 1 и 2 счёта — из кеша, как после открытия страницы. */
+  function withTasks(d: ReturnType<typeof deps>) {
+    d.cache.set('my.bitrix24.by:5', { tasks: [{ id: 1, title: 'Отчёт' }, { id: 2, title: 'Импорт' }] } as unknown as PublicInvoiceView)
+    return d
+  }
+  const decide = (decisions: unknown) => ({ ...req(), decisions })
+
+  it('на странице — решения из поля; поля нет — null (кнопок нет)', async () => {
+    const r = await loadPublicInvoice(req(), deps(portal({ decisions: '{"1":{"d":"no","at":"x"}}' })))
+    expect(r.status === 200 && r.body.state === 'open' && r.body.invoice.approval?.decisions).toEqual({ 1: 'no' })
+    const none = await loadPublicInvoice(req(), deps(portal()))
+    expect(none.status === 200 && none.body.state === 'open' && none.body.invoice.approval?.decisions).toBeNull()
+  })
+
+  it('отказ: решение в поле счёта и дело ответственному с задачами', async () => {
+    const p = portal({ decisions: null })
+    expect(await postPublicDecide(decide({ 1: 'yes', 2: 'no', 99: 'yes' }), withTasks(deps(p)))).toEqual({ status: 200, body: { ok: true } })
+    expect(p.writes[0]).toEqual(['crm.item.update', { entityTypeId: 31, id: 5, fields: { ufCrmSmartInvoiceShIftTasks: '{"1":{"d":"yes","at":"2026-10-06T10:00:00.000Z"},"2":{"d":"no","at":"2026-10-06T10:00:00.000Z"}}' } }])
+    expect(p.writes[1]?.[1]).toMatchObject({ title: 'Клиент отказался от работ: ООО Клиент', description: '#2 Импорт', responsibleId: 12 })
+    expect(p.writes).toHaveLength(2)
+  })
+
+  it('все подтверждены — счёт согласован тем же полем, что кнопка', async () => {
+    const p = portal({ decisions: '{"1":{"d":"yes","at":"old"}}' })
+    expect((await postPublicDecide(decide({ 2: 'yes' }), withTasks(deps(p)))).status).toBe(200)
+    expect(p.writes[0]?.[1]).toMatchObject({ fields: { ufCrmSmartInvoiceOk: 'Y', ufCrmSmartInvoiceOkAt: '2026-10-06T10:00:00.000Z' } })
+    expect(p.writes[1]?.[1]).toMatchObject({ title: 'Счёт согласован клиентом: ООО Клиент' })
+  })
+
+  it('без поля решений — 403; чужие задачи — 400; не на согласовании — 403; ничего не пишется', async () => {
+    const p = portal()
+    expect((await postPublicDecide(decide({ 1: 'yes' }), withTasks(deps(p)))).status).toBe(403)
+    const q = portal({ decisions: null })
+    expect((await postPublicDecide(decide({ 99: 'yes' }), withTasks(deps(q)))).status).toBe(400)
+    const r = portal({ decisions: null, stage: 'DT31_1:N' })
+    expect((await postPublicDecide(decide({ 1: 'yes' }), withTasks(deps(r)))).status).toBe(403)
+    expect([...p.writes, ...q.writes, ...r.writes]).toEqual([])
+  })
+
+  it('то же решение повторно — без записи', async () => {
+    const p = portal({ decisions: '{"1":{"d":"yes","at":"old"}}' })
+    expect((await postPublicDecide(decide({ 1: 'yes' }), withTasks(deps(p)))).status).toBe(200)
+    expect(p.writes).toEqual([])
   })
 })

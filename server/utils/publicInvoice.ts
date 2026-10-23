@@ -31,6 +31,7 @@ import {
   type PublicInvoiceView,
   type PublicTask
 } from '#shared/domain/publicInvoice'
+import { cleanDecisionInput, DECLINED_TITLE, declinedText, decisionSummary, INVOICE_DECISIONS_FIELD, mergeDecisions, parseDecisions, serializeDecisions } from '#shared/domain/decisions'
 import { APPROVED_TITLE, approvalMark, approvalUpdates, cleanComment, commentListParams, commentsFrom, commentTodoParams, noteText, type ApprovalComment } from '#shared/domain/approval'
 import { parseSettings, SETTINGS_KEY, type AppSettings } from '#shared/domain/settings'
 import { ACCESS_CODE_FIELD, camelFieldKey } from '#shared/domain/userFields'
@@ -290,7 +291,12 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
     status: 200,
     body: {
       state: 'open',
-      invoice: { ...view, approval: access.approval ? { comments: await readComments(call, invoice.id), mark: approvalMark(access.raw, settings.publicPage, camelFieldKey) } : null }
+      invoice: {
+        ...view,
+        approval: access.approval
+          ? { comments: await readComments(call, invoice.id), mark: approvalMark(access.raw, settings.publicPage, camelFieldKey), decisions: decisionsView(access.raw) }
+          : null
+      }
     }
   })
   const cached = deps.cache.get(cacheKey)
@@ -510,5 +516,64 @@ export async function postPublicApprove(req: PublicRequest, deps: CommentDeps): 
   // Дело — чтобы ответственный узнал сразу; его сбой согласование не отменяет.
   await call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, 'Клиент нажал «Согласовать» на странице расшифровки счёта.', now), title: access.author ? `${APPROVED_TITLE}: ${access.author}` : APPROVED_TITLE })
     .catch((e: unknown) => console.warn(`[public] approve todo of invoice ${invoice.id}: ${e instanceof Error ? e.message : String(e)}`))
+  return { status: 200, body: { ok: true } }
+}
+
+/** Решения из счёта для страницы; поля решений в счёте нет (ключа нет в ответе) — `null`. */
+export function decisionsView(raw: Record<string, unknown>): Record<number, 'yes' | 'no'> | null {
+  const key = camelFieldKey(INVOICE_DECISIONS_FIELD)
+  if (!(key in raw)) return null
+  return Object.fromEntries(Object.entries(parseDecisions(raw[key])).map(([id, v]) => [id, v.d]))
+}
+
+/**
+ * Решения клиента по задачам (просьба владельца 2026-10-23): `{ "<taskId>": "yes" | "no" }` — по
+ * одной задаче или все разом. Только в стадии согласования и только задачи этого счёта. Решения —
+ * в поле счёта (JSON); новый отказ — дело ответственному; все задачи подтверждены — та же отметка
+ * «Согласовано», что у кнопки. Пишет сервер токеном установщика, как комментарии и согласование.
+ */
+export async function postPublicDecide(req: PublicRequest & { decisions: unknown }, deps: CommentDeps): Promise<CommentResult> {
+  const access = await verifyPublicAccess(req, deps)
+  if (isResult(access)) return access.status === 200 ? { status: 403, body: { error: 'Счёт сейчас не на согласовании' } } : access
+  if (!access.approval) return { status: 403, body: { error: 'Счёт сейчас не на согласовании' } }
+  const { call, invoice, settings } = access
+  const key = camelFieldKey(INVOICE_DECISIONS_FIELD)
+  if (!(key in access.raw)) return { status: 403, body: { error: 'Решения по задачам не настроены' } }
+  // Задачи счёта — те же, что видит клиент (страница из кеша или собранная заново)
+  const cached = deps.cache.get(`${req.domain}:${invoice.id}`)
+  const view = cached ?? await loadPublicInvoice(req, deps).then(r => (r.status === 200 && 'invoice' in r.body ? r.body.invoice as PublicInvoiceView : null))
+  if (!view) return { status: 503, body: { error: 'Не удалось прочитать задачи счёта — попробуйте позже' } }
+  const taskIds = view.tasks.map(t => t.id)
+  const input = cleanDecisionInput(req.decisions, taskIds)
+  if (!input) return { status: 400, body: { error: 'Нет решений по задачам этого счёта' } }
+  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много действий — попробуйте через час' } }
+  const now = deps.now()
+  const { next, changed } = mergeDecisions(parseDecisions(access.raw[key]), input, now)
+  if (!changed.length) return { status: 200, body: { ok: true } }
+  const summary = decisionSummary(next, taskIds)
+  const mark = approvalMark(access.raw, settings.publicPage, camelFieldKey)
+  const approveNow = summary.allYes && mark.enabled && !mark.approved
+  const fields: Record<string, string> = { [key]: serializeDecisions(next), ...(approveNow ? approvalUpdates(settings.publicPage, camelFieldKey, now) : {}) }
+  try {
+    await call('crm.item.update', { entityTypeId: 31, id: invoice.id, fields })
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e)
+    console.error(`[public] decisions of invoice ${invoice.id} failed: ${reason}`)
+    if (deps.notify) {
+      void deps.notify(call, `pub-decide-fail:${req.domain}:${invoice.id}`, `[b]Решения клиента по задачам счёта «${invoice.title}» (#${invoice.id}) не записаны[/b]\nПортал ответил: ${reason}. Проверьте поле «Решения клиента по задачам» в счёте.`).catch(() => {})
+    }
+    return { status: 503, body: { error: 'Не удалось сохранить решение — попробуйте позже' } }
+  }
+  // Дела — чтобы ответственный узнал сразу; их сбой решения не отменяет.
+  const declined = changed.filter(c => c.d === 'no').map(c => c.taskId)
+  const titles = new Map(view.tasks.map(t => [t.id, t.title]))
+  const todos: Array<Promise<unknown>> = []
+  if (declined.length) {
+    todos.push(call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, declinedText(declined, titles), now), title: access.author ? `${DECLINED_TITLE}: ${access.author}` : DECLINED_TITLE }))
+  }
+  if (approveNow) {
+    todos.push(call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, 'Клиент подтвердил все работы счёта на странице расшифровки.', now), title: access.author ? `${APPROVED_TITLE}: ${access.author}` : APPROVED_TITLE }))
+  }
+  await Promise.all(todos.map(t => t.catch((e: unknown) => console.warn(`[public] decide todo of invoice ${invoice.id}: ${e instanceof Error ? e.message : String(e)}`))))
   return { status: 200, body: { ok: true } }
 }

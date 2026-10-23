@@ -183,6 +183,49 @@ async function refreshApproval() {
   if (res.state === 'open' && invoice.value) invoice.value = { ...invoice.value, approval: res.invoice.approval }
 }
 
+/** Решения по задачам; `null` — в счёте нет поля решений (кнопок по задачам нет). */
+const decisions = computed(() => invoice.value?.approval?.decisions ?? null)
+/** Задачи для решений — под названием строки счёта (как в «Работах»), без строки — название задачи. */
+const decisionTasks = computed(() => {
+  if (!decisions.value) return []
+  const rows = invoice.value?.rows ?? []
+  return (invoice.value?.tasks ?? []).map((t) => {
+    const row = rows.find(r => r.taskId === t.id)
+    return { id: t.id, title: row ? rowTitle(row.name) : t.title }
+  })
+})
+const decisionCount = computed(() => {
+  const d = decisions.value ?? {}
+  const ids = decisionTasks.value.map(t => t.id)
+  return { yes: ids.filter(id => d[id] === 'yes').length, no: ids.filter(id => d[id] === 'no').length, all: ids.length }
+})
+const deciding = ref(false)
+
+/**
+ * Решение по задачам — одной или всем: сразу показываем (оптимистично), сервер пишет в счёт;
+ * затем перечитываем — вдруг счёт стал согласованным (все подтверждены). Сбой — откат и текст.
+ */
+async function decide(map: Record<number, 'yes' | 'no'>) {
+  if (!invoice.value?.approval || deciding.value) return
+  const before = invoice.value.approval
+  invoice.value = { ...invoice.value, approval: { ...before, decisions: { ...(before.decisions ?? {}), ...map } } }
+  deciding.value = true
+  commentError.value = ''
+  try {
+    await $fetch('/api/public/decide', { method: 'POST', body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, decisions: map } })
+    void refreshApproval().catch(() => {})
+  } catch (e) {
+    if (invoice.value) invoice.value = { ...invoice.value, approval: before }
+    const err = e as { data?: { error?: string }, statusMessage?: string }
+    commentError.value = err.data?.error || err.statusMessage || 'Не удалось сохранить решение'
+  } finally {
+    deciding.value = false
+  }
+}
+function decideAll(d: 'yes' | 'no') {
+  void decide(Object.fromEntries(decisionTasks.value.map(t => [t.id, d])))
+}
+
 function dateTime(value: string): string {
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
@@ -415,11 +458,71 @@ const rowItems = computed(() => {
             <div class="text-base opacity-80">
               {{ invoice.approval.mark.approved
                 ? (invoice.approval.mark.approvedAt ? dateTime(invoice.approval.mark.approvedAt) : '')
-                : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
+                : decisions
+                  ? `Отметьте каждую работу или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}`
+                  : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
             </div>
           </div>
+          <div
+            v-if="decisions && decisionTasks.length"
+            class="w-full space-y-2"
+            data-testid="public-decisions"
+          >
+            <div
+              v-for="(t, n) in decisionTasks"
+              :key="t.id"
+              class="grid grid-cols-2 sm:flex sm:items-center gap-2 border-t border-(--ui-color-design-plain-content-divider) pt-2"
+            >
+              <span class="col-span-2 sm:flex-1 flex gap-2"><span class="opacity-75 tabular-nums w-6 shrink-0">{{ n + 1 }}</span>{{ t.title }}</span>
+              <B24Button
+                :color="decisions[t.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
+                size="md"
+                :label="decisions[t.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
+                :disabled="deciding"
+                :aria-pressed="decisions[t.id] === 'yes'"
+                class="justify-center"
+                data-testid="public-decide-yes"
+                @click="decide({ [t.id]: 'yes' })"
+              />
+              <B24Button
+                :color="decisions[t.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
+                size="md"
+                :label="decisions[t.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
+                :disabled="deciding"
+                :aria-pressed="decisions[t.id] === 'no'"
+                class="justify-center"
+                data-testid="public-decide-no"
+                @click="decide({ [t.id]: 'no' })"
+              />
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2">
+              <B24Button
+                color="air-primary-success"
+                label="Подтвердить всё"
+                :loading="deciding"
+                :disabled="deciding"
+                class="flex-1 sm:flex-none justify-center"
+                data-testid="public-decide-all-yes"
+                @click="decideAll('yes')"
+              />
+              <B24Button
+                color="air-secondary"
+                label="Всё не делаем"
+                :disabled="deciding"
+                class="flex-1 sm:flex-none justify-center"
+                data-testid="public-decide-all-no"
+                @click="decideAll('no')"
+              />
+            </div>
+            <p
+              v-if="commentError"
+              class="text-(--ui-color-accent-main-alert)"
+            >
+              {{ commentError }}
+            </p>
+          </div>
           <B24Button
-            v-if="!invoice.approval.mark.approved && invoice.approval.mark.enabled"
+            v-if="!decisions && !invoice.approval.mark.approved && invoice.approval.mark.enabled"
             color="air-primary-success"
             label="Согласовать"
             :loading="approving"
@@ -503,6 +606,12 @@ const rowItems = computed(() => {
                       :label="item.state"
                     />
                     <span v-if="item.date">{{ date(item.date) }}</span>
+                    <B24Badge
+                      v-if="item.task && decisions?.[item.task.id]"
+                      :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-primary-alert'"
+                      size="md"
+                      :label="decisions[item.task.id] === 'yes' ? 'вы подтвердили' : 'не делаем'"
+                    />
                     <span v-if="item.task">#{{ item.task.id }}</span>
                   </span>
                 </span>

@@ -101,7 +101,7 @@ describe('поля счёта приложения', () => {
       params: { moduleId: 'crm', field: { entityId: 'CRM_SMART_INVOICE', fieldName: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', userTypeId: 'boolean', xmlId: 'UF_CRM_SMART_INVOICE_SH_IFT_OK', multiple: 'N', mandatory: 'N', editFormLabel: { ru: ok.label, en: ok.label } } }
     })
     // ссылка полем больше не создаётся (владелец 2026-10-09) — её показывает «Экономика счёта»; QR — для шаблона
-    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['boolean', false], ['datetime', false], ['ift_economics', true]])
+    expect(APP_FIELDS.filter(f => f.entity === 'invoice').map(f => [f.type, needsAppId(f)])).toEqual([['url', false], ['boolean', false], ['datetime', false], ['string', false], ['ift_economics', true]])
     for (const f of APP_FIELDS.filter(f => f.entity === 'invoice')) expect(f.name.length).toBeLessThanOrEqual(50)
   })
 
