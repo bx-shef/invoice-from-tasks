@@ -231,6 +231,14 @@ function dateTime(value: string): string {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Раскрытые строки «Работ»: подробности задачи по нажатию на строку. */
+const openRows = ref(new Set<string>())
+function toggleRow(value: string) {
+  const next = new Set(openRows.value)
+  if (!next.delete(value)) next.add(value)
+  openRows.value = next
+}
+
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
 
 /** Что показать в строке: состояние и дата — задачи клиента, если она прочитана, иначе нашей. */
@@ -459,7 +467,7 @@ const rowItems = computed(() => {
               {{ invoice.approval.mark.approved
                 ? (invoice.approval.mark.approvedAt ? dateTime(invoice.approval.mark.approvedAt) : '')
                 : decisions
-                  ? `Отметьте каждую работу или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}`
+                  ? `Отметьте каждую работу ниже или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}`
                   : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
             </div>
           </div>
@@ -468,33 +476,6 @@ const rowItems = computed(() => {
             class="w-full space-y-2"
             data-testid="public-decisions"
           >
-            <div
-              v-for="(t, n) in decisionTasks"
-              :key="t.id"
-              class="grid grid-cols-2 sm:flex sm:items-center gap-2 border-t border-(--ui-color-design-plain-content-divider) pt-2"
-            >
-              <span class="col-span-2 sm:flex-1 flex gap-2"><span class="opacity-75 tabular-nums w-6 shrink-0">{{ n + 1 }}</span>{{ t.title }}</span>
-              <B24Button
-                :color="decisions[t.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
-                size="md"
-                :label="decisions[t.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
-                :disabled="deciding"
-                :aria-pressed="decisions[t.id] === 'yes'"
-                class="justify-center"
-                data-testid="public-decide-yes"
-                @click="decide({ [t.id]: 'yes' })"
-              />
-              <B24Button
-                :color="decisions[t.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
-                size="md"
-                :label="decisions[t.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
-                :disabled="deciding"
-                :aria-pressed="decisions[t.id] === 'no'"
-                class="justify-center"
-                data-testid="public-decide-no"
-                @click="decide({ [t.id]: 'no' })"
-              />
-            </div>
             <div class="flex flex-wrap gap-2 pt-2">
               <B24Button
                 color="air-primary-success"
@@ -583,162 +564,186 @@ const rowItems = computed(() => {
             Работы
           </div>
           <!-- Строка — чтобы вспомнить: №, что за задача, состояние, дата, цена. Подробности — по раскрытию. -->
-          <B24Accordion
-            type="multiple"
-            :items="rowItems"
+          <!-- Решения по работе — прямо в её строке (владелец 2026-10-25: два списка рядом — странно) -->
+          <div
             class="hd-card px-3"
-            :b24ui="{ trigger: 'items-center', label: 'flex-1 min-w-0' }"
             data-testid="public-rows"
           >
-            <template #default="{ item }">
-              <div
-                class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left"
-                data-testid="public-row"
-              >
-                <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
-                <span class="min-w-0">
-                  <span class="block text-lg font-medium leading-snug">{{ rowTitle(item.row.name) }}</span>
-                  <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
-                    <B24Badge
-                      v-if="item.state"
-                      :color="item.done ? 'air-primary-success' : 'air-secondary'"
-                      size="md"
-                      :label="item.state"
-                    />
-                    <span v-if="item.date">{{ date(item.date) }}</span>
-                    <B24Badge
-                      v-if="item.task && decisions?.[item.task.id]"
-                      :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-primary-alert'"
-                      size="md"
-                      :label="decisions[item.task.id] === 'yes' ? 'вы подтвердили' : 'не делаем'"
-                    />
-                    <span v-if="item.task">#{{ item.task.id }}</span>
+            <div
+              v-for="item in rowItems"
+              :key="item.value"
+              class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider)"
+            >
+              <!-- Строка: название раскрывает подробности; цена и решения — рядом, видны и в свёрнутом виде -->
+              <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
+                <button
+                  type="button"
+                  class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left disabled:cursor-default"
+                  :disabled="item.disabled"
+                  :aria-expanded="openRows.has(item.value)"
+                  data-testid="public-row"
+                  @click="toggleRow(item.value)"
+                >
+                  <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
+                  <span class="min-w-0">
+                    <span class="block text-lg font-medium leading-snug">{{ rowTitle(item.row.name) }}</span>
+                    <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
+                      <B24Badge
+                        v-if="item.state"
+                        :color="item.done ? 'air-primary-success' : 'air-secondary'"
+                        size="md"
+                        :label="item.state"
+                      />
+                      <span v-if="item.date">{{ date(item.date) }}</span>
+                    </span>
                   </span>
-                </span>
+                  <span
+                    v-if="!item.disabled"
+                    class="opacity-60 transition-transform"
+                    :class="{ 'rotate-180': openRows.has(item.value) }"
+                    aria-hidden="true"
+                  >⌄</span>
+                </button>
                 <span
                   v-if="item.row.sum !== null"
-                  class="whitespace-nowrap text-lg font-semibold tabular-nums"
+                  class="whitespace-nowrap text-lg font-semibold tabular-nums pl-9 sm:pl-0"
                 >{{ money(item.row.sum, invoice.currencyId) }}</span>
                 <span
                   v-else
-                  class="whitespace-nowrap text-sm opacity-75"
+                  class="whitespace-nowrap text-sm opacity-75 pl-9 sm:pl-0"
                 >без строки</span>
-              </div>
-            </template>
-            <template #body="{ item }">
-              <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
-              <div
-                v-if="item.task"
-                class="space-y-3 text-base pb-3"
-              >
                 <div
-                  v-if="lastResult(item.task)"
-                  class="pub-result p-4 space-y-2"
-                  data-testid="public-task"
+                  v-if="decisions && item.task"
+                  class="flex gap-2 shrink-0"
                 >
-                  <div class="flex items-center gap-2 text-lg font-semibold">
-                    <span
-                      class="size-7 rounded-md border-2 border-(--ui-color-accent-main-primary) text-(--ui-color-accent-main-primary) flex items-center justify-center text-sm"
-                      aria-hidden="true"
-                    >✓</span>
-                    Результат работы
-                  </div>
-                  <p
-                    class="whitespace-pre-line text-lg leading-relaxed break-words"
-                    :class="{ 'line-clamp-6': !fullResult.has(item.task.id) }"
+                  <B24Button
+                    :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
+                    size="sm"
+                    :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
+                    :disabled="deciding"
+                    :aria-pressed="decisions[item.task.id] === 'yes'"
+                    data-testid="public-decide-yes"
+                    @click="decide({ [item.task.id]: 'yes' })"
+                  />
+                  <B24Button
+                    :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
+                    size="sm"
+                    :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
+                    :disabled="deciding"
+                    :aria-pressed="decisions[item.task.id] === 'no'"
+                    data-testid="public-decide-no"
+                    @click="decide({ [item.task.id]: 'no' })"
+                  />
+                </div>
+              </div>
+              <template v-if="openRows.has(item.value)">
+                <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
+                <div
+                  v-if="item.task"
+                  class="space-y-3 text-base pb-3"
+                >
+                  <div
+                    v-if="lastResult(item.task)"
+                    class="pub-result p-4 space-y-2"
+                    data-testid="public-task"
                   >
-                    {{ lastResult(item.task) }}
-                  </p>
-                  <button
-                    v-if="lastResult(item.task).split('\n').length > 6 || lastResult(item.task).length > 300"
-                    type="button"
-                    class="underline text-(--ui-color-accent-main-primary)"
-                    @click="toggleResult(item.task.id)"
-                  >
-                    {{ fullResult.has(item.task.id) ? 'Свернуть' : 'Показать полностью' }}
-                  </button>
-                  <details v-if="allResults(item.task).length > 1">
-                    <summary class="cursor-pointer opacity-80">
-                      Все результаты ({{ allResults(item.task).length }})
-                    </summary>
+                    <div class="flex items-center gap-2 text-lg font-semibold">
+                      <span
+                        class="size-7 rounded-md border-2 border-(--ui-color-accent-main-primary) text-(--ui-color-accent-main-primary) flex items-center justify-center text-sm"
+                        aria-hidden="true"
+                      >✓</span>
+                      Результат работы
+                    </div>
                     <p
-                      v-for="(r, j) in allResults(item.task).slice(1)"
-                      :key="j"
-                      class="whitespace-pre-line mt-2 pt-2 border-t border-(--ui-color-design-plain-content-divider)"
+                      class="whitespace-pre-line text-lg leading-relaxed break-words"
+                      :class="{ 'line-clamp-6': !fullResult.has(item.task.id) }"
                     >
-                      {{ r }}
+                      {{ lastResult(item.task) }}
                     </p>
-                  </details>
-                </div>
-                <div
-                  v-else
-                  data-testid="public-task"
-                />
-
-                <div
-                  v-if="item.task.clientTask?.creatorName"
-                  class="pub-tile p-4 space-y-2"
-                >
-                  <div class="opacity-75">
-                    Поставил
-                  </div>
-                  <div class="flex items-center gap-3 text-lg">
-                    <img
-                      v-if="item.task.clientTask.creatorIcon"
-                      :src="item.task.clientTask.creatorIcon"
-                      alt=""
-                      referrerpolicy="no-referrer"
-                      class="size-10 rounded-full object-cover"
+                    <button
+                      v-if="lastResult(item.task).split('\n').length > 6 || lastResult(item.task).length > 300"
+                      type="button"
+                      class="underline text-(--ui-color-accent-main-primary)"
+                      @click="toggleResult(item.task.id)"
                     >
-                    <span
-                      v-else
-                      class="size-10 rounded-full bg-(--ui-color-accent-main-primary) text-white flex items-center justify-center"
-                      aria-hidden="true"
-                    >{{ item.task.clientTask.creatorName.slice(0, 1) }}</span>
-                    {{ item.task.clientTask.creatorName }}
+                      {{ fullResult.has(item.task.id) ? 'Свернуть' : 'Показать полностью' }}
+                    </button>
+                    <details v-if="allResults(item.task).length > 1">
+                      <summary class="cursor-pointer opacity-80">
+                        Все результаты ({{ allResults(item.task).length }})
+                      </summary>
+                      <p
+                        v-for="(r, j) in allResults(item.task).slice(1)"
+                        :key="j"
+                        class="whitespace-pre-line mt-2 pt-2 border-t border-(--ui-color-design-plain-content-divider)"
+                      >
+                        {{ r }}
+                      </p>
+                    </details>
                   </div>
-                </div>
+                  <div
+                    v-else
+                    data-testid="public-task"
+                  />
 
-                <div class="pub-tile p-4 space-y-2">
-                  <div class="opacity-75">
-                    Задача
-                  </div>
-                  <div>{{ item.task.title || item.row.name }}</div>
-                  <div class="flex flex-wrap gap-2 pt-1">
-                    <B24Button
-                      v-if="item.task.clientTaskUrl"
-                      :to="item.task.clientTaskUrl"
-                      target="_blank"
-                      color="air-primary"
-                      size="md"
-                      :label="`Ваша задача #${item.task.clientTaskId}`"
-                      data-testid="public-client-task"
-                    />
-                    <span
-                      v-else-if="item.task.clientTaskId"
-                      class="opacity-80"
-                      data-testid="public-client-task"
-                    >Ваша задача #{{ item.task.clientTaskId }}</span>
-                    <B24Button
-                      :to="item.task.url"
-                      target="_blank"
-                      color="air-secondary"
-                      size="md"
-                      :label="`Задача исполнителя #${item.task.id}`"
-                    />
-                  </div>
-                  <details v-if="item.task.clientTask?.description || item.task.description">
-                    <summary class="cursor-pointer opacity-80">
-                      Описание задачи
-                    </summary>
-                    <p class="whitespace-pre-line mt-2 opacity-90">
-                      {{ item.task.clientTask?.description || item.task.description }}
+                  <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
+                  <div class="pub-tile p-4 space-y-2">
+                    <div class="font-medium">
+                      {{ item.task.title || item.row.name }}
+                    </div>
+                    <div
+                      v-if="item.task.clientTask?.creatorName"
+                      class="flex items-center gap-2 text-sm opacity-80"
+                    >
+                      <span>Поставил</span>
+                      <img
+                        v-if="item.task.clientTask.creatorIcon"
+                        :src="item.task.clientTask.creatorIcon"
+                        alt=""
+                        referrerpolicy="no-referrer"
+                        class="size-6 rounded-full object-cover"
+                      >
+                      <span
+                        v-else
+                        class="size-6 rounded-full bg-(--ui-color-accent-main-primary) text-white text-xs flex items-center justify-center"
+                        aria-hidden="true"
+                      >{{ item.task.clientTask.creatorName.slice(0, 1) }}</span>
+                      <span>{{ item.task.clientTask.creatorName }}</span>
+                    </div>
+                    <p
+                      v-if="item.task.description"
+                      class="whitespace-pre-line opacity-90"
+                    >
+                      {{ item.task.description }}
                     </p>
-                  </details>
+                    <div class="flex flex-wrap gap-2 pt-1">
+                      <B24Button
+                        v-if="item.task.clientTaskUrl"
+                        :to="item.task.clientTaskUrl"
+                        target="_blank"
+                        color="air-primary"
+                        size="md"
+                        :label="`Ваша задача #${item.task.clientTaskId}`"
+                        data-testid="public-client-task"
+                      />
+                      <span
+                        v-else-if="item.task.clientTaskId"
+                        class="opacity-80"
+                        data-testid="public-client-task"
+                      >Ваша задача #{{ item.task.clientTaskId }}</span>
+                      <B24Button
+                        :to="item.task.url"
+                        target="_blank"
+                        color="air-secondary"
+                        size="md"
+                        :label="`Задача исполнителя #${item.task.id}`"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </template>
-          </B24Accordion>
+              </template>
+            </div>
+          </div>
           <p
             v-if="invoice.truncated"
             class="text-base opacity-80"

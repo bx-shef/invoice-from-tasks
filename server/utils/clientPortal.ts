@@ -12,7 +12,7 @@ export const CLIENT_PORTAL_DEADLINE_MS = 10_000
 /** Предел ответа портала клиента, байт. */
 export const CLIENT_PORTAL_MAX_BYTES = 2 * 1024 * 1024
 /** Сколько задач клиента читаем за раз (пакет `batch` — до 50 команд). */
-export const MAX_CLIENT_TASKS = 20
+export const MAX_CLIENT_TASKS = 50
 /** Сколько запросов результатов идут одновременно. */
 const RESULTS_CONCURRENCY = 4
 

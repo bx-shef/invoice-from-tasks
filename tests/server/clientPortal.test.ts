@@ -83,10 +83,10 @@ describe('адреса и вызов портала клиента', () => {
     expect(await readClientTasks(f, HOOK, [])).toEqual(new Map())
   })
 
-  it('не больше 20 задач за раз', async () => {
+  it('не больше 50 задач за раз (предел пакета)', async () => {
     const f = fakeFetch(() => ({ body: { result: { result: {} } } }))
-    await readClientTasks(f, HOOK, Array.from({ length: 25 }, (_, i) => i + 1))
-    expect(Object.keys((JSON.parse(f.inits[0]!.body) as { cmd: object }).cmd)).toHaveLength(20)
+    await readClientTasks(f, HOOK, Array.from({ length: 55 }, (_, i) => i + 1))
+    expect(Object.keys((JSON.parse(f.inits[0]!.body) as { cmd: object }).cmd)).toHaveLength(50)
   })
 
   it('общий дедлайн: медленный портал не держит страницу дольше дедлайна', async () => {
