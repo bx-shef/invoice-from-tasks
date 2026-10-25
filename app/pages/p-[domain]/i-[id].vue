@@ -256,10 +256,17 @@ function dateTime(value: string): string {
 
 /** Раскрытые строки «Работ»: подробности задачи по нажатию на строку. */
 const openRows = ref(new Set<string>())
+/**
+ * Раскрытие — одна строка за раз, к началу экрана, остальное под размытием (владелец 2026-10-25:
+ * «подробности теряются»). Повторное нажатие или клик по фону — закрыть.
+ */
 function toggleRow(value: string) {
-  const next = new Set(openRows.value)
-  if (!next.delete(value)) next.add(value)
-  openRows.value = next
+  const opening = !openRows.value.has(value)
+  openRows.value = opening ? new Set([value]) : new Set()
+  if (opening) void nextTick(() => document.getElementById(`row-${value}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+function closeRows() {
+  openRows.value = new Set()
 }
 
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
@@ -393,7 +400,7 @@ const rowItems = computed(() => {
     </div>
     <div
       v-else
-      class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4 text-base"
+      class="mx-auto max-w-3xl p-3 sm:p-4 pb-24 sm:pb-24 space-y-4 text-base"
     >
       <h1 class="sr-only">
         Документы для счёта
@@ -594,8 +601,10 @@ const rowItems = computed(() => {
           >
             <div
               v-for="item in rowItems"
+              :id="`row-${item.value}`"
               :key="item.value"
-              class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider)"
+              class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider) scroll-mt-3"
+              :class="openRows.has(item.value) ? 'relative z-40 -mx-3 px-3 rounded-xl bg-(--ui-color-bg-content-primary) shadow-2xl ring-2 ring-(--ui-color-accent-main-primary)' : ''"
             >
               <!-- Строка: название раскрывает подробности; цена и решения — рядом, видны и в свёрнутом виде -->
               <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
@@ -641,7 +650,7 @@ const rowItems = computed(() => {
                   class="grid grid-cols-2 w-full sm:flex sm:w-auto gap-2 shrink-0"
                 >
                   <B24Button
-                    :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
+                    :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary-accent-1'"
                     size="md"
                     :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
                     :disabled="deciding"
@@ -651,7 +660,7 @@ const rowItems = computed(() => {
                     @click="decide({ [item.task.id]: 'yes' })"
                   />
                   <B24Button
-                    :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
+                    :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary-alert'"
                     size="md"
                     :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
                     :disabled="deciding"
@@ -661,7 +670,7 @@ const rowItems = computed(() => {
                     @click="decide({ [item.task.id]: 'no' })"
                   />
                   <B24Button
-                    :color="decisions[item.task.id] === 'later' ? 'air-primary-copilot' : 'air-secondary'"
+                    :color="decisions[item.task.id] === 'later' ? 'air-primary-copilot' : 'air-tertiary'"
                     size="md"
                     :label="decisions[item.task.id] === 'later' ? `⏸ До ${invoice.approval?.postponed?.[item.task.id] ? date(invoice.approval.postponed[item.task.id]!) : '…'}` : 'Отложить'"
                     :disabled="deciding"
@@ -724,13 +733,13 @@ const rowItems = computed(() => {
                   />
 
                   <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
-                  <div class="pub-tile p-4 space-y-2">
+                  <div class="pub-tile p-4 space-y-3">
                     <div class="flex flex-wrap gap-2">
                       <B24Button
                         v-if="item.task.clientTaskUrl"
                         :to="item.task.clientTaskUrl"
                         target="_blank"
-                        color="air-primary"
+                        color="air-secondary-accent"
                         size="sm"
                         :label="`Ваша задача #${item.task.clientTaskId}`"
                         data-testid="public-client-task"
@@ -743,19 +752,24 @@ const rowItems = computed(() => {
                       <B24Button
                         :to="item.task.url"
                         target="_blank"
-                        color="air-secondary"
+                        color="air-tertiary"
                         size="sm"
                         :label="`Задача исполнителя #${item.task.id}`"
                       />
                     </div>
-                    <div class="font-medium">
-                      {{ item.task.title || item.row.name }}
+                    <div>
+                      <div class="text-xs uppercase tracking-wide opacity-60">
+                        Задача
+                      </div>
+                      <div class="text-lg font-semibold leading-snug">
+                        {{ item.task.title || item.row.name }}
+                      </div>
                     </div>
                     <div
                       v-if="item.task.clientTask?.creatorName"
-                      class="flex items-center gap-2 text-sm opacity-80"
+                      class="inline-flex items-center gap-2 text-sm rounded-full bg-(--ui-color-bg-content-secondary) pl-3 pr-3 py-1"
                     >
-                      <span>Поставил</span>
+                      <span class="opacity-60">Поставил</span>
                       <img
                         v-if="item.task.clientTask.creatorIcon"
                         :src="item.task.clientTask.creatorIcon"
@@ -770,12 +784,17 @@ const rowItems = computed(() => {
                       >{{ item.task.clientTask.creatorName.slice(0, 1) }}</span>
                       <span>{{ item.task.clientTask.creatorName }}</span>
                     </div>
-                    <p
+                    <div
                       v-if="item.task.description"
-                      class="whitespace-pre-line opacity-90 [overflow-wrap:anywhere]"
+                      class="border-l-4 border-(--ui-color-accent-main-primary) pl-3"
                     >
-                      {{ item.task.description }}
-                    </p>
+                      <div class="text-xs uppercase tracking-wide opacity-60 mb-1">
+                        Что сделать
+                      </div>
+                      <p class="whitespace-pre-line [overflow-wrap:anywhere]">
+                        {{ item.task.description }}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -845,8 +864,15 @@ const rowItems = computed(() => {
         </section>
       </template>
     </div>
+    <div
+      v-if="openRows.size"
+      class="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm"
+      aria-hidden="true"
+      data-testid="public-row-backdrop"
+      @click="closeRows"
+    />
     <B24Button
-      v-if="invoice?.approval"
+      v-if="invoice?.approval && !openRows.size"
       color="air-primary"
       size="lg"
       label="Замечание"
@@ -862,7 +888,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <form
-          class="space-y-2"
+          class="space-y-3 py-2"
           @submit.prevent="sendComment"
         >
           <B24Textarea
@@ -907,7 +933,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <form
-          class="space-y-2"
+          class="space-y-3 py-2"
           @submit.prevent="sendComment"
         >
           <B24Textarea
@@ -944,7 +970,9 @@ const rowItems = computed(() => {
         </form>
       </template>
     </B24Drawer>
+    <!-- Окна — по одному правилу: компьютер — модальное окно, телефон — панель снизу (владелец 2026-10-25) -->
     <B24Modal
+      v-if="isDesktop"
       :open="postponeTask !== null"
       title="Отложить решение по работе"
       description="Сейчас не решаете — вернёмся к этой работе позже. На сколько отложить?"
@@ -952,7 +980,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <div
-          class="grid grid-cols-2 gap-2"
+          class="grid grid-cols-2 gap-3 pt-2 pb-4"
           data-testid="public-postpone-options"
         >
           <B24Button
@@ -968,6 +996,31 @@ const rowItems = computed(() => {
         </div>
       </template>
     </B24Modal>
+    <B24Drawer
+      v-else
+      :open="postponeTask !== null"
+      title="Отложить решение по работе"
+      description="Сейчас не решаете — вернёмся к этой работе позже. На сколько отложить?"
+      @update:open="(v: boolean) => { if (!v) postponeTask = null }"
+    >
+      <template #body>
+        <div
+          class="grid grid-cols-2 gap-3 pt-2 pb-4"
+          data-testid="public-postpone-options"
+        >
+          <B24Button
+            v-for="[period, label] in postponeOptions"
+            :key="period"
+            color="air-secondary"
+            size="lg"
+            :label="label"
+            class="justify-center"
+            :data-testid="`public-postpone-${period}`"
+            @click="postpone(period)"
+          />
+        </div>
+      </template>
+    </B24Drawer>
   </div>
 </template>
 
