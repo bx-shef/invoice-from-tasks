@@ -30,3 +30,23 @@ test('публичная страница: тёмная тема по систе
   await expect(page.getByTestId('public-open')).toBeVisible()
   await expect(page.locator('html')).toHaveClass(/dark/)
 })
+
+test('публичная страница: «Отложить» спрашивает срок и отправляет его', async ({ page }) => {
+  const log = await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  await page.getByTestId('public-decide-later').first().click()
+  await page.getByTestId('public-postpone-2w').click()
+  await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"87":"later:2w"')
+})
+
+test('публичная страница: плавающая «Замечание» открывает окно с полем', async ({ page }, info) => {
+  await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  await page.getByTestId('public-comment-fab').click()
+  await expect(page.getByTestId('public-comment-text')).toBeVisible()
+  await info.attach('comment', { body: await page.screenshot(), contentType: 'image/png' })
+})

@@ -6,6 +6,7 @@
 // дата принятия, описание и результат; без вебхука — только ссылка. Не в разрешённой стадии —
 // спокойная фраза из настроек.
 // Без фрейма портала: страница открыта всем, данные отдаёт сервер только по верному коду.
+import { POSTPONE_PERIODS, type DecisionInput, type PostponePeriod } from '#shared/domain/decisions'
 import ObserverIcon from '@bitrix24/b24icons-vue/outline/ObserverIcon'
 import CrossedEyeIcon from '@bitrix24/b24icons-vue/outline/CrossedEyeIcon'
 import { MAX_COMMENT_LENGTH } from '#shared/domain/approval'
@@ -148,6 +149,7 @@ async function sendComment() {
     })
     commentText.value = ''
     commentSent.value = true
+    commentOpen.value = false
     // Перечитывание счёта долгое (задачи, документы) — кнопку не держим: список обновится сам
     void refreshApproval().catch(() => {})
   } catch (e) {
@@ -197,7 +199,7 @@ const decisionTasks = computed(() => {
 const decisionCount = computed(() => {
   const d = decisions.value ?? {}
   const ids = decisionTasks.value.map(t => t.id)
-  return { yes: ids.filter(id => d[id] === 'yes').length, no: ids.filter(id => d[id] === 'no').length, all: ids.length }
+  return { yes: ids.filter(id => d[id] === 'yes').length, no: ids.filter(id => d[id] === 'no').length, later: ids.filter(id => d[id] === 'later').length, all: ids.length }
 })
 const deciding = ref(false)
 
@@ -205,10 +207,10 @@ const deciding = ref(false)
  * Решение по задачам — одной или всем: сразу показываем (оптимистично), сервер пишет в счёт;
  * затем перечитываем — вдруг счёт стал согласованным (все подтверждены). Сбой — откат и текст.
  */
-async function decide(map: Record<number, 'yes' | 'no'>) {
+async function decide(map: Record<number, DecisionInput>) {
   if (!invoice.value?.approval || deciding.value) return
   const before = invoice.value.approval
-  invoice.value = { ...invoice.value, approval: { ...before, decisions: { ...(before.decisions ?? {}), ...map } } }
+  invoice.value = { ...invoice.value, approval: { ...before, decisions: { ...(before.decisions ?? {}), ...Object.fromEntries(Object.entries(map).map(([id, v]) => [id, v.startsWith('later:') ? 'later' as const : v as 'yes' | 'no'])) } } }
   deciding.value = true
   commentError.value = ''
   try {
@@ -222,6 +224,27 @@ async function decide(map: Record<number, 'yes' | 'no'>) {
     deciding.value = false
   }
 }
+/** «Отложить»: окно выбора срока по задаче (владелец 2026-10-25). */
+const postponeTask = ref<number | null>(null)
+function postpone(period: PostponePeriod) {
+  const id = postponeTask.value
+  postponeTask.value = null
+  if (id !== null) void decide({ [id]: `later:${period}` })
+}
+/**
+ * Замечание — в окне по плавающей кнопке (владелец 2026-10-25: «непонятно, как вносить»):
+ * компьютер — модальное окно, телефон — выезжающая снизу панель.
+ */
+const commentOpen = ref(false)
+const isDesktop = useMediaQuery('(min-width: 640px)')
+function openComment() {
+  commentError.value = ''
+  commentSent.value = false
+  commentOpen.value = true
+}
+
+const postponeOptions = Object.entries(POSTPONE_PERIODS) as Array<[PostponePeriod, string]>
+
 function decideAll(d: 'yes' | 'no') {
   void decide(Object.fromEntries(decisionTasks.value.map(t => [t.id, d])))
 }
@@ -467,7 +490,7 @@ const rowItems = computed(() => {
               {{ invoice.approval.mark.approved
                 ? (invoice.approval.mark.approvedAt ? dateTime(invoice.approval.mark.approvedAt) : '')
                 : decisions
-                  ? `Отметьте каждую работу ниже или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}`
+                  ? `Отметьте каждую работу ниже или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}${decisionCount.later ? `, отложено ${decisionCount.later}` : ''}`
                   : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
             </div>
           </div>
@@ -578,7 +601,7 @@ const rowItems = computed(() => {
               <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
                 <button
                   type="button"
-                  class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left disabled:cursor-default"
+                  class="grid basis-full sm:basis-auto flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left disabled:cursor-default"
                   :disabled="item.disabled"
                   :aria-expanded="openRows.has(item.value)"
                   data-testid="public-row"
@@ -612,27 +635,41 @@ const rowItems = computed(() => {
                   v-else
                   class="whitespace-nowrap text-sm opacity-75 pl-9 sm:pl-0"
                 >без строки</span>
+                <!-- Телефон: «Подтверждаю / Не делаем» в ряд, «Отложить» под ними; компьютер — всё рядом с ценой -->
                 <div
                   v-if="decisions && item.task"
-                  class="flex gap-2 shrink-0"
+                  class="grid grid-cols-2 w-full sm:flex sm:w-auto gap-2 shrink-0"
                 >
                   <B24Button
                     :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
-                    size="sm"
+                    size="md"
                     :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
                     :disabled="deciding"
+                    class="justify-center"
                     :aria-pressed="decisions[item.task.id] === 'yes'"
                     data-testid="public-decide-yes"
                     @click="decide({ [item.task.id]: 'yes' })"
                   />
                   <B24Button
                     :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
-                    size="sm"
+                    size="md"
                     :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
                     :disabled="deciding"
+                    class="justify-center"
                     :aria-pressed="decisions[item.task.id] === 'no'"
                     data-testid="public-decide-no"
                     @click="decide({ [item.task.id]: 'no' })"
+                  />
+                  <B24Button
+                    :color="decisions[item.task.id] === 'later' ? 'air-primary-copilot' : 'air-secondary'"
+                    size="md"
+                    :label="decisions[item.task.id] === 'later' ? `⏸ До ${invoice.approval?.postponed?.[item.task.id] ? date(invoice.approval.postponed[item.task.id]!) : '…'}` : 'Отложить'"
+                    :disabled="deciding"
+                    class="justify-center col-span-2"
+                    :aria-pressed="decisions[item.task.id] === 'later'"
+                    title="Решение по работе не сейчас"
+                    data-testid="public-decide-later"
+                    @click="postponeTask = item.task.id"
                   />
                 </div>
               </div>
@@ -655,7 +692,7 @@ const rowItems = computed(() => {
                       Результат работы
                     </div>
                     <p
-                      class="whitespace-pre-line text-lg leading-relaxed break-words"
+                      class="whitespace-pre-line text-lg leading-relaxed [overflow-wrap:anywhere]"
                       :class="{ 'line-clamp-6': !fullResult.has(item.task.id) }"
                     >
                       {{ lastResult(item.task) }}
@@ -694,7 +731,7 @@ const rowItems = computed(() => {
                         :to="item.task.clientTaskUrl"
                         target="_blank"
                         color="air-primary"
-                        size="md"
+                        size="sm"
                         :label="`Ваша задача #${item.task.clientTaskId}`"
                         data-testid="public-client-task"
                       />
@@ -707,7 +744,7 @@ const rowItems = computed(() => {
                         :to="item.task.url"
                         target="_blank"
                         color="air-secondary"
-                        size="md"
+                        size="sm"
                         :label="`Задача исполнителя #${item.task.id}`"
                       />
                     </div>
@@ -735,7 +772,7 @@ const rowItems = computed(() => {
                     </div>
                     <p
                       v-if="item.task.description"
-                      class="whitespace-pre-line opacity-90"
+                      class="whitespace-pre-line opacity-90 [overflow-wrap:anywhere]"
                     >
                       {{ item.task.description }}
                     </p>
@@ -758,6 +795,7 @@ const rowItems = computed(() => {
 
         <section
           v-if="invoice.approval"
+          id="public-comments"
           class="hd-card p-4 space-y-3"
           data-testid="public-approval"
         >
@@ -767,40 +805,18 @@ const rowItems = computed(() => {
           <p class="text-base opacity-80">
             Напишите, что поправить, — менеджер получит задачу и ответит здесь же.
           </p>
-          <form
-            class="space-y-2"
-            @submit.prevent="sendComment"
+          <B24Button
+            color="air-primary"
+            label="Написать замечание"
+            data-testid="public-comment-open"
+            @click="openComment"
+          />
+          <p
+            v-if="commentSent"
+            class="text-base text-(--ui-color-accent-main-success)"
           >
-            <B24Textarea
-              v-model="commentText"
-              :maxlength="MAX_COMMENT_LENGTH"
-              :rows="3"
-              class="w-full"
-              placeholder="Ваш комментарий"
-              aria-label="Комментарий"
-              data-testid="public-comment-text"
-            />
-            <B24Button
-              type="submit"
-              color="air-primary"
-              label="Отправить"
-              :loading="sending"
-              :disabled="sending || !commentText.trim()"
-              data-testid="public-comment-send"
-            />
-            <p
-              v-if="commentError"
-              class="text-base text-(--ui-color-accent-main-alert)"
-            >
-              {{ commentError }}
-            </p>
-            <p
-              v-else-if="commentSent"
-              class="text-base text-(--ui-color-accent-main-success)"
-            >
-              Комментарий отправлен
-            </p>
-          </form>
+            Комментарий отправлен
+          </p>
           <article
             v-for="c in invoice.approval.comments"
             :key="c.id"
@@ -829,6 +845,129 @@ const rowItems = computed(() => {
         </section>
       </template>
     </div>
+    <B24Button
+      v-if="invoice?.approval"
+      color="air-primary"
+      size="lg"
+      label="Замечание"
+      class="fixed bottom-4 right-4 z-40 shadow-lg rounded-full"
+      data-testid="public-comment-fab"
+      @click="openComment"
+    />
+    <B24Modal
+      v-if="isDesktop"
+      v-model:open="commentOpen"
+      title="Замечание по счёту"
+      description="Напишите, что поправить, — менеджер получит задачу и ответит на этой странице."
+    >
+      <template #body>
+        <form
+          class="space-y-2"
+          @submit.prevent="sendComment"
+        >
+          <B24Textarea
+            v-model="commentText"
+            :maxlength="MAX_COMMENT_LENGTH"
+            :rows="3"
+            autoresize
+            :maxrows="12"
+            class="w-full"
+            placeholder="Ваш комментарий"
+            aria-label="Комментарий"
+            data-testid="public-comment-text"
+          />
+          <B24Button
+            type="submit"
+            color="air-primary"
+            label="Отправить"
+            :loading="sending"
+            :disabled="sending || !commentText.trim()"
+            data-testid="public-comment-send"
+          />
+          <p
+            v-if="commentError"
+            class="text-base text-(--ui-color-accent-main-alert)"
+          >
+            {{ commentError }}
+          </p>
+          <p
+            v-else-if="commentSent"
+            class="text-base text-(--ui-color-accent-main-success)"
+          >
+            Комментарий отправлен
+          </p>
+        </form>
+      </template>
+    </B24Modal>
+    <B24Drawer
+      v-else
+      v-model:open="commentOpen"
+      title="Замечание по счёту"
+      description="Напишите, что поправить, — менеджер получит задачу и ответит на этой странице."
+    >
+      <template #body>
+        <form
+          class="space-y-2"
+          @submit.prevent="sendComment"
+        >
+          <B24Textarea
+            v-model="commentText"
+            :maxlength="MAX_COMMENT_LENGTH"
+            :rows="3"
+            autoresize
+            :maxrows="12"
+            class="w-full"
+            placeholder="Ваш комментарий"
+            aria-label="Комментарий"
+            data-testid="public-comment-text"
+          />
+          <B24Button
+            type="submit"
+            color="air-primary"
+            label="Отправить"
+            :loading="sending"
+            :disabled="sending || !commentText.trim()"
+            data-testid="public-comment-send"
+          />
+          <p
+            v-if="commentError"
+            class="text-base text-(--ui-color-accent-main-alert)"
+          >
+            {{ commentError }}
+          </p>
+          <p
+            v-else-if="commentSent"
+            class="text-base text-(--ui-color-accent-main-success)"
+          >
+            Комментарий отправлен
+          </p>
+        </form>
+      </template>
+    </B24Drawer>
+    <B24Modal
+      :open="postponeTask !== null"
+      title="Отложить решение по работе"
+      description="Сейчас не решаете — вернёмся к этой работе позже. На сколько отложить?"
+      @update:open="(v: boolean) => { if (!v) postponeTask = null }"
+    >
+      <template #body>
+        <div
+          class="grid grid-cols-2 gap-2"
+          data-testid="public-postpone-options"
+        >
+          <B24Button
+            v-for="[period, label] in postponeOptions"
+            :key="period"
+            color="air-secondary"
+            size="lg"
+            :label="label"
+            class="justify-center"
+            :data-testid="`public-postpone-${period}`"
+            @click="postpone(period)"
+          />
+        </div>
+      </template>
+    </B24Modal>
   </div>
 </template>
 
