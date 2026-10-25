@@ -238,7 +238,22 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
                   :label="line.kind === 'fixed' ? 'фикс' : 'расчёт'"
                   :title="line.kind === 'fixed' ? 'Сумма — «Стоимость работ» из задачи' : 'Сумма — часы × цена часа'"
                 />
-                <span class="opacity-75">{{ line.detail }}</span>
+                <span
+                  v-if="!line.steps.length"
+                  class="opacity-75"
+                >{{ line.detail }}</span>
+                <span
+                  v-if="line.steps.length"
+                  class="grid w-full max-w-sm grid-cols-[1fr_auto] gap-x-3 opacity-75"
+                >
+                  <template
+                    v-for="s in line.steps"
+                    :key="s.label"
+                  >
+                    <span>{{ s.label }}</span>
+                    <span class="text-right tabular-nums">{{ s.value }}</span>
+                  </template>
+                </span>
                 <span
                   v-if="outlierIds.has(line.row.taskId)"
                   class="text-(--ui-color-accent-main-warning) font-medium"
