@@ -393,7 +393,7 @@ const rowItems = computed(() => {
     </div>
     <div
       v-else
-      class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4 text-base"
+      class="mx-auto max-w-3xl p-3 sm:p-4 pb-24 sm:pb-24 space-y-4 text-base"
     >
       <h1 class="sr-only">
         Документы для счёта
@@ -862,7 +862,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <form
-          class="space-y-2"
+          class="space-y-3 py-2"
           @submit.prevent="sendComment"
         >
           <B24Textarea
@@ -907,7 +907,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <form
-          class="space-y-2"
+          class="space-y-3 py-2"
           @submit.prevent="sendComment"
         >
           <B24Textarea
@@ -944,7 +944,9 @@ const rowItems = computed(() => {
         </form>
       </template>
     </B24Drawer>
+    <!-- Окна — по одному правилу: компьютер — модальное окно, телефон — панель снизу (владелец 2026-10-25) -->
     <B24Modal
+      v-if="isDesktop"
       :open="postponeTask !== null"
       title="Отложить решение по работе"
       description="Сейчас не решаете — вернёмся к этой работе позже. На сколько отложить?"
@@ -952,7 +954,7 @@ const rowItems = computed(() => {
     >
       <template #body>
         <div
-          class="grid grid-cols-2 gap-2"
+          class="grid grid-cols-2 gap-3 pt-2 pb-4"
           data-testid="public-postpone-options"
         >
           <B24Button
@@ -968,6 +970,31 @@ const rowItems = computed(() => {
         </div>
       </template>
     </B24Modal>
+    <B24Drawer
+      v-else
+      :open="postponeTask !== null"
+      title="Отложить решение по работе"
+      description="Сейчас не решаете — вернёмся к этой работе позже. На сколько отложить?"
+      @update:open="(v: boolean) => { if (!v) postponeTask = null }"
+    >
+      <template #body>
+        <div
+          class="grid grid-cols-2 gap-3 pt-2 pb-4"
+          data-testid="public-postpone-options"
+        >
+          <B24Button
+            v-for="[period, label] in postponeOptions"
+            :key="period"
+            color="air-secondary"
+            size="lg"
+            :label="label"
+            class="justify-center"
+            :data-testid="`public-postpone-${period}`"
+            @click="postpone(period)"
+          />
+        </div>
+      </template>
+    </B24Drawer>
   </div>
 </template>
 
