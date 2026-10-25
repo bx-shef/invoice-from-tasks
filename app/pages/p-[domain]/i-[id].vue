@@ -256,7 +256,7 @@ function toggleResult(id: number) {
   fullResult.value = next
 }
 
-/** Строка счёта без служебной приставки «[87-119884] » — номера задач и так видны рядом. */
+/** Строка счёта без приставки «[87-119884] » — для счётчика решений; в «Работах» название как в счёте (владелец 2026-10-25). */
 function rowTitle(name: string): string {
   return name.replace(/^\[[^\]]*\]\s*/, '') || name
 }
@@ -586,7 +586,7 @@ const rowItems = computed(() => {
                 >
                   <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                   <span class="min-w-0">
-                    <span class="block text-lg font-medium leading-snug">{{ rowTitle(item.row.name) }}</span>
+                    <span class="block text-lg font-medium leading-snug">{{ item.row.name }}</span>
                     <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
                       <B24Badge
                         v-if="item.state"
