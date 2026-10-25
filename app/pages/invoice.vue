@@ -60,6 +60,37 @@ const roundingText = computed(() => {
 watch(mode, () => fill.reset())
 const result = computed(() => fill.result.value)
 const taskTitles = computed(() => Object.fromEntries(fill.tasks.value.map(t => [t.id, t.title])))
+
+// «Стоимость работ» задачи из окна счёта: ввели — сохранили в задачу и пересчитали таблицу
+const costTask = ref<number | null>(null)
+const costValue = ref('')
+const costSaving = ref(false)
+const costError = ref('')
+function editCost(taskId: number) {
+  const current = fill.tasks.value.find(t => t.id === taskId)?.workCost
+  costTask.value = taskId
+  costValue.value = current === null || current === undefined ? '' : String(current)
+  costError.value = ''
+}
+async function saveCost(clear = false) {
+  if (costTask.value === null) return
+  const raw = costValue.value.replace(/\s/g, '').replace(',', '.')
+  const value = clear || raw === '' ? null : Number(raw)
+  if (value !== null && (!Number.isFinite(value) || value < 0)) {
+    costError.value = 'Введите сумму числом, например 600 или 600,50'
+    return
+  }
+  costSaving.value = true
+  costError.value = ''
+  try {
+    await fill.setWorkCost(costTask.value, value)
+    costTask.value = null
+  } catch (e) {
+    costError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    costSaving.value = false
+  }
+}
 /**
  * Идущие вопросы перед записью (writeConfirm.ts) — на месте кнопок. Строки собрали заново или
  * сбросили — вопросы были о прежних строках: снимаем.
@@ -276,6 +307,15 @@ async function consult(promptId: string) {
           data-testid="fill-problems"
         />
 
+        <InvoiceEconomicsTable
+          v-if="result"
+          summary-only
+          :items="fill.economics.value"
+          :threshold="app.settings.value.economics.threshold"
+          :origin="origin"
+          :titles="taskTitles"
+          :currency="fill.invoice.value?.currencyId ?? ''"
+        />
         <InvoiceFillPreview
           v-if="result"
           :rows="result.rows"
@@ -292,22 +332,65 @@ async function consult(promptId: string) {
           :conversion="fill.conversion.value"
           :origin="origin"
           :user-label="users.label"
+          :economics="fill.economics.value"
+          :can-edit-cost="!!app.settings.value.taskFields.workCost && fill.step.value !== 'writing'"
+          @edit-cost="editCost"
         />
+        <B24Modal
+          :open="costTask !== null"
+          :title="`Стоимость работ · задача #${costTask ?? ''}`"
+          description="Итог строки с НДС — то, что платит клиент. Сохраняется в задачу; строки и экономика пересчитаются сразу."
+          @update:open="(v: boolean) => { if (!v) costTask = null }"
+        >
+          <template #body>
+            <form
+              class="space-y-2"
+              @submit.prevent="saveCost()"
+            >
+              <B24Input
+                v-model="costValue"
+                inputmode="decimal"
+                placeholder="например, 600"
+                autofocus
+                class="w-full"
+                data-testid="cost-input"
+              />
+              <p class="text-sm opacity-70">
+                {{ fill.tasks.value.find(t => t.id === costTask)?.title }}
+              </p>
+              <p
+                v-if="costError"
+                class="text-sm text-(--ui-color-accent-main-alert)"
+              >
+                {{ costError }}
+              </p>
+            </form>
+          </template>
+          <template #footer>
+            <div class="flex flex-wrap gap-2">
+              <B24Button
+                color="air-primary"
+                label="Сохранить"
+                :loading="costSaving"
+                :disabled="costSaving"
+                data-testid="cost-save"
+                @click="saveCost()"
+              />
+              <B24Button
+                color="air-secondary"
+                label="Очистить — считать по формуле"
+                :disabled="costSaving"
+                @click="saveCost(true)"
+              />
+            </div>
+          </template>
+        </B24Modal>
         <B24Alert
           v-if="fill.economyNotice.value"
           color="air-primary-warning"
           :description="fill.economyNotice.value"
           data-testid="economy-notice"
         />
-        <InvoiceEconomicsTable
-          v-if="result"
-          :items="fill.economics.value"
-          :threshold="app.settings.value.economics.threshold"
-          :origin="origin"
-          :titles="taskTitles"
-          :currency="fill.invoice.value?.currencyId ?? ''"
-        />
-
         <InvoiceWriteConfirm
           v-if="confirming && fill.canWrite.value"
           :state="confirming"

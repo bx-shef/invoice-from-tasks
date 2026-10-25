@@ -267,6 +267,28 @@ export function useInvoiceFill() {
     return res.conversion
   }
 
+  /** Что собрали в последний раз — пересчёт после правки стоимости работ (setWorkCost). */
+  let lastBuild: { input: Parameters<typeof buildRows>[0], names: Record<string, string> | null, inv: InvoiceInfo, source: TaskSource, mode: FillMode } | null = null
+
+  /**
+   * «Стоимость работ» задачи из окна счёта (владелец 2026-10-25: «не удобно открывать каждую
+   * задачу»): пишем в поле задачи правами сотрудника, затем пересчитываем строки и экономику из уже
+   * прочитанного — без новых запросов к порталу и ИИ. `null` — очистить (строка снова по формуле).
+   */
+  async function setWorkCost(taskId: number, value: number | null): Promise<void> {
+    const field = settings.value.taskFields.workCost
+    if (!field) throw new Error('В настройках не выбрано поле «Стоимость работ» (вкладка «Поля клиента»)')
+    if (value !== null && (!Number.isFinite(value) || value < 0)) throw new Error('Сумма — неотрицательное число')
+    await b24.call('tasks.task.update', { taskId, fields: { [field]: value === null ? '' : value } })
+    tasks.value = tasks.value.map(t => (t.id === taskId ? { ...t, workCost: value } : t))
+    if (!lastBuild) return
+    const input = { ...lastBuild.input, tasks: tasks.value }
+    lastBuild = { ...lastBuild, input }
+    result.value = finishRows(buildRows(input), lastBuild.names, settings.value.taskIdInName)
+    economics.value = taskEconomics(result.value, settings.value.economics.threshold)
+    await saveEconomics(lastBuild.inv, lastBuild.source, lastBuild.mode)
+  }
+
   async function collect(source: TaskSource, mode: FillMode): Promise<void> {
     const opened = invoice.value
     if (!opened) return
@@ -318,7 +340,7 @@ export function useInvoiceFill() {
       economyNotice.value = ''
       const estimates = await estimateHours(tasks.value, entries, today, clients)
 
-      const built = buildRows({
+      const input = {
         mode,
         tasks: tasks.value,
         entries,
@@ -330,7 +352,8 @@ export function useInvoiceFill() {
         userNames,
         estimates,
         today
-      })
+      }
+      const built = buildRows(input)
 
       let names: Record<string, string> | null = null
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
@@ -344,6 +367,8 @@ export function useInvoiceFill() {
       // Названия от BitrixGPT, затем ID задачи (finishRows): предпросмотр — то, что уйдёт в счёт.
       result.value = finishRows(built, names, settings.value.taskIdInName)
       economics.value = taskEconomics(result.value, settings.value.economics.threshold)
+      // Для пересчёта после правки «Стоимости работ» в окне — без новых запросов к порталу и ИИ
+      lastBuild = { input, names, inv, source, mode }
       step.value = 'preview'
       // Поля задач и счёта — по нажатию «Собрать строки» (решение владельца); сбой — не стоп.
       await saveEconomics(inv, source, mode)
@@ -536,7 +561,7 @@ export function useInvoiceFill() {
     return answer
   }
 
-  return { invoice, existing, tasks, result, economics, economyNotice, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, prepareWrite, write, consult }
+  return { invoice, existing, tasks, result, economics, economyNotice, problems, conversion, vat, step, error, notice, writing, canWrite, totals, loadInvoice, reset, collect, setWorkCost, prepareWrite, write, consult }
 }
 
 /** Сегодня в поясе браузера сотрудника, `YYYY-MM-DD` — дата ставки для задачи без времени. */
