@@ -31,7 +31,7 @@ import {
   type PublicInvoiceView,
   type PublicTask
 } from '#shared/domain/publicInvoice'
-import { cleanDecisionInput, DECLINED_TITLE, declinedText, decisionSummary, INVOICE_DECISIONS_FIELD, mergeDecisions, parseDecisions, serializeDecisions } from '#shared/domain/decisions'
+import { cleanDecisionInput, DECLINED_TITLE, declinedText, decisionSummary, INVOICE_DECISIONS_FIELD, mergeDecisions, parseDecisions, POSTPONED_TITLE, postponedText, serializeDecisions } from '#shared/domain/decisions'
 import { APPROVED_TITLE, approvalMark, approvalUpdates, cleanComment, commentListParams, commentsFrom, commentTodoParams, noteText, type ApprovalComment } from '#shared/domain/approval'
 import { parseSettings, SETTINGS_KEY, type AppSettings } from '#shared/domain/settings'
 import { ACCESS_CODE_FIELD, camelFieldKey } from '#shared/domain/userFields'
@@ -300,7 +300,7 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
       invoice: {
         ...view,
         approval: access.approval
-          ? { comments: await readComments(call, invoice.id), mark: approvalMark(access.raw, settings.publicPage, camelFieldKey), decisions: decisionsView(access.raw) }
+          ? { comments: await readComments(call, invoice.id), mark: approvalMark(access.raw, settings.publicPage, camelFieldKey), decisions: decisionsView(access.raw), postponed: postponedView(access.raw) }
           : null
       }
     }
@@ -530,10 +530,16 @@ export async function postPublicApprove(req: PublicRequest, deps: CommentDeps): 
 }
 
 /** Решения из счёта для страницы; поля решений в счёте нет (ключа нет в ответе) — `null`. */
-export function decisionsView(raw: Record<string, unknown>): Record<number, 'yes' | 'no'> | null {
+export function decisionsView(raw: Record<string, unknown>): Record<number, 'yes' | 'no' | 'later'> | null {
   const key = camelFieldKey(INVOICE_DECISIONS_FIELD)
   if (!(key in raw)) return null
   return Object.fromEntries(Object.entries(parseDecisions(raw[key])).map(([id, v]) => [id, v.d]))
+}
+
+/** До какого дня отложены работы (ISO-дата) — для подписи на странице. */
+export function postponedView(raw: Record<string, unknown>): Record<number, string> {
+  const key = camelFieldKey(INVOICE_DECISIONS_FIELD)
+  return Object.fromEntries(Object.entries(parseDecisions(raw[key])).filter(([, v]) => v.d === 'later' && v.until).map(([id, v]) => [id, v.until!]))
 }
 
 /**
@@ -580,6 +586,10 @@ export async function postPublicDecide(req: PublicRequest & { decisions: unknown
   const todos: Array<Promise<unknown>> = []
   if (declined.length) {
     todos.push(call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, declinedText(declined, titles), now), title: access.author ? `${DECLINED_TITLE}: ${access.author}` : DECLINED_TITLE }))
+  }
+  const postponed = changed.filter(c => c.d === 'later')
+  if (postponed.length) {
+    todos.push(call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, postponedText(postponed, titles), now), title: access.author ? `${POSTPONED_TITLE}: ${access.author}` : POSTPONED_TITLE }))
   }
   if (approveNow) {
     todos.push(call('crm.activity.todo.add', { ...commentTodoParams(invoice.id, invoice.assignedById, access.author, 'Клиент подтвердил все работы счёта на странице расшифровки.', now), title: access.author ? `${APPROVED_TITLE}: ${access.author}` : APPROVED_TITLE }))

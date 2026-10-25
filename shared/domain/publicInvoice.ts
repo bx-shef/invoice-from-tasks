@@ -337,7 +337,9 @@ export interface PublicInvoiceView {
     comments: ApprovalComment[]
     mark: ApprovalMark
     /** Решения клиента по задачам; `null` — в счёте нет поля решений (кнопок по задачам нет). */
-    decisions?: Record<number, 'yes' | 'no'> | null
+    decisions?: Record<number, 'yes' | 'no' | 'later'> | null
+    /** До какого дня клиент отложил решение (ISO-дата) по задачам с «later». */
+    postponed?: Record<number, string>
   } | null
 }
 
