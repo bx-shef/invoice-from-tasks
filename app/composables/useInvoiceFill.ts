@@ -45,6 +45,10 @@ import { camelFieldKey } from '#shared/domain/userFields'
 import { parseEconomicsFields } from '#shared/domain/invoiceLinks'
 import { describeWrite, writeCrash, type WriteMode } from '~/utils/writeOutcome'
 
+/** Строк в одном запросе к ИИ (названия, оценка часов) и сколько запросов сразу. */
+const AI_BATCH = 6
+const AI_PARALLEL = 4
+
 /** Предел названия счёта в контексте консультации — название не должно съесть весь контекст. */
 const MAX_CONSULT_TITLE = 500
 /** Сколько задач читаем одновременно: SDK всё равно выравнивает вызовы под лимит REST портала. */
@@ -358,11 +362,12 @@ export function useInvoiceFill() {
       let names: Record<string, string> | null = null
       if (settings.value.naming === 'ai' && built.errors.length === 0 && built.rows.length > 0) {
         names = {}
-        // Пакетами по MAX_NAMING_ITEMS: сервер больше за раз не примет (бюджет модели).
-        for (const part of chunk(await namingItems(mode, built), MAX_NAMING_ITEMS)) {
-          const res = await post<{ names: Record<string, string> }>('/api/ai/names', { mode, items: part })
-          Object.assign(names, res.names)
-        }
+        // Мелкими пакетами параллельно: модель отвечает тем дольше, чем длиннее ответ, — 23 задачи
+        // одним запросом шли минуты (bel, счёт 153, 2026-10-25). Лимит сервера считает строки,
+        // а не запросы, поэтому дробление его не обходит.
+        const parts = chunk(await namingItems(mode, built), Math.min(AI_BATCH, MAX_NAMING_ITEMS))
+        const answers = await mapLimit(parts, AI_PARALLEL, part => post<{ names: Record<string, string> }>('/api/ai/names', { mode, items: part }))
+        for (const res of answers) Object.assign(names, res.names)
       }
       // Названия от BitrixGPT, затем ID задачи (finishRows): предпросмотр — то, что уйдёт в счёт.
       result.value = finishRows(built, names, settings.value.taskIdInName)
@@ -395,10 +400,10 @@ export function useInvoiceFill() {
     const out = new Map<number, number>()
     if (!items.length) return out
     try {
-      for (const part of chunk(items, MAX_ESTIMATE_ITEMS)) {
-        const res = await post<{ hours: Record<string, number> }>('/api/ai/estimate', { items: part })
-        for (const [key, hours] of Object.entries(res.hours)) out.set(Number(key.slice(1)), hours)
-      }
+      // Как и названия — мелкими пакетами параллельно (длинный ответ модели идёт минутами).
+      const parts = chunk(items, Math.min(AI_BATCH, MAX_ESTIMATE_ITEMS))
+      const answers = await mapLimit(parts, AI_PARALLEL, part => post<{ hours: Record<string, number> }>('/api/ai/estimate', { items: part }))
+      for (const res of answers) for (const [key, hours] of Object.entries(res.hours)) out.set(Number(key.slice(1)), hours)
     } catch (e) {
       economyNotice.value = `ИИ не оценил часы задач без времени (${e instanceof Error ? e.message : String(e)}) — их строки с нулём`
     }
