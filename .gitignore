@@ -29,3 +29,7 @@ logs
 
 # Скриншоты живого портала могут унести данные CRM, домены и токены — не коммитим.
 screenshots
+
+# Отчёты Playwright (e2e)
+playwright-report
+test-results

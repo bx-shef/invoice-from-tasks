@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flagOf, invoiceEconomy, parseInvoiceEconomy, taskEconomics, taskFieldValues } from '#shared/domain/economics'
+import { flagOf, invoiceEconomy, parseInvoiceEconomy, taskEconomics, taskFieldValues, hasDelta } from '#shared/domain/economics'
 import { buildEstimateMessages, MAX_ESTIMATE_HOURS, parseEstimateItems, pickEstimates } from '#shared/domain/estimate'
 import { moneyOf } from '#shared/domain/tasks'
 import type { DraftRow } from '#shared/domain/fill'
@@ -35,7 +35,7 @@ describe('экономика задач', () => {
 
   it('поля задачи: разница пустая, если формулы нет; не выбранные поля не пишем', () => {
     const [e] = taskEconomics({ rows: [row(1, 0, 500, true)], errors: [] }, 20)
-    expect(taskFieldValues(e!, { diffPercent: 'UF_D', delta: 'UF_X' })).toEqual({ UF_D: '', UF_X: 500 })
+    expect(taskFieldValues(e!, { diffPercent: 'UF_D', delta: 'UF_X' })).toEqual({ UF_D: '', UF_X: '' })
     expect(taskFieldValues(e!, { diffPercent: '', delta: '' })).toEqual({})
   })
 
@@ -80,5 +80,12 @@ describe('оценка часов ИИ', () => {
     expect(parseEstimateItems({ items: [{ key: 'x5', title: 'A' }] })).toBeNull()
     expect(parseEstimateItems({ items: Array.from({ length: 26 }, (_, i) => ({ key: `t${i}`, title: 'A' })) })).toBeNull()
     expect(parseEstimateItems({})).toBeNull()
+  })
+})
+
+describe('hasDelta', () => {
+  it('без часов (формула 0) дельты нет', () => {
+    expect(hasDelta({ formula: 0 })).toBe(false)
+    expect(hasDelta({ formula: 28.34 })).toBe(true)
   })
 })
