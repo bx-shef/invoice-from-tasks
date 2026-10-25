@@ -3,6 +3,7 @@ import type { DraftRow } from '#shared/domain/fill'
 import { vatTotals } from '#shared/domain/vat'
 import {
   alignClass,
+  calcSteps,
   driftNote,
   formatMoney,
   formatNumber,
@@ -276,5 +277,17 @@ describe('задачи со временем заметно больше обы�
 describe('hoursText: оценка ИИ', () => {
   it('часы от ИИ подписаны, а не «списано 0 с»', () => {
     expect(hoursText({ hours: 14, seconds: 0, roundedSeconds: 50400, estimated: true } as never)).toBe('оценка ИИ: 14 ч')
+  })
+})
+
+describe('calcSteps', () => {
+  it('фикс — три суммы столбиком, обычная строка — пусто', () => {
+    const row = { fixedGross: 408, sum: 340, formulaSum: 1020, hours: 6, seconds: 0, roundedSeconds: 0, estimated: true, hourPrice: 170 } as never
+    expect(calcSteps(row)).toEqual([
+      { label: '«Стоимость работ» с налогом', value: '408,00' },
+      { label: 'без налога', value: '340,00' },
+      { label: 'по формуле: оценка ИИ: 6 ч × 170,00', value: formatMoney(1020) }
+    ])
+    expect(calcSteps({ sum: 1 } as never)).toEqual([])
   })
 })

@@ -114,6 +114,8 @@ export interface PreviewLine {
   kind: 'calc' | 'fixed'
   /** Расчёт без «сотрудник · расчёт:» — для значка рядом в таблице. */
   detail: string
+  /** Расчёт столбиком — подпись и сумма в строку, суммы друг под другом (фикс: выставлено, без налога, по формуле). */
+  steps: Array<{ label: string, value: string }>
   /** Подстрока: откуда цена часа — ставка (и курс), наценка. */
   basis: string
   /** Подсказка к ставке: на какую дату она выбрана. */
@@ -155,6 +157,17 @@ export function calcText(row: DraftRow, ctx: PreviewContext): string {
   return `${who} · расчёт: ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.sum)}`
 }
 
+/** Расчёт фикс-строки столбиком: сравнивать суммы под друг другом проще, чем в строку (замечание владельца). */
+export function calcSteps(row: DraftRow): PreviewLine['steps'] {
+  if (row.fixedGross === undefined) return []
+  const steps = [
+    { label: '«Стоимость работ» с налогом', value: formatMoney(row.fixedGross) },
+    { label: 'без налога', value: formatMoney(row.sum) }
+  ]
+  if (row.formulaSum !== undefined) steps.push({ label: `по формуле: ${hoursText(row)} × ${formatMoney(row.hourPrice)}`, value: formatMoney(row.formulaSum) })
+  return steps
+}
+
 /** Строка предпросмотра; `unit` — краткое обозначение единицы («ч»), пусто — без неё. */
 export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): PreviewLine {
   const input: CellInput = { row, amounts: lineAmounts(row), unit }
@@ -164,6 +177,7 @@ export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): P
     calc: calcText(row, ctx),
     kind: row.fixedGross !== undefined ? 'fixed' : 'calc',
     detail: calcText(row, ctx).replace(/^.*? · (?:расчёт|фикс): /, ''),
+    steps: calcSteps(row),
     basis: rateBasis(row, ctx),
     rateTitle: `Ставка на ${formatRuDate(row.rateDate)}`
   }
