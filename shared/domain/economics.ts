@@ -75,11 +75,16 @@ export function taskEconomics(result: Pick<FillResult, 'rows' | 'errors'>, thres
   return out.sort((a, b) => a.taskId - b.taskId)
 }
 
-/** Значения для UF задачи: разница, % и дельта. Формулы нет — разницу не пишем (пусто). */
+/** Есть с чем сравнивать: без затраченных часов формула 0, и дельта равна всей сумме — не пишем её. */
+export function hasDelta(e: Pick<TaskEconomy, 'formula'>): boolean {
+  return e.formula > 0
+}
+
+/** Значения для UF задачи: разница, % и дельта. Формулы нет — обе пустые. */
 export function taskFieldValues(e: TaskEconomy, fields: { diffPercent: string, delta: string }): Record<string, number | string> {
   const out: Record<string, number | string> = {}
   if (fields.diffPercent) out[fields.diffPercent] = e.diffPercent ?? ''
-  if (fields.delta) out[fields.delta] = e.delta
+  if (fields.delta) out[fields.delta] = hasDelta(e) ? e.delta : ''
   return out
 }
 

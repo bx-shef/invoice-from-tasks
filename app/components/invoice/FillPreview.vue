@@ -5,6 +5,7 @@
 // (с тестами); шаблон только обходит их массивы — переставить здесь столбец нечем.
 import type { CurrencyConversion } from '#shared/domain/currency'
 import type { TaskEconomy } from '#shared/domain/economics'
+import { hasDelta } from '#shared/domain/economics'
 import type { DraftRow, FillIssue, OpenTask, TimeOutlier } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import type { VatRate, VatTotals } from '#shared/domain/vat'
@@ -278,9 +279,9 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
               </td>
               <td
                 class="py-2 pl-3 text-right whitespace-nowrap tabular-nums"
-                :class="econByRow[n] ? deltaTone(econByRow[n]!.delta) : ''"
+                :class="econByRow[n] && hasDelta(econByRow[n]!) ? deltaTone(econByRow[n]!.delta) : ''"
               >
-                <template v-if="econByRow[n]">
+                <template v-if="econByRow[n] && hasDelta(econByRow[n]!)">
                   {{ signedMoney(econByRow[n]!.delta) }}
                   <span
                     v-if="econByRow[n]!.diffPercent !== null"
