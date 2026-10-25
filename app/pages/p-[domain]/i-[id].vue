@@ -688,6 +688,29 @@ const rowItems = computed(() => {
 
                   <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
                   <div class="pub-tile p-4 space-y-2">
+                    <div class="flex flex-wrap gap-2">
+                      <B24Button
+                        v-if="item.task.clientTaskUrl"
+                        :to="item.task.clientTaskUrl"
+                        target="_blank"
+                        color="air-primary"
+                        size="md"
+                        :label="`Ваша задача #${item.task.clientTaskId}`"
+                        data-testid="public-client-task"
+                      />
+                      <span
+                        v-else-if="item.task.clientTaskId"
+                        class="opacity-80"
+                        data-testid="public-client-task"
+                      >Ваша задача #{{ item.task.clientTaskId }}</span>
+                      <B24Button
+                        :to="item.task.url"
+                        target="_blank"
+                        color="air-secondary"
+                        size="md"
+                        :label="`Задача исполнителя #${item.task.id}`"
+                      />
+                    </div>
                     <div class="font-medium">
                       {{ item.task.title || item.row.name }}
                     </div>
@@ -716,29 +739,6 @@ const rowItems = computed(() => {
                     >
                       {{ item.task.description }}
                     </p>
-                    <div class="flex flex-wrap gap-2 pt-1">
-                      <B24Button
-                        v-if="item.task.clientTaskUrl"
-                        :to="item.task.clientTaskUrl"
-                        target="_blank"
-                        color="air-primary"
-                        size="md"
-                        :label="`Ваша задача #${item.task.clientTaskId}`"
-                        data-testid="public-client-task"
-                      />
-                      <span
-                        v-else-if="item.task.clientTaskId"
-                        class="opacity-80"
-                        data-testid="public-client-task"
-                      >Ваша задача #{{ item.task.clientTaskId }}</span>
-                      <B24Button
-                        :to="item.task.url"
-                        target="_blank"
-                        color="air-secondary"
-                        size="md"
-                        :label="`Задача исполнителя #${item.task.id}`"
-                      />
-                    </div>
                   </div>
                 </div>
               </template>
