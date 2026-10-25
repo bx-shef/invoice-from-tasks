@@ -24,6 +24,8 @@ import {
   previewContext,
   previewLine,
   previewTotals,
+  rowVariants,
+  type RowVariant,
   taskLinks,
   unitNoticeShown
 } from '~/utils/fillPreview'
@@ -84,6 +86,13 @@ const lines = computed(() => {
   const ctx = previewContext(props.conversion, props.userLabel)
   return props.rows.map(row => previewLine(row, props.unit, ctx))
 })
+/**
+ * Строки задачи: три варианта суммы друг под другом, название — одна общая ячейка (владелец
+ * 2026-10-25). Без экономики (или не первая строка задачи) — одна строка с расчётом, как раньше.
+ */
+const variants = computed<Array<Array<RowVariant | null>>>(() =>
+  lines.value.map((line, n) => econByRow.value[n] ? rowVariants(line.row, econByRow.value[n]!.formula) : [null]))
+const lastCol = PREVIEW_COLUMNS.length - 1
 const footer = computed(() => previewTotals(props.totals, props.vat, props.currency))
 const note = computed(() => placementNote(props.priceMode, props.vat?.rate))
 const drift = computed(() => driftNote(props.rows, props.totals))
@@ -192,120 +201,136 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
               Название строки
             </th>
             <th
+              scope="col"
+              class="py-2 pr-3 font-medium"
+            >
+              Как посчитано
+            </th>
+            <template
               v-for="(column, c) in PREVIEW_COLUMNS"
               :key="column.title"
-              scope="col"
-              class="py-2 font-medium whitespace-nowrap"
-              :class="[alignClass(column), c < PREVIEW_COLUMNS.length - 1 ? 'pr-3' : '']"
             >
-              {{ column.title }}
-            </th>
-            <template v-if="hasEcon">
               <th
+                v-if="c === lastCol && hasEcon"
                 scope="col"
-                class="py-2 pl-3 font-medium whitespace-nowrap text-right"
-                title="Часы × цена часа, с НДС"
+                class="py-2 pr-3 font-medium whitespace-nowrap text-right"
+                title="В счёт минус сумма по часам"
               >
-                По формуле
+                Дельта
               </th>
               <th
                 scope="col"
-                class="py-2 pl-3 font-medium whitespace-nowrap text-right"
-                title="В счёт минус по формуле"
+                class="py-2 font-medium whitespace-nowrap"
+                :class="[alignClass(column), c < lastCol ? 'pr-3' : '']"
               >
-                Дельта
+                {{ column.title }}
               </th>
             </template>
           </tr>
         </thead>
         <tbody>
-          <tr
+          <template
             v-for="(line, n) in lines"
             :key="line.row.key"
-            class="align-top border-t border-(--ui-color-divider-less)"
-            :class="{ 'fill-outlier': outlierIds.has(line.row.taskId) }"
-            :data-outlier="outlierIds.has(line.row.taskId) || undefined"
           >
-            <td class="py-2 pr-2 text-right opacity-60 tabular-nums">
-              {{ n + 1 }}
-            </td>
-            <td class="py-2 pr-3">
-              <span class="font-medium">{{ line.row.name }}</span>
-              <span class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                <B24Badge
-                  :color="line.kind === 'fixed' ? 'air-primary-copilot' : 'air-secondary-accent'"
-                  size="xs"
-                  :label="line.kind === 'fixed' ? 'фикс' : 'расчёт'"
-                  :title="line.kind === 'fixed' ? 'Сумма — «Стоимость работ» из задачи' : 'Сумма — часы × цена часа'"
-                />
+            <tr
+              v-for="(v, vi) in variants[n]"
+              :key="v?.key ?? 'one'"
+              class="align-top"
+              :class="[vi === 0 ? 'border-t border-(--ui-color-divider-less)' : '', { 'fill-outlier': outlierIds.has(line.row.taskId) }]"
+              :data-outlier="outlierIds.has(line.row.taskId) || undefined"
+              :data-variant="v?.key"
+            >
+              <template v-if="vi === 0">
+                <td
+                  class="py-2 pr-2 text-right opacity-60 tabular-nums"
+                  :rowspan="variants[n]!.length"
+                >
+                  {{ n + 1 }}
+                </td>
+                <td
+                  class="py-2 pr-3"
+                  :rowspan="variants[n]!.length"
+                >
+                  <span class="font-medium">{{ line.row.name }}</span>
+                  <span class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                    <B24Badge
+                      :color="line.kind === 'fixed' ? 'air-primary-copilot' : 'air-secondary-accent'"
+                      size="xs"
+                      :label="line.kind === 'fixed' ? 'фикс' : 'расчёт'"
+                      :title="line.kind === 'fixed' ? 'Сумма — «Стоимость работ» из задачи' : 'Сумма — часы × цена часа'"
+                    />
+                    <span
+                      v-if="outlierIds.has(line.row.taskId)"
+                      class="text-(--ui-color-accent-main-warning) font-medium"
+                    >время больше обычного</span>
+                    <B24Badge
+                      v-if="econByRow[n]?.flag"
+                      :color="econByRow[n]!.flag === 'loss' ? 'air-primary-alert' : econByRow[n]!.flag === 'over' ? 'air-primary-warning' : 'air-secondary'"
+                      size="xs"
+                      :label="FLAG_LABEL[econByRow[n]!.flag!]"
+                    />
+                    <button
+                      v-if="canEditCost && econByRow[n] !== null"
+                      type="button"
+                      class="underline text-(--ui-color-accent-main-primary)"
+                      data-testid="fill-edit-cost"
+                      @click="emit('editCost', line.row.taskId)"
+                    >{{ line.kind === 'fixed' ? 'изменить стоимость' : 'задать стоимость' }}</button>
+                  </span>
+                  <span class="block text-xs opacity-60 mt-0.5">
+                    <span :title="line.rateTitle">{{ line.basis }}</span> ·
+                    <InvoiceTaskLink
+                      :origin="origin"
+                      :task-id="line.row.taskId"
+                    >задача #{{ line.row.taskId }}</InvoiceTaskLink>
+                  </span>
+                </td>
+              </template>
+              <td
+                class="pr-3 text-xs"
+                :class="[vi === variants[n]!.length - 1 ? 'pb-2' : '', vi === 0 ? 'pt-2' : 'pt-0.5', v && !v.chosen ? 'opacity-60' : '']"
+              >
+                <template v-if="v">
+                  <span :class="v.chosen ? 'font-semibold' : ''">{{ v.chosen ? '▶ ' : '' }}{{ v.label }}</span>
+                  <span class="block opacity-75">{{ v.detail }}</span>
+                </template>
                 <span
-                  v-if="!line.steps.length"
+                  v-else
                   class="opacity-75"
                 >{{ line.detail }}</span>
-                <span
-                  v-if="line.steps.length"
-                  class="grid w-full max-w-sm grid-cols-[1fr_auto] gap-x-3 opacity-75"
-                >
-                  <template
-                    v-for="s in line.steps"
-                    :key="s.label"
-                  >
-                    <span>{{ s.label }}</span>
-                    <span class="text-right tabular-nums">{{ s.value }}</span>
-                  </template>
-                </span>
-                <span
-                  v-if="outlierIds.has(line.row.taskId)"
-                  class="text-(--ui-color-accent-main-warning) font-medium"
-                >· время больше обычного</span>
-                <B24Badge
-                  v-if="econByRow[n]?.flag"
-                  :color="econByRow[n]!.flag === 'loss' ? 'air-primary-alert' : econByRow[n]!.flag === 'over' ? 'air-primary-warning' : 'air-secondary'"
-                  size="xs"
-                  :label="FLAG_LABEL[econByRow[n]!.flag!]"
-                />
-                <button
-                  v-if="canEditCost && econByRow[n] !== null"
-                  type="button"
-                  class="underline text-(--ui-color-accent-main-primary)"
-                  data-testid="fill-edit-cost"
-                  @click="emit('editCost', line.row.taskId)"
-                >{{ line.kind === 'fixed' ? 'изменить стоимость' : 'задать стоимость' }}</button>
-              </span>
-              <span class="block text-xs opacity-60 mt-0.5">
-                <span :title="line.rateTitle">{{ line.basis }}</span> ·
-                <InvoiceTaskLink
-                  :origin="origin"
-                  :task-id="line.row.taskId"
-                >задача #{{ line.row.taskId }}</InvoiceTaskLink>
-              </span>
-            </td>
-            <td
-              v-for="(cell, c) in line.cells"
-              :key="c"
-              class="py-2 whitespace-nowrap"
-              :class="[alignClass(PREVIEW_COLUMNS[c]), c < line.cells.length - 1 ? 'pr-3' : '']"
-            >
-              {{ cell }}
-            </td>
-            <template v-if="hasEcon">
-              <td class="py-2 pl-3 text-right whitespace-nowrap tabular-nums">
-                {{ econByRow[n] ? formatMoney(econByRow[n]!.formula) : '' }}
               </td>
-              <td
-                class="py-2 pl-3 text-right whitespace-nowrap tabular-nums"
-                :class="econByRow[n] && hasDelta(econByRow[n]!) ? deltaTone(econByRow[n]!.delta) : ''"
+              <template
+                v-for="(cell, c) in line.cells"
+                :key="c"
               >
-                <template v-if="econByRow[n] && hasDelta(econByRow[n]!)">
-                  {{ signedMoney(econByRow[n]!.delta) }}
-                  <span
-                    v-if="econByRow[n]!.diffPercent !== null"
-                    class="block text-xs"
-                  >{{ econByRow[n]!.diffPercent! > 0 ? '+' : '' }}{{ econByRow[n]!.diffPercent }}%</span>
-                </template>
-              </td>
-            </template>
-          </tr>
+                <td
+                  v-if="c === lastCol && hasEcon"
+                  class="pr-3 text-right whitespace-nowrap tabular-nums"
+                  :class="[vi === 0 ? 'pt-2' : 'pt-0.5', v?.chosen && econByRow[n] && hasDelta(econByRow[n]!) ? deltaTone(econByRow[n]!.delta) : '']"
+                >
+                  <template v-if="v?.chosen && v.key === 'fixed' && econByRow[n] && hasDelta(econByRow[n]!)">
+                    {{ signedMoney(econByRow[n]!.delta) }}
+                    <span
+                      v-if="econByRow[n]!.diffPercent !== null"
+                      class="block text-xs"
+                    >{{ econByRow[n]!.diffPercent! > 0 ? '+' : '' }}{{ econByRow[n]!.diffPercent }}%</span>
+                  </template>
+                </td>
+                <td
+                  class="whitespace-nowrap"
+                  :class="[alignClass(PREVIEW_COLUMNS[c]), c < lastCol ? 'pr-3' : '', vi === 0 ? 'pt-2' : 'pt-0.5', v && !v.chosen ? 'opacity-50' : '', c === lastCol && v?.chosen ? 'font-semibold' : '']"
+                >
+                  <template v-if="!v || v.chosen">
+                    {{ cell }}
+                  </template>
+                  <template v-else-if="c === lastCol">
+                    {{ v.amount === null ? '—' : formatMoney(v.amount) }}
+                  </template>
+                </td>
+              </template>
+            </tr>
+          </template>
         </tbody>
         <tfoot>
           <tr
@@ -315,7 +340,7 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
           >
             <th
               scope="row"
-              :colspan="PREVIEW_COLUMNS.length + 1"
+              :colspan="PREVIEW_COLUMNS.length + 1 + (hasEcon ? 1 : 0)"
               class="pr-3 text-right"
               :class="[footerPadding(item.strong, i), item.strong ? 'font-semibold' : 'font-normal']"
             >
@@ -328,10 +353,6 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             >
               {{ item.value }}
             </td>
-            <td
-              v-if="hasEcon"
-              colspan="2"
-            />
           </tr>
         </tfoot>
       </table>

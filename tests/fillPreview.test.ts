@@ -3,7 +3,7 @@ import type { DraftRow } from '#shared/domain/fill'
 import { vatTotals } from '#shared/domain/vat'
 import {
   alignClass,
-  calcSteps,
+  rowVariants,
   driftNote,
   formatMoney,
   formatNumber,
@@ -280,14 +280,14 @@ describe('hoursText: оценка ИИ', () => {
   })
 })
 
-describe('calcSteps', () => {
-  it('фикс — три суммы столбиком, обычная строка — пусто', () => {
-    const row = { fixedGross: 408, sum: 340, formulaSum: 1020, hours: 6, seconds: 0, roundedSeconds: 0, estimated: true, hourPrice: 170 } as never
-    expect(calcSteps(row)).toEqual([
-      { label: '«Стоимость работ» с налогом', value: '408,00' },
-      { label: 'без налога', value: '340,00' },
-      { label: 'по формуле: оценка ИИ: 6 ч × 170,00', value: formatMoney(1020) }
-    ])
-    expect(calcSteps({ sum: 1 } as never)).toEqual([])
+describe('rowVariants', () => {
+  const base = { hours: 2, seconds: 7200, roundedSeconds: 7200, hourPrice: 170 }
+  it('фикс при оценке ИИ: в счёт — «Стоимость работ», реальных часов нет', () => {
+    const v = rowVariants({ ...base, seconds: 0, estimated: true, fixedGross: 700 } as never, 408)
+    expect(v.map(x => [x.key, x.amount, x.chosen])).toEqual([['real', null, false], ['ai', 408, false], ['fixed', 700, true]])
+  })
+  it('без фикса с временем: в счёт — реальные часы, оценки нет', () => {
+    const v = rowVariants(base as never, 408)
+    expect(v.map(x => [x.key, x.amount, x.chosen])).toEqual([['real', 408, true], ['ai', null, false], ['fixed', null, false]])
   })
 })

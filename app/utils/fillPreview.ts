@@ -114,8 +114,6 @@ export interface PreviewLine {
   kind: 'calc' | 'fixed'
   /** Расчёт без «сотрудник · расчёт:» — для значка рядом в таблице. */
   detail: string
-  /** Расчёт столбиком — подпись и сумма в строку, суммы друг под другом (фикс: выставлено, без налога, по формуле). */
-  steps: Array<{ label: string, value: string }>
   /** Подстрока: откуда цена часа — ставка (и курс), наценка. */
   basis: string
   /** Подсказка к ставке: на какую дату она выбрана. */
@@ -157,15 +155,49 @@ export function calcText(row: DraftRow, ctx: PreviewContext): string {
   return `${who} · расчёт: ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.sum)}`
 }
 
-/** Расчёт фикс-строки столбиком: сравнивать суммы под друг другом проще, чем в строку (замечание владельца). */
-export function calcSteps(row: DraftRow): PreviewLine['steps'] {
-  if (row.fixedGross === undefined) return []
-  const steps = [
-    { label: '«Стоимость работ» с налогом', value: formatMoney(row.fixedGross) },
-    { label: 'без налога', value: formatMoney(row.sum) }
+/** Вариант суммы задачи: по реальным часам, по оценке ИИ, по полю «Стоимость работ». */
+export interface RowVariant {
+  key: 'real' | 'ai' | 'fixed'
+  label: string
+  /** Как получена сумма или почему варианта нет. */
+  detail: string
+  /** Сумма с налогом; `null` — варианта у задачи нет. */
+  amount: number | null
+  /** Этот вариант уходит в счёт. */
+  chosen: boolean
+}
+
+/**
+ * Три варианта суммы задачи друг под другом (замечание владельца 2026-10-25): сравнивать
+ * столбиком проще, чем в строку. `formula` — сумма по часам с налогом (economics.ts): часы
+ * реальные, а если времени нет — оценка ИИ; оба варианта сразу не бывают.
+ */
+export function rowVariants(row: DraftRow, formula: number): RowVariant[] {
+  const fixed = row.fixedGross !== undefined
+  const hours = `${formatNumber(row.hours)} ч × ${formatMoney(row.hourPrice)}`
+  return [
+    {
+      key: 'real',
+      label: 'по реальным часам',
+      detail: row.estimated ? 'времени в задаче нет' : row.seconds !== row.roundedSeconds ? `${hours} (списано ${formatDuration(row.seconds)})` : hours,
+      amount: row.estimated ? null : formula,
+      chosen: !fixed && !row.estimated
+    },
+    {
+      key: 'ai',
+      label: 'по оценке ИИ',
+      detail: row.estimated ? hours : 'не нужна — время есть',
+      amount: row.estimated ? formula : null,
+      chosen: !fixed && !!row.estimated
+    },
+    {
+      key: 'fixed',
+      label: 'по «Стоимости работ»',
+      detail: fixed ? 'из поля задачи' : 'не задана',
+      amount: fixed ? row.fixedGross! : null,
+      chosen: fixed
+    }
   ]
-  if (row.formulaSum !== undefined) steps.push({ label: `по формуле: ${hoursText(row)} × ${formatMoney(row.hourPrice)}`, value: formatMoney(row.formulaSum) })
-  return steps
 }
 
 /** Строка предпросмотра; `unit` — краткое обозначение единицы («ч»), пусто — без неё. */
@@ -177,7 +209,6 @@ export function previewLine(row: DraftRow, unit: string, ctx: PreviewContext): P
     calc: calcText(row, ctx),
     kind: row.fixedGross !== undefined ? 'fixed' : 'calc',
     detail: calcText(row, ctx).replace(/^.*? · (?:расчёт|фикс): /, ''),
-    steps: calcSteps(row),
     basis: rateBasis(row, ctx),
     rateTitle: `Ставка на ${formatRuDate(row.rateDate)}`
   }
