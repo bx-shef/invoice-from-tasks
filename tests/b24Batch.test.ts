@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { B24CallError, unwrapBatchPart, type BatchCall, type BatchItem } from '~/utils/b24Batch'
+import { B24CallError, isTimeoutMessage, unwrapBatchPart, type BatchCall, type BatchItem } from '~/utils/b24Batch'
 
 const ok = <T>(result: T): BatchItem<T> => ({ isSuccess: true, getData: () => ({ result }), getErrorMessages: () => [] })
 const fail = (msg: string): BatchItem<never> => ({ isSuccess: false, getData: () => undefined, getErrorMessages: () => [msg] })
@@ -29,5 +29,14 @@ describe('unwrapBatchPart', () => {
 
   it('B24CallError без текста — «неизвестная ошибка»', () => {
     expect(new B24CallError('x', []).message).toBe('x: неизвестная ошибка')
+  })
+})
+
+describe('истёкший срок ответа портала (#27)', () => {
+  it('понятный текст вместо кода axios', () => {
+    expect(new B24CallError('crm.item.get', ['timeout of 60000ms exceeded']).message).toBe('crm.item.get: портал не ответил вовремя — проверьте результат и повторите')
+    expect(isTimeoutMessage(['REQUEST_TIMEOUT'])).toBe(true)
+    expect(isTimeoutMessage(['ACCESS_DENIED'])).toBe(false)
+    expect(new B24CallError('x', ['ACCESS_DENIED']).message).toBe('x: ACCESS_DENIED')
   })
 })

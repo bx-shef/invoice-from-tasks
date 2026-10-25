@@ -2,9 +2,16 @@
 // пакета на ошибке проверялась тестом (находка программиста панели).
 
 /** Ошибка REST-вызова с кодом метода — чтобы в интерфейсе было видно, ЧТО не получилось. */
+/** Ответ SDK про истёкший срок (axios `ECONNABORTED`, SDK `REQUEST_TIMEOUT`, «timeout of N ms»). */
+export function isTimeoutMessage(messages: readonly string[]): boolean {
+  return messages.some(m => /REQUEST_TIMEOUT|ECONNABORTED|timeout of \d+ ?ms|timed? ?out/i.test(m))
+}
+
 export class B24CallError extends Error {
   constructor(readonly method: string, readonly messages: string[]) {
-    super(`${method}: ${messages.join('; ') || 'неизвестная ошибка'}`)
+    super(isTimeoutMessage(messages)
+      ? `${method}: портал не ответил вовремя — проверьте результат и повторите`
+      : `${method}: ${messages.join('; ') || 'неизвестная ошибка'}`)
     this.name = 'B24CallError'
   }
 }

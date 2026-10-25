@@ -24,11 +24,13 @@ export function useApi() {
   /** POST в наш API. Ошибку сервера превращает в {@link ApiError} с его текстом. */
   async function post<T>(url: string, body: unknown): Promise<T> {
     try {
-      const res = await $fetch(url, { method: 'POST', body: body as Record<string, unknown>, headers: await authHeaders() })
+      // Предел (#27): ИИ отвечает до 2 минут (llm.ts), дальше — понятная ошибка, а не вечная крутилка
+      const res = await $fetch(url, { method: 'POST', body: body as Record<string, unknown>, headers: await authHeaders(), timeout: 150_000 })
       return res as T
     } catch (e) {
       const err = e as { statusCode?: number, statusMessage?: string, data?: { statusMessage?: string, error?: string } }
-      const message = err.data?.statusMessage || err.data?.error || err.statusMessage || 'Сервер приложения не ответил'
+      const timedOut = (e as { name?: string, cause?: { name?: string } }).cause?.name === 'TimeoutError' || (e as { name?: string }).name === 'TimeoutError'
+      const message = timedOut ? 'Сервер приложения не ответил вовремя — попробуйте ещё раз' : err.data?.statusMessage || err.data?.error || err.statusMessage || 'Сервер приложения не ответил'
       throw new ApiError(err.statusCode ?? 0, message, err.data)
     }
   }

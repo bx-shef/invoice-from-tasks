@@ -10,6 +10,8 @@ import {
   vatListCall,
   elapsedListCall,
   ELAPSED_PAGE,
+  elapsedBatchCall,
+  resultBatchCall,
   invoiceGetCall,
   MAX_RESULTS,
   productRowListCall,
@@ -81,5 +83,19 @@ describe('параметры запросов сценария счёта', () =
     const row = { productName: 'Вёрстка', price: 10, quantity: 1, sort: 10 }
     expect(replaceRowsCall(2, [row])).toEqual({ method: 'crm.item.productrow.set', params: { ownerType: 'SI', ownerId: 2, productRows: [row] } })
     expect(addRowCall(2, row)).toEqual({ method: 'crm.item.productrow.add', params: { fields: { ownerType: 'SI', ownerId: 2, ...row } } })
+  })
+})
+
+describe('команды пакета для заполнения счёта', () => {
+  it('записи времени — позиционно ключами 0…4, фильтр не пустой (пустой съедает позицию)', () => {
+    const [method, params] = elapsedBatchCall(7)
+    expect(method).toBe('task.elapseditem.getlist')
+    expect(params[0]).toBe(7)
+    expect(Object.keys(params[2] as object).length).toBeGreaterThan(0)
+    expect(params[4]).toEqual({ NAV_PARAMS: { nPageSize: ELAPSED_PAGE, iNumPage: 1 } })
+  })
+
+  it('результаты — v2 с taskId', () => {
+    expect(resultBatchCall(9)).toEqual(['tasks.task.result.list', { taskId: 9 }])
   })
 })
