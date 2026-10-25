@@ -58,9 +58,15 @@ describe.skipIf(!env || !fx)('REST: формы ответов портала', (
     const mine = new Set((await listMyCompanies(portal)).map(c => c.id))
     expect(mine.has(fx!.myCompanyId)).toBe(true)
     // Все компании портала, постранично: фильтр не должен пропустить ни одну «не мою».
-    const all = await collectOffsetPages(async start => (await portal.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
+    const listAll = () => collectOffsetPages(async start => (await portal.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
       entityTypeId: COMPANY_ENTITY_TYPE_ID, select: ['id', 'isMyCompany'], order: { id: 'asc' }, start
     }))?.items ?? [], 50, 5000, 'слишком много компаний')
+    let all = await listAll()
+    // Свежий портал (с 2026-10-25): клиентов нет вовсе — заводим одного на все прогоны, иначе нечего сверять
+    if (!all.some(c => c.isMyCompany !== 'Y')) {
+      await portal.call('crm.item.add', { entityTypeId: COMPANY_ENTITY_TYPE_ID, fields: { title: 'IFT smoke: клиент', isMyCompany: 'N' } })
+      all = await listAll()
+    }
     const notMine = all.filter(c => c.isMyCompany !== 'Y').map(c => Number(c.id))
     expect(notMine.length).toBeGreaterThan(0)
     for (const id of notMine) expect(mine.has(id)).toBe(false)

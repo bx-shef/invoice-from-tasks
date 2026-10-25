@@ -4,12 +4,14 @@
 // (просьба владельца 2026-09-28). Столбцы, ячейки, итоги и подписи — app/utils/fillPreview.ts
 // (с тестами); шаблон только обходит их массивы — переставить здесь столбец нечем.
 import type { CurrencyConversion } from '#shared/domain/currency'
+import type { TaskEconomy } from '#shared/domain/economics'
 import type { DraftRow, FillIssue, OpenTask, TimeOutlier } from '#shared/domain/fill'
 import type { PriceMode } from '#shared/domain/settings'
 import type { VatRate, VatTotals } from '#shared/domain/vat'
 import {
   alignClass,
   driftNote,
+  formatMoney,
   issueText,
   OPEN_TASKS_TITLE,
   openTaskText,
@@ -50,7 +52,32 @@ const props = defineProps<{
   /** Адрес портала для ссылок на задачи (`https://portal.bitrix24.ru`). */
   origin: string
   userLabel: (id: number) => string
+  /** Экономика задач (одна таблица с предпросмотром, владелец 2026-10-25): формула и дельта — у первой строки задачи. */
+  economics?: TaskEconomy[]
+  /** Можно ли править «Стоимость работ» задачи из окна (поле выбрано в настройках). */
+  canEditCost?: boolean
 }>()
+
+const emit = defineEmits<{ editCost: [taskId: number] }>()
+
+/** Экономика задачи — только у её первой строки (в «записях времени» строк у задачи несколько). */
+const econByRow = computed(() => {
+  const byTask = new Map((props.economics ?? []).map(e => [e.taskId, e]))
+  const seen = new Set<number>()
+  return props.rows.map((row) => {
+    if (seen.has(row.taskId)) return null
+    seen.add(row.taskId)
+    return byTask.get(row.taskId) ?? null
+  })
+})
+const hasEcon = computed(() => (props.economics?.length ?? 0) > 0)
+const FLAG_LABEL = { loss: 'убыток', over: 'завышение', missing: 'нет данных' } as const
+function signedMoney(v: number): string {
+  return `${v > 0 ? '+' : ''}${formatMoney(v)}`
+}
+function deltaTone(v: number): string {
+  return v < -0.004 ? 'text-(--ui-color-accent-main-alert)' : v > 0.004 ? 'text-(--ui-color-accent-main-success)' : 'opacity-60'
+}
 
 const lines = computed(() => {
   const ctx = previewContext(props.conversion, props.userLabel)
@@ -172,6 +199,22 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             >
               {{ column.title }}
             </th>
+            <template v-if="hasEcon">
+              <th
+                scope="col"
+                class="py-2 pl-3 font-medium whitespace-nowrap text-right"
+                title="Часы × цена часа, с НДС"
+              >
+                По формуле
+              </th>
+              <th
+                scope="col"
+                class="py-2 pl-3 font-medium whitespace-nowrap text-right"
+                title="В счёт минус по формуле"
+              >
+                Дельта
+              </th>
+            </template>
           </tr>
         </thead>
         <tbody>
@@ -199,6 +242,19 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
                   v-if="outlierIds.has(line.row.taskId)"
                   class="text-(--ui-color-accent-main-warning) font-medium"
                 >· время больше обычного</span>
+                <B24Badge
+                  v-if="econByRow[n]?.flag"
+                  :color="econByRow[n]!.flag === 'loss' ? 'air-primary-alert' : econByRow[n]!.flag === 'over' ? 'air-primary-warning' : 'air-secondary'"
+                  size="xs"
+                  :label="FLAG_LABEL[econByRow[n]!.flag!]"
+                />
+                <button
+                  v-if="canEditCost && econByRow[n] !== null"
+                  type="button"
+                  class="underline text-(--ui-color-accent-main-primary)"
+                  data-testid="fill-edit-cost"
+                  @click="emit('editCost', line.row.taskId)"
+                >{{ line.kind === 'fixed' ? 'изменить стоимость' : 'задать стоимость' }}</button>
               </span>
               <span class="block text-xs opacity-60 mt-0.5">
                 <span :title="line.rateTitle">{{ line.basis }}</span> ·
@@ -216,6 +272,23 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             >
               {{ cell }}
             </td>
+            <template v-if="hasEcon">
+              <td class="py-2 pl-3 text-right whitespace-nowrap tabular-nums">
+                {{ econByRow[n] ? formatMoney(econByRow[n]!.formula) : '' }}
+              </td>
+              <td
+                class="py-2 pl-3 text-right whitespace-nowrap tabular-nums"
+                :class="econByRow[n] ? deltaTone(econByRow[n]!.delta) : ''"
+              >
+                <template v-if="econByRow[n]">
+                  {{ signedMoney(econByRow[n]!.delta) }}
+                  <span
+                    v-if="econByRow[n]!.diffPercent !== null"
+                    class="block text-xs"
+                  >{{ econByRow[n]!.diffPercent! > 0 ? '+' : '' }}{{ econByRow[n]!.diffPercent }}%</span>
+                </template>
+              </td>
+            </template>
           </tr>
         </tbody>
         <tfoot>
@@ -239,6 +312,10 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             >
               {{ item.value }}
             </td>
+            <td
+              v-if="hasEcon"
+              colspan="2"
+            />
           </tr>
         </tfoot>
       </table>

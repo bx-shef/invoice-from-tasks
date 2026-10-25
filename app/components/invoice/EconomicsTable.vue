@@ -5,7 +5,8 @@
 import type { TaskEconomy } from '#shared/domain/economics'
 import { formatMoney } from '~/utils/fillPreview'
 
-const props = defineProps<{ items: TaskEconomy[], threshold: number, origin: string, titles: Record<number, string>, currency: string }>()
+// summaryOnly — только сводка: задачи — в общей таблице предпросмотра (владелец 2026-10-25)
+const props = defineProps<{ items: TaskEconomy[], threshold: number, origin: string, titles: Record<number, string>, currency: string, summaryOnly?: boolean }>()
 
 const FLAG = {
   loss: { label: 'убыток', color: 'air-primary-alert', bar: 'border-l-(--ui-color-accent-main-alert)' },
@@ -84,7 +85,10 @@ function hoursText(h: number): string {
       </div>
     </div>
 
-    <div class="overflow-x-auto rounded-lg border border-(--ui-color-divider-less)">
+    <div
+      v-if="!summaryOnly"
+      class="overflow-x-auto rounded-lg border border-(--ui-color-divider-less)"
+    >
       <table class="w-full text-sm">
         <thead class="bg-(--ui-color-bg-content-secondary)">
           <tr class="text-left text-xs opacity-70">
