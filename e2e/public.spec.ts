@@ -14,7 +14,7 @@ test('публичная страница: вход по коду, счёт и �
   await open.click()
   await expect(page.getByTestId('public-summary')).toBeVisible()
   expect(log.invoice.length).toBeGreaterThan(0)
-  await expect(page.getByText('Импорт банковских выписок').first()).toBeVisible()
+  await expect(page.getByTestId('public-row').filter({ hasText: 'Импорт банковских выписок' })).toBeVisible()
 
   const yes = page.getByTestId('public-decide-yes')
   await expect(yes).toHaveCount(2)
