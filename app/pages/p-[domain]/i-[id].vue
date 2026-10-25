@@ -256,7 +256,7 @@ function toggleResult(id: number) {
   fullResult.value = next
 }
 
-/** Строка счёта без служебной приставки «[87-119884] » — номера задач и так видны рядом. */
+/** Строка счёта без приставки «[87-119884] » — для счётчика решений; в «Работах» название как в счёте (владелец 2026-10-25). */
 function rowTitle(name: string): string {
   return name.replace(/^\[[^\]]*\]\s*/, '') || name
 }
@@ -586,7 +586,7 @@ const rowItems = computed(() => {
                 >
                   <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                   <span class="min-w-0">
-                    <span class="block text-lg font-medium leading-snug">{{ rowTitle(item.row.name) }}</span>
+                    <span class="block text-lg font-medium leading-snug">{{ item.row.name }}</span>
                     <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
                       <B24Badge
                         v-if="item.state"
@@ -688,6 +688,29 @@ const rowItems = computed(() => {
 
                   <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
                   <div class="pub-tile p-4 space-y-2">
+                    <div class="flex flex-wrap gap-2">
+                      <B24Button
+                        v-if="item.task.clientTaskUrl"
+                        :to="item.task.clientTaskUrl"
+                        target="_blank"
+                        color="air-primary"
+                        size="md"
+                        :label="`Ваша задача #${item.task.clientTaskId}`"
+                        data-testid="public-client-task"
+                      />
+                      <span
+                        v-else-if="item.task.clientTaskId"
+                        class="opacity-80"
+                        data-testid="public-client-task"
+                      >Ваша задача #{{ item.task.clientTaskId }}</span>
+                      <B24Button
+                        :to="item.task.url"
+                        target="_blank"
+                        color="air-secondary"
+                        size="md"
+                        :label="`Задача исполнителя #${item.task.id}`"
+                      />
+                    </div>
                     <div class="font-medium">
                       {{ item.task.title || item.row.name }}
                     </div>
@@ -716,29 +739,6 @@ const rowItems = computed(() => {
                     >
                       {{ item.task.description }}
                     </p>
-                    <div class="flex flex-wrap gap-2 pt-1">
-                      <B24Button
-                        v-if="item.task.clientTaskUrl"
-                        :to="item.task.clientTaskUrl"
-                        target="_blank"
-                        color="air-primary"
-                        size="md"
-                        :label="`Ваша задача #${item.task.clientTaskId}`"
-                        data-testid="public-client-task"
-                      />
-                      <span
-                        v-else-if="item.task.clientTaskId"
-                        class="opacity-80"
-                        data-testid="public-client-task"
-                      >Ваша задача #{{ item.task.clientTaskId }}</span>
-                      <B24Button
-                        :to="item.task.url"
-                        target="_blank"
-                        color="air-secondary"
-                        size="md"
-                        :label="`Задача исполнителя #${item.task.id}`"
-                      />
-                    </div>
                   </div>
                 </div>
               </template>
