@@ -574,16 +574,15 @@ const rowItems = computed(() => {
               :key="item.value"
               class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider)"
             >
-              <button
-                type="button"
-                class="flex w-full items-center gap-2 py-3 text-left disabled:cursor-default"
-                :disabled="item.disabled"
-                :aria-expanded="openRows.has(item.value)"
-                @click="toggleRow(item.value)"
-              >
-                <div
-                  class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left"
+              <!-- Строка: название раскрывает подробности; цена и решения — рядом, видны и в свёрнутом виде -->
+              <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
+                <button
+                  type="button"
+                  class="grid flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left disabled:cursor-default"
+                  :disabled="item.disabled"
+                  :aria-expanded="openRows.has(item.value)"
                   data-testid="public-row"
+                  @click="toggleRow(item.value)"
                 >
                   <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                   <span class="min-w-0">
@@ -599,45 +598,43 @@ const rowItems = computed(() => {
                     </span>
                   </span>
                   <span
-                    v-if="item.row.sum !== null"
-                    class="whitespace-nowrap text-lg font-semibold tabular-nums"
-                  >{{ money(item.row.sum, invoice.currencyId) }}</span>
-                  <span
-                    v-else
-                    class="whitespace-nowrap text-sm opacity-75"
-                  >без строки</span>
-                </div>
+                    v-if="!item.disabled"
+                    class="opacity-60 transition-transform"
+                    :class="{ 'rotate-180': openRows.has(item.value) }"
+                    aria-hidden="true"
+                  >⌄</span>
+                </button>
                 <span
-                  v-if="!item.disabled"
-                  class="shrink-0 opacity-60 transition-transform"
-                  :class="{ 'rotate-180': openRows.has(item.value) }"
-                  aria-hidden="true"
-                >⌄</span>
-              </button>
-              <div
-                v-if="decisions && item.task"
-                class="grid grid-cols-2 sm:flex gap-2 pb-3 sm:pl-9"
-              >
-                <B24Button
-                  :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
-                  size="md"
-                  :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
-                  :disabled="deciding"
-                  :aria-pressed="decisions[item.task.id] === 'yes'"
-                  class="justify-center"
-                  data-testid="public-decide-yes"
-                  @click="decide({ [item.task.id]: 'yes' })"
-                />
-                <B24Button
-                  :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
-                  size="md"
-                  :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
-                  :disabled="deciding"
-                  :aria-pressed="decisions[item.task.id] === 'no'"
-                  class="justify-center"
-                  data-testid="public-decide-no"
-                  @click="decide({ [item.task.id]: 'no' })"
-                />
+                  v-if="item.row.sum !== null"
+                  class="whitespace-nowrap text-lg font-semibold tabular-nums pl-9 sm:pl-0"
+                >{{ money(item.row.sum, invoice.currencyId) }}</span>
+                <span
+                  v-else
+                  class="whitespace-nowrap text-sm opacity-75 pl-9 sm:pl-0"
+                >без строки</span>
+                <div
+                  v-if="decisions && item.task"
+                  class="flex gap-2 shrink-0"
+                >
+                  <B24Button
+                    :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary'"
+                    size="sm"
+                    :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
+                    :disabled="deciding"
+                    :aria-pressed="decisions[item.task.id] === 'yes'"
+                    data-testid="public-decide-yes"
+                    @click="decide({ [item.task.id]: 'yes' })"
+                  />
+                  <B24Button
+                    :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary'"
+                    size="sm"
+                    :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
+                    :disabled="deciding"
+                    :aria-pressed="decisions[item.task.id] === 'no'"
+                    data-testid="public-decide-no"
+                    @click="decide({ [item.task.id]: 'no' })"
+                  />
+                </div>
               </div>
               <template v-if="openRows.has(item.value)">
                 <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
@@ -689,35 +686,36 @@ const rowItems = computed(() => {
                     data-testid="public-task"
                   />
 
-                  <div
-                    v-if="item.task.clientTask?.creatorName"
-                    class="pub-tile p-4 space-y-2"
-                  >
-                    <div class="opacity-75">
-                      Поставил
+                  <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
+                  <div class="pub-tile p-4 space-y-2">
+                    <div class="font-medium">
+                      {{ item.task.title || item.row.name }}
                     </div>
-                    <div class="flex items-center gap-3 text-lg">
+                    <div
+                      v-if="item.task.clientTask?.creatorName"
+                      class="flex items-center gap-2 text-sm opacity-80"
+                    >
+                      <span>Поставил</span>
                       <img
                         v-if="item.task.clientTask.creatorIcon"
                         :src="item.task.clientTask.creatorIcon"
                         alt=""
                         referrerpolicy="no-referrer"
-                        class="size-10 rounded-full object-cover"
+                        class="size-6 rounded-full object-cover"
                       >
                       <span
                         v-else
-                        class="size-10 rounded-full bg-(--ui-color-accent-main-primary) text-white flex items-center justify-center"
+                        class="size-6 rounded-full bg-(--ui-color-accent-main-primary) text-white text-xs flex items-center justify-center"
                         aria-hidden="true"
                       >{{ item.task.clientTask.creatorName.slice(0, 1) }}</span>
-                      {{ item.task.clientTask.creatorName }}
+                      <span>{{ item.task.clientTask.creatorName }}</span>
                     </div>
-                  </div>
-
-                  <div class="pub-tile p-4 space-y-2">
-                    <div class="opacity-75">
-                      Задача
-                    </div>
-                    <div>{{ rowTitle(item.row.name) || item.task.title }}</div>
+                    <p
+                      v-if="item.task.description"
+                      class="whitespace-pre-line opacity-90"
+                    >
+                      {{ item.task.description }}
+                    </p>
                     <div class="flex flex-wrap gap-2 pt-1">
                       <B24Button
                         v-if="item.task.clientTaskUrl"
@@ -741,14 +739,6 @@ const rowItems = computed(() => {
                         :label="`Задача исполнителя #${item.task.id}`"
                       />
                     </div>
-                    <details v-if="item.task.clientTask?.description || item.task.description">
-                      <summary class="cursor-pointer opacity-80">
-                        Описание задачи
-                      </summary>
-                      <p class="whitespace-pre-line mt-2 opacity-90">
-                        {{ item.task.clientTask?.description || item.task.description }}
-                      </p>
-                    </details>
                   </div>
                 </div>
               </template>
