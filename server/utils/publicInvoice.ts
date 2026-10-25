@@ -55,8 +55,14 @@ export const PUBLIC_FAILS_PER_INVOICE: WindowLimit = { max: 100, windowMs: 60 * 
 export const PUBLIC_404_FLOOR_MS = 800
 /** Сколько контактов счёта проверяем — один пакет `batch` (предел 50 команд). */
 export const MAX_PUBLIC_CONTACTS = 20
-/** Сколько задач расшифровываем — один пакет на задачи и по запросу результатов на каждую. */
-export const MAX_PUBLIC_TASKS = 20
+/**
+ * Сколько задач расшифровываем — один пакет на задачи (предел `batch` — 50 команд) и по запросу
+ * результатов на каждую. Было 20: в счёте 153 на 24 строки последние четыре без расшифровки и
+ * без кнопок решения (отчёт владельца 2026-10-25).
+ */
+export const MAX_PUBLIC_TASKS = 50
+/** Запросов результатов задач одновременно — 50 подряд шли бы долго. */
+const RESULTS_PARALLEL = 5
 /** Сколько позиций счёта читаем (страница — 50). */
 export const MAX_PUBLIC_ROWS = 200
 /** Сколько живёт готовая расшифровка: повторные открытия не гоняют портал. Код проверяется всегда. */
@@ -319,14 +325,18 @@ export async function loadPublicInvoice(req: PublicRequest, deps: PublicDeps): P
   const ids = rowTaskIds(list, MAX_PUBLIC_TASKS)
   const taskRaw = await batch(call, Object.fromEntries(ids.map(id => [`t${id}`, batchCommand('tasks.task.get', { taskId: id, select })])))
   const tasks: PublicTask[] = []
-  for (const id of ids) {
-    const rawTask = taskRaw[`t${id}`]
-    if (!rawTask || !taskBoundTo(rawTask, codes)) continue
-    // Результаты — только в REST v3 (пакета v3 у SDK сервера нет): по запросу на задачу.
-    const results = await orNull(call(`${V3_PREFIX}tasks.task.result.list`, { filter: [['taskId', '=', id]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: 20 } }))
-    const resultList = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
-    const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
-    if (task) tasks.push(task)
+  const bound = ids.filter(id => taskRaw[`t${id}`] && taskBoundTo(taskRaw[`t${id}`], codes))
+  // Результаты — только в REST v3 (пакета v3 у SDK сервера нет): по запросу на задачу, пачками.
+  for (let i = 0; i < bound.length; i += RESULTS_PARALLEL) {
+    const part = bound.slice(i, i + RESULTS_PARALLEL)
+    const resultsByTask = await Promise.all(part.map(id => orNull(call(`${V3_PREFIX}tasks.task.result.list`, { filter: [['taskId', '=', id]], select: ['id', 'text'], order: { id: 'desc' }, pagination: { limit: 20 } }))))
+    part.forEach((id, j) => {
+      const rawTask = taskRaw[`t${id}`]
+      const results = resultsByTask[j]
+      const resultList = Array.isArray(results) ? results : (results as { items?: unknown } | null)?.items
+      const task = parsePublicTask(rawTask, portal.origin, clientTaskIdFor(list, id, rawTask, clientTaskField), resultList, taskDomain)
+      if (task) tasks.push(task)
+    })
   }
   // Задачи, привязанные к самому счёту, но без строки в нём (согласование до сборки строк —
   // отчёт владельца 2026-10-07: «где задачи?» на пустом счёте). Только привязка к счёту, не к сделке.
