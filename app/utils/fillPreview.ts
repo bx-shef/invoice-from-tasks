@@ -123,6 +123,8 @@ export interface PreviewLine {
 /** Часы строки: округлённые, а если округление их изменило — и сколько списано на самом деле. */
 export function hoursText(row: DraftRow): string {
   const rounded = `${formatNumber(row.hours)} ч`
+  // Времени в задаче нет — часы оценил ИИ: подписываем, чтобы не путать с фактом.
+  if (row.estimated) return `оценка ИИ: ${rounded}`
   return row.roundedSeconds !== row.seconds ? `${rounded} (списано ${formatDuration(row.seconds)})` : rounded
 }
 

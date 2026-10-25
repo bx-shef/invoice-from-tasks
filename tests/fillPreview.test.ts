@@ -272,3 +272,9 @@ describe('задачи со временем заметно больше обы�
     expect(ids.has(102)).toBe(false)
   })
 })
+
+describe('hoursText: оценка ИИ', () => {
+  it('часы от ИИ подписаны, а не «списано 0 с»', () => {
+    expect(hoursText({ hours: 14, seconds: 0, roundedSeconds: 50400, estimated: true } as never)).toBe('оценка ИИ: 14 ч')
+  })
+})
