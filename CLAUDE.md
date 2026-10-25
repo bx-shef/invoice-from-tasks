@@ -20,6 +20,7 @@ pnpm install          # + nuxt prepare (postinstall)
 pnpm dev              # разработка; страницы работают только во фрейме портала
 pnpm check            # lint + typecheck + test — перед каждым PR
 pnpm build            # сборка сервера .output/server/index.mjs
+pnpm e2e              # Playwright: публичная страница и справка на собранном сервере (после pnpm build)
 pnpm smoke            # живой прогон на ТЕСТОВОМ портале: REST, расчёт, запись, BitrixGPT (docs/SMOKE.md)
 ```
 
@@ -37,6 +38,7 @@ pnpm smoke            # живой прогон на ТЕСТОВОМ порта
 | `server/utils/` | `frameAuth` (кто пришёл), `requestContext` (обвязка обработчиков, IP), `b24Host` (SSRF-гард, CSP, серверы авторизации), `b24Client` (REST через B24OAuth), `b24Events` (разбор события) + `b24EventsHandler` (решение по событию), `verifyInstallMember` (сверка member_id и домена), `tokenStore` + `secretCrypto` (токены установки), `clientHook` (вебхук клиента: проверка, шифрование своим ключом), `publicInvoice` (решение публичной страницы: лимиты, код, токен установщика), `clientPortal` (задачи клиента по его вебхуку: https, без редиректов, таймаут), `publicContext` (общие лимиты, кеш и доступ публичных обработчиков), `installerCall` (токен установщика: свежая запись, очередь), `options` (app.option с бюджетом) + `optionWrites` (кто и каким токеном пишет), `requestLimits` (пределы, IP за прокси), `buildInfo` (коммит сборки для health), `llm` + `aiGateway` + `aiRequests` + `rateLimit` (ИИ: BitrixGPT по умолчанию или любой OpenAI-совместимый через LLM_*, лимиты) |
 | `tests/` | юнит-тесты (vitest, node); `tests/server/` — серверные модули; `repoGuards` — гарды репо |
 | `docker-compose.prod.yml`, `Makefile` | выкат как в client-bank: `main` → GHCR → Watchtower → nginx-proxy, `invoice-from-tasks.bx-shef.by`; проверка сервера — `make doctor` — `docs/DEPLOY.md` |
+| `e2e/` | сквозные тесты Playwright (`pnpm e2e`, после `pnpm build`): DOM-проверки, скриншоты — вложениями отчёта; в CI |
 | `smoke/` | смок на тестовом портале (`pnpm smoke`, свой vitest-конфиг, не в CI): страж портала, засев, формы REST, матрица расчёта, BitrixGPT — `docs/SMOKE.md` |
 
 **Документация двух видов**: `docs/guide/NN-*.md` — публичная справка (страница «Справка», ИИ-чат,
