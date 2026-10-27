@@ -201,28 +201,49 @@ const decisionCount = computed(() => {
   const ids = decisionTasks.value.map(t => t.id)
   return { yes: ids.filter(id => d[id] === 'yes').length, no: ids.filter(id => d[id] === 'no').length, later: ids.filter(id => d[id] === 'later').length, all: ids.length }
 })
-const deciding = ref(false)
-
 /**
- * Решение по задачам — одной или всем: сразу показываем (оптимистично), сервер пишет в счёт;
- * затем перечитываем — вдруг счёт стал согласованным (все подтверждены). Сбой — откат и текст.
+ * Решения — без блокировки кнопок (отчёт клиента 2026-10-27: «нажимаю — ничего не происходит»):
+ * раньше клик во время записи молча игнорировался, а перечитывание после первого ответа затирало
+ * следующие клики. Теперь: сразу показываем выбор, запросы идут по очереди, счёт перечитываем,
+ * только когда очередь пуста. Сбой — откат только этих задач и сообщение.
  */
-async function decide(map: Record<number, DecisionInput>) {
-  if (!invoice.value?.approval || deciding.value) return
-  const before = invoice.value.approval
-  invoice.value = { ...invoice.value, approval: { ...before, decisions: { ...(before.decisions ?? {}), ...Object.fromEntries(Object.entries(map).map(([id, v]) => [id, v.startsWith('later:') ? 'later' as const : v as 'yes' | 'no'])) } } }
-  deciding.value = true
-  commentError.value = ''
-  try {
-    await $fetch('/api/public/decide', { method: 'POST', body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, decisions: map } })
-    void refreshApproval().catch(() => {})
-  } catch (e) {
-    if (invoice.value) invoice.value = { ...invoice.value, approval: before }
-    const err = e as { data?: { error?: string }, statusMessage?: string }
-    commentError.value = err.data?.error || err.statusMessage || 'Не удалось сохранить решение'
-  } finally {
-    deciding.value = false
-  }
+const deciding = ref(0)
+let decideQueue: Promise<void> = Promise.resolve()
+const toast = useToast()
+
+const asView = (v: DecisionInput) => (v.startsWith('later:') ? 'later' as const : v as 'yes' | 'no')
+
+function decide(map: Record<number, DecisionInput>) {
+  if (!invoice.value?.approval) return
+  const prev = { ...(invoice.value.approval.decisions ?? {}) }
+  invoice.value = { ...invoice.value, approval: { ...invoice.value.approval, decisions: { ...prev, ...Object.fromEntries(Object.entries(map).map(([id, v]) => [id, asView(v)])) } } }
+  deciding.value++
+  decideQueue = decideQueue.then(async () => {
+    try {
+      await $fetch('/api/public/decide', { method: 'POST', body: { domain: domain.value, invoiceId: invoiceId.value, code: code.value, decisions: map } })
+    } catch (e) {
+      // Откат только этих задач — более поздние клики по другим не трогаем
+      if (invoice.value?.approval) {
+        const ids = new Set(Object.keys(map))
+        const old = prev as Record<string, 'yes' | 'no' | 'later'>
+        const now = Object.fromEntries(Object.entries(invoice.value.approval.decisions ?? {}).filter(([id]) => !ids.has(id) || old[id]).map(([id, v]) => [id, ids.has(id) ? old[id]! : v]))
+        invoice.value = { ...invoice.value, approval: { ...invoice.value.approval, decisions: now } }
+      }
+      const err = e as { data?: { error?: string }, statusMessage?: string }
+      toast.add({ title: 'Решение не сохранено', description: err.data?.error || err.statusMessage || 'Попробуйте ещё раз', color: 'air-primary-alert' })
+    } finally {
+      deciding.value--
+      if (!deciding.value) void refreshApproval().catch(() => {})
+    }
+  })
+}
+/** Подсветка строки по решению: разрешено — зелёная полоса и фон, не делаем — бледно, отложено — фиолетовая полоса. */
+function decisionClass(taskId: number | undefined): string {
+  const d = taskId ? decisions.value?.[taskId] : undefined
+  if (d === 'yes') return 'border-l-4 border-l-(--ui-color-accent-main-success) bg-(--ui-color-accent-soft-green-3) -ml-3 pl-2 rounded-l'
+  if (d === 'no') return 'opacity-70'
+  if (d === 'later') return 'border-l-4 border-l-(--ui-color-copilot-accent-primary) -ml-3 pl-2 rounded-l'
+  return ''
 }
 /** «Отложить»: окно выбора срока по задаче (владелец 2026-10-25). */
 const postponeTask = ref<number | null>(null)
@@ -510,8 +531,7 @@ const rowItems = computed(() => {
               <B24Button
                 color="air-primary-success"
                 label="Подтвердить всё"
-                :loading="deciding"
-                :disabled="deciding"
+                :loading="deciding > 0"
                 class="flex-1 sm:flex-none justify-center"
                 data-testid="public-decide-all-yes"
                 @click="decideAll('yes')"
@@ -519,7 +539,6 @@ const rowItems = computed(() => {
               <B24Button
                 color="air-secondary"
                 label="Всё не делаем"
-                :disabled="deciding"
                 class="flex-1 sm:flex-none justify-center"
                 data-testid="public-decide-all-no"
                 @click="decideAll('no')"
@@ -604,7 +623,8 @@ const rowItems = computed(() => {
               :id="`row-${item.value}`"
               :key="item.value"
               class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider) scroll-mt-3"
-              :class="openRows.has(item.value) ? 'relative z-40 -mx-3 px-3 rounded-xl bg-(--ui-color-bg-content-primary) shadow-2xl ring-2 ring-(--ui-color-accent-main-primary)' : ''"
+              :class="[openRows.has(item.value) ? 'relative z-40 -mx-3 px-3 rounded-xl bg-(--ui-color-bg-content-primary) shadow-2xl ring-2 ring-(--ui-color-accent-main-primary)' : '', decisionClass(item.task?.id)]"
+              :data-decision="item.task ? decisions?.[item.task.id] : undefined"
             >
               <!-- Строка: название раскрывает подробности; цена и решения — рядом, видны и в свёрнутом виде -->
               <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
@@ -618,7 +638,10 @@ const rowItems = computed(() => {
                 >
                   <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
                   <span class="min-w-0">
-                    <span class="block text-lg font-medium leading-snug">{{ item.row.name }}</span>
+                    <span
+                      class="block text-lg font-medium leading-snug"
+                      :class="{ 'line-through opacity-60': item.task && decisions?.[item.task.id] === 'no' }"
+                    >{{ item.row.name }}</span>
                     <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
                       <B24Badge
                         v-if="item.state"
@@ -627,6 +650,13 @@ const rowItems = computed(() => {
                         :label="item.state"
                       />
                       <span v-if="item.date">{{ date(item.date) }}</span>
+                      <B24Badge
+                        v-if="item.task && decisions?.[item.task.id]"
+                        :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-primary-copilot'"
+                        size="md"
+                        :label="decisions[item.task.id] === 'yes' ? '✓ разрешено к выполнению' : decisions[item.task.id] === 'no' ? 'не делаем' : 'отложено'"
+                        data-testid="public-decision-badge"
+                      />
                     </span>
                   </span>
                   <span
@@ -653,7 +683,6 @@ const rowItems = computed(() => {
                     :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary-accent-1'"
                     size="md"
                     :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
-                    :disabled="deciding"
                     class="justify-center"
                     :aria-pressed="decisions[item.task.id] === 'yes'"
                     data-testid="public-decide-yes"
@@ -663,7 +692,6 @@ const rowItems = computed(() => {
                     :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary-alert'"
                     size="md"
                     :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
-                    :disabled="deciding"
                     class="justify-center"
                     :aria-pressed="decisions[item.task.id] === 'no'"
                     data-testid="public-decide-no"
@@ -673,7 +701,6 @@ const rowItems = computed(() => {
                     :color="decisions[item.task.id] === 'later' ? 'air-primary-copilot' : 'air-tertiary'"
                     size="md"
                     :label="decisions[item.task.id] === 'later' ? `⏸ До ${invoice.approval?.postponed?.[item.task.id] ? date(invoice.approval.postponed[item.task.id]!) : '…'}` : 'Отложить'"
-                    :disabled="deciding"
                     class="justify-center col-span-2"
                     :aria-pressed="decisions[item.task.id] === 'later'"
                     title="Решение по работе не сейчас"

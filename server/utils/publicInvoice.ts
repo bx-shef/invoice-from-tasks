@@ -40,7 +40,11 @@ import { V3_PREFIX, type RestCall } from './b24Client'
 import { readOption } from './options'
 import type { WindowLimit } from './rateLimit'
 
-/** Попыток с одного IP — 10 за 10 минут (все попытки). */
+/**
+ * НЕВЕРНЫХ кодов с одного IP — 10 за 10 минут. Верный код его не тратит: клиент жмёт решения и
+ * перечитывает счёт сколько угодно (раньше считалось каждое обращение — 5 нажатий «Подтверждаю»
+ * блокировали клиента на 10 минут, отчёт владельца 2026-10-27).
+ */
 export const PUBLIC_PER_IP: WindowLimit = { max: 10, windowMs: 10 * 60_000 }
 /** Попыток на портал — 600 в час: распределённый перебор не съест REST-лимит портала. */
 export const PUBLIC_PER_PORTAL: WindowLimit = { max: 600, windowMs: 60 * 60_000 }
@@ -82,12 +86,12 @@ export type PublicResult
 export interface PublicDeps {
   /** Портал по домену: REST токеном установщика и адрес; `null` — не установлен или не Битрикс24. */
   portal: (domain: string) => Promise<{ call: RestCall, origin: string } | null>
-  /** Учесть попытку в лимитах IP и портала; `false` — исчерпано. */
+  /** Лимит IP не исчерпан (без учёта: учитываются неверные коды — `fail`); портал — учесть попытку. `false` — исчерпано. */
   allowAttempt: (ipKey: string, portalKey: string) => boolean
   /** Исчерпан ли лимит неверных кодов счёта (без учёта попытки). */
   locked: (invoiceKey: string) => boolean
-  /** Учесть неверный код счёта; возвращает, сколько неверных кодов у счёта в окне. */
-  fail: (invoiceKey: string) => number
+  /** Учесть неверный код счёта и IP; возвращает, сколько неверных кодов у счёта в окне. */
+  fail: (invoiceKey: string, ipKey: string) => number
   /**
    * Написать в чат проблем портала (настройки → `problemChat`). Не задано — уведомлений нет.
    * `key` — для ограничения частоты: одно сообщение на ключ в окне (publicContext).
@@ -233,11 +237,12 @@ export async function verifyPublicAccess(req: PublicRequest, deps: PublicDeps): 
   if (!Number.isInteger(req.invoiceId) || req.invoiceId <= 0 || !DOMAIN_RE.test(req.domain)) return { status: 400, body: { error: 'Неверная ссылка' } }
   if (!isAccessCode(req.code)) return { status: 404, body: { error: NOT_FOUND } }
   const invoiceKey = `pub-inv:${req.domain}:${req.invoiceId}`
-  if (!deps.allowAttempt(`pub-ip:${req.ip}`, `pub-portal:${req.domain}`) || deps.locked(invoiceKey)) {
+  const ipKey = `pub-ip:${req.ip}`
+  if (!deps.allowAttempt(ipKey, `pub-portal:${req.domain}`) || deps.locked(invoiceKey)) {
     return { status: 429, body: { error: 'Слишком много попыток — попробуйте позже' } }
   }
   const notFound = (): PublicResult => {
-    deps.fail(invoiceKey)
+    deps.fail(invoiceKey, ipKey)
     return { status: 404, body: { error: NOT_FOUND } }
   }
   const portal = await deps.portal(req.domain)
@@ -245,7 +250,7 @@ export async function verifyPublicAccess(req: PublicRequest, deps: PublicDeps): 
   const { call } = portal
   // Неверный код при известном портале: на пороге — сообщение в чат проблем (сбой чата вход не ломает).
   const failAndNotify = (invoice: PublicInvoiceItem | null): PublicResult => {
-    const count = deps.fail(invoiceKey)
+    const count = deps.fail(invoiceKey, ipKey)
     const text = failNotice(count, req.invoiceId, invoice?.title ?? '', req.ip)
     if (text && deps.notify) {
       void deps.notify(call, `${invoiceKey}:${count >= PUBLIC_FAILS_PER_INVOICE.max ? 'lock' : 'fails'}`, text).catch((e: unknown) => {
@@ -392,12 +397,11 @@ export async function readComments(call: RestCall, invoiceId: number): Promise<A
   }
 }
 
-/** Комментариев на счёт — 20 в час: клиенту хватит, а таймлайн не завалят. */
-export const PUBLIC_COMMENTS_PER_INVOICE: WindowLimit = { max: 20, windowMs: 60 * 60_000 }
+// Комментарии, решения и «Согласовать» — без лимитов (решение владельца 2026-10-27): клиент с верным
+// кодом жмёт и пишет сколько хочет; надоест — счёт уводят со стадии согласования. Лимиты — только на
+// ввод кода (PUBLIC_PER_IP, PUBLIC_FAILS_PER_INVOICE).
 
 export interface CommentDeps extends PublicDeps {
-  /** Учесть комментарий в лимите счёта; `false` — исчерпано. */
-  allowComment: (invoiceKey: string) => boolean
   now: () => Date
 }
 
@@ -415,7 +419,6 @@ export async function postPublicComment(req: PublicRequest & { text: unknown }, 
   if (isResult(access)) return access.status === 200 ? { status: 403, body: { error: 'Счёт сейчас не на согласовании' } } : access
   if (!access.approval) return { status: 403, body: { error: 'Счёт сейчас не на согласовании' } }
   const { call, invoice } = access
-  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много комментариев — попробуйте через час' } }
   try {
     await call('crm.activity.todo.add', commentTodoParams(invoice.id, invoice.assignedById, access.author, text, deps.now()))
   } catch (e) {
@@ -511,7 +514,6 @@ export async function postPublicApprove(req: PublicRequest, deps: CommentDeps): 
   const mark = approvalMark(access.raw, settings.publicPage, camelFieldKey)
   if (!mark.enabled) return { status: 403, body: { error: 'Согласование со страницы не настроено' } }
   if (mark.approved) return { status: 200, body: { ok: true } }
-  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много действий — попробуйте через час' } }
   const now = deps.now()
   try {
     await call('crm.item.update', { entityTypeId: 31, id: invoice.id, fields: approvalUpdates(settings.publicPage, camelFieldKey, now) })
@@ -562,7 +564,6 @@ export async function postPublicDecide(req: PublicRequest & { decisions: unknown
   const taskIds = view.tasks.map(t => t.id)
   const input = cleanDecisionInput(req.decisions, taskIds)
   if (!input) return { status: 400, body: { error: 'Нет решений по задачам этого счёта' } }
-  if (!deps.allowComment(`pub-comment:${req.domain}:${invoice.id}`)) return { status: 429, body: { error: 'Слишком много действий — попробуйте через час' } }
   const now = deps.now()
   const { next, changed } = mergeDecisions(parseDecisions(access.raw[key]), input, now)
   if (!changed.length) return { status: 200, body: { ok: true } }

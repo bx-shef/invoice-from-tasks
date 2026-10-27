@@ -55,7 +55,7 @@ function portal(over: Over = {}) {
   return { call, writes }
 }
 
-function deps(p: ReturnType<typeof portal>, opts: { comments?: boolean } = {}) {
+function deps(p: ReturnType<typeof portal>) {
   const fails = new Map<string, number>()
   const notices: Array<[string, string]> = []
   const cache = new Map<string, PublicInvoiceView>()
@@ -71,7 +71,6 @@ function deps(p: ReturnType<typeof portal>, opts: { comments?: boolean } = {}) {
     notify: async (_call, key, text) => {
       notices.push([key, text])
     },
-    allowComment: () => opts.comments ?? true,
     now: () => new Date('2026-10-06T10:00:00Z'),
     notices
   }
@@ -81,6 +80,12 @@ function deps(p: ReturnType<typeof portal>, opts: { comments?: boolean } = {}) {
 const req = (over: Partial<{ code: string, text: unknown }> = {}) => ({ domain: 'my.bitrix24.by', invoiceId: 5, code: CODE, ip: '1.2.3.4', text: undefined as unknown, ...over })
 
 describe('страница в стадии согласования', () => {
+  it('комментарии без лимита: 25 подряд — все записаны (владелец 2026-10-27)', async () => {
+    const p = portal()
+    const d = deps(p)
+    for (let i = 0; i < 25; i++) expect((await postPublicComment(req({ text: `замечание ${i}` }), d)).status).toBe(200)
+  })
+
   it('открыта, хотя стадии нет в обычных; комментарии с ответом и отметкой «закрыто»', async () => {
     const r = await loadPublicInvoice(req(), deps(portal()))
     if (r.status !== 200 || r.body.state !== 'open') throw new Error('closed')
@@ -105,9 +110,7 @@ describe('комментарий клиента', () => {
     const p = portal({ stage: 'DT31_1:N' })
     expect((await postPublicComment(req({ text: 'x' }), deps(p))).status).toBe(403)
     expect((await postPublicComment(req({ text: '  ' }), deps(portal()))).status).toBe(400)
-    const limited = portal()
-    expect((await postPublicComment(req({ text: 'x' }), deps(limited, { comments: false }))).status).toBe(429)
-    expect([...p.writes, ...limited.writes]).toEqual([])
+    expect(p.writes).toEqual([])
   })
 
   it('неверный код — 404, без записи', async () => {

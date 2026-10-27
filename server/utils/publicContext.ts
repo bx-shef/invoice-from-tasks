@@ -11,11 +11,10 @@ import { parseSettings, SETTINGS_KEY } from '#shared/domain/settings'
 import type { RestCall } from './b24Client'
 import { readOption } from './options'
 import { postProblem } from './problemChat'
-import { MAX_PDF_BYTES, PUBLIC_CACHE_MS, PUBLIC_COMMENTS_PER_INVOICE, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL, type CommentDeps, type DocumentDeps } from './publicInvoice'
+import { MAX_PDF_BYTES, PUBLIC_CACHE_MS, PUBLIC_FAILS_PER_INVOICE, PUBLIC_PER_IP, PUBLIC_PER_PORTAL, type CommentDeps, type DocumentDeps } from './publicInvoice'
 import { SlidingWindow } from './rateLimit'
 
 const attempts = new SlidingWindow()
-const comments = new SlidingWindow()
 /** Сообщения в чат проблем: одно на ключ в час — порог неверных кодов не засыпет чат. */
 const noticeSent = new Map<string, number>()
 /** ID бота чата проблем по порталам (problemChat.ts); `null` — портал бота не даёт. */
@@ -39,11 +38,10 @@ async function notifyProblemChat(call: RestCall, key: string, text: string): Pro
   await postProblem(key.split(':')[1] ?? '', call, dialogId, text, botIds)
 }
 
-/** Зависимости записи комментария: проверка доступа как у страницы плюс лимит комментариев счёта. */
+/** Зависимости записи комментария и решений: проверка доступа как у страницы, без своих лимитов. */
 export function commentDeps(): CommentDeps {
   return {
     ...publicDeps('page'),
-    allowComment: key => comments.take([[key, PUBLIC_COMMENTS_PER_INVOICE]]),
     now: () => new Date()
   }
 }
@@ -64,10 +62,15 @@ export const PUBLIC_DOWNLOADS_PER_IP = { max: 60, windowMs: 10 * 60_000 }
 export function publicDeps(kind: 'page' | 'download' = 'page'): DocumentDeps {
   const ipLimit = kind === 'download' ? PUBLIC_DOWNLOADS_PER_IP : PUBLIC_PER_IP
   return {
-    allowAttempt: (ipKey, portalKey) => attempts.take([[`${kind}:${ipKey}`, ipLimit], [portalKey, PUBLIC_PER_PORTAL]]),
+    // Страница: IP — только проверка, его тратят неверные коды (fail); скачивание PDF — учёт каждого
+    // (щедрое окно). Портал — каждая попытка: лимит бережёт REST портала.
+    allowAttempt: (ipKey, portalKey) => kind === 'page'
+      ? attempts.used(`page:${ipKey}`, ipLimit) < ipLimit.max && attempts.take([[portalKey, PUBLIC_PER_PORTAL]])
+      : attempts.take([[`${kind}:${ipKey}`, ipLimit], [portalKey, PUBLIC_PER_PORTAL]]),
     // Проверка без учёта, учёт — только неверного кода: верный код счётчик не тратит.
     locked: key => failures.used(key, PUBLIC_FAILS_PER_INVOICE) >= PUBLIC_FAILS_PER_INVOICE.max,
-    fail: (key) => {
+    fail: (key, ipKey) => {
+      attempts.take([[`page:${ipKey}`, PUBLIC_PER_IP]])
       failures.take([[key, PUBLIC_FAILS_PER_INVOICE]])
       return failures.used(key, PUBLIC_FAILS_PER_INVOICE)
     },
