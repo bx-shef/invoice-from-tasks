@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockPublicApi } from './fixtures'
+import { mockPublicApi, sampleInvoice } from './fixtures'
 
 const URL = '/p-example.bitrix24.by/i-145'
 
@@ -49,4 +49,28 @@ test('публичная страница: плавающая «Замечани
   await page.getByTestId('public-comment-fab').click()
   await expect(page.getByTestId('public-comment-text')).toBeVisible()
   await info.attach('comment', { body: await page.screenshot(), contentType: 'image/png' })
+})
+
+test('публичная страница: быстрые клики подряд не теряются, разрешённая работа подсвечена', async ({ page }) => {
+  const inv = sampleInvoice()
+  const log = await mockPublicApi(page, inv)
+  // Медленная запись: второй клик — пока первый ещё пишется
+  await page.route('**/api/public/decide', async (r) => {
+    await new Promise(res => setTimeout(res, 400))
+    const body = r.request().postDataJSON()
+    log.decide.push(body)
+    Object.assign(inv.invoice.approval.decisions, body.decisions)
+    return r.fulfill({ json: { ok: true } })
+  })
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  const yes = page.getByTestId('public-decide-yes')
+  await yes.nth(0).click()
+  await yes.nth(1).click()
+  await expect(yes.nth(0)).toHaveAttribute('aria-pressed', 'true')
+  await expect(yes.nth(1)).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => log.decide.length).toBe(2)
+  await expect(page.locator('[data-decision=yes]')).toHaveCount(2)
+  await expect(page.getByTestId('public-decision-badge').first()).toContainText('разрешено')
 })

@@ -60,17 +60,20 @@ function portal(over: Over = {}) {
 
 function deps(p: ReturnType<typeof portal> | null, opts: { allow?: boolean } = {}) {
   const fails = new Map<string, number>()
+  const ipFails: string[] = []
   const cache = new Map<string, PublicInvoiceView>()
-  const d: PublicDeps & { fails: Map<string, number>, cache2: Map<string, PublicInvoiceView> } = {
+  const d: PublicDeps & { fails: Map<string, number>, ipFails: string[], cache2: Map<string, PublicInvoiceView> } = {
     portal: async () => (p ? { call: p.call, origin: 'https://my.bitrix24.by' } : null),
     allowAttempt: () => opts.allow ?? true,
     locked: key => (fails.get(key) ?? 0) >= 3,
-    fail: (key) => {
+    fail: (key, ipKey) => {
+      ipFails.push(ipKey)
       fails.set(key, (fails.get(key) ?? 0) + 1)
       return fails.get(key)!
     },
     cache: { get: k => cache.get(k), set: (k, v) => { cache.set(k, v) } },
     fails,
+    ipFails,
     cache2: cache
   }
   return d
@@ -128,7 +131,10 @@ describe('loadPublicInvoice', () => {
     const d = deps(portal())
     for (let i = 0; i < 5; i++) await loadPublicInvoice(req(), d)
     expect(d.fails.size).toBe(0)
+    expect(d.ipFails).toEqual([])
     for (let i = 0; i < 3; i++) await loadPublicInvoice(req({ code: 'ZZZZZZZZZZ' }), d)
+    // Неверный код тратит и лимит IP (верный — нет: клиент жмёт сколько угодно)
+    expect(d.ipFails).toEqual(['pub-ip:1.2.3.4', 'pub-ip:1.2.3.4', 'pub-ip:1.2.3.4'])
     expect((await loadPublicInvoice(req(), d)).status).toBe(429)
   })
 
