@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, worksLabel } from '../app/utils/publicProgress'
+import { decisionProgress, docTitles, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, worksLabel } from '../app/utils/publicProgress'
 
 describe('decisionProgress', () => {
   const rows = [{ taskId: 1, sum: 100.1 }, { taskId: 2, sum: 50 }, { taskId: 1, sum: 0.2 }, { taskId: null, sum: 999 }, { taskId: 3, sum: null }]
@@ -66,5 +66,25 @@ describe('withRowPrefix', () => {
   })
   it('текст уже на пределе — без приставки', () => {
     expect(withRowPrefix('x'.repeat(20), 'A', 20)).toBe('x'.repeat(20))
+  })
+})
+
+describe('docTitles', () => {
+  it.each([
+    ['Акт (Беларусь) 63', 'Акт'],
+    ['Акт 57', 'Акт'],
+    ['Счёт № 12', 'Счёт'],
+    ['Договор оказания услуг', 'Договор оказания услуг'],
+    ['Счёт-фактура 12/2026', 'Счёт-фактура 12/2026'],
+    ['Акт сверки (2026)', 'Акт сверки (2026)'],
+    ['Договор №5 от 01.01', 'Договор №5 от 01.01'],
+    ['Акт (a (b)) 1', 'Акт (a (b)) 1'],
+    ['63', '63']
+  ])('%s', (a, b) => {
+    expect(docTitles([a])).toEqual([b])
+  })
+  it('одинаковые короткие — все полные', () => {
+    expect(docTitles(['Акт (Беларусь) 63', 'Акт (Россия) 64'])).toEqual(['Акт (Беларусь) 63', 'Акт (Россия) 64'])
+    expect(docTitles(['Акт 57', 'Счёт 12'])).toEqual(['Акт', 'Счёт'])
   })
 })
