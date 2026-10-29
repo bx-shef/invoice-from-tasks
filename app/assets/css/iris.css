@@ -20,6 +20,7 @@
   --tai-accent-hover: #3E30B8;
   --tai-accent-soft: #EFEDFF;
   --tai-border: #E6E3EE;
+  --tai-border-dash: #B8B4C4;
   --tai-success: #1E7A3C; --tai-success-bg: #E7F5EC; --tai-success-icon: #2E9150;
   --tai-warning: #8A5300; --tai-warning-bg: #FFF3DC; --tai-warning-icon: #B87A12;
   --tai-danger: #B42318; --tai-danger-bg: #FDECEA; --tai-danger-icon: #D23B2F;
@@ -44,6 +45,7 @@
   --tai-accent-hover: #8475FF;
   --tai-accent-soft: rgba(110,91,255,.22);
   --tai-border: #2F2D3A;
+  --tai-border-dash: #5A5670;
   --tai-success: #6FD49A; --tai-success-bg: rgba(46,145,80,.18); --tai-success-icon: #6FD49A;
   --tai-warning: #F2B654; --tai-warning-bg: rgba(184,122,18,.20); --tai-warning-icon: #F2B654;
   --tai-danger: #FF8E85; --tai-danger-bg: rgba(210,59,47,.20); --tai-danger-icon: #FF8E85;

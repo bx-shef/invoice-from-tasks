@@ -161,3 +161,24 @@ export function parseInvoiceEconomy(raw: unknown): InvoiceEconomy | null {
 export function rowFlag(row: Pick<DraftRow, 'taskId'>, list: TaskEconomy[]): EconomyFlag {
   return list.find(e => e.taskId === row.taskId)?.flag ?? null
 }
+
+/** Знак и деньги для пилюли: «+280,00» / «−204,60» (минус — U+2212, как в макете). */
+function signedMoney(v: number): string {
+  const abs = Math.abs(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `${v > 0 ? '+' : v < 0 ? '−' : ''}${abs}`
+}
+
+/** Пилюля дельты в поле «Экономика счёта»: «−204,60 · −4,7%», в ноль — «в ноль» (дизайн v2). */
+export function economyDeltaLabel(e: Pick<InvoiceEconomy, 'delta' | 'diffPercent' | 'verdict'>): string {
+  if (e.verdict === 'even') return 'в ноль'
+  const pct = e.diffPercent === null ? '' : ` · ${e.diffPercent > 0 ? '+' : e.diffPercent < 0 ? '−' : ''}${Math.abs(e.diffPercent).toLocaleString('ru-RU')}%`
+  return `${signedMoney(e.delta)}${pct}`
+}
+
+/** «3 задачи с пометками» — склонение по числу. */
+export function flaggedLabel(n: number): string {
+  const m10 = n % 10
+  const m100 = n % 100
+  const word = m10 === 1 && m100 !== 11 ? 'задача' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'задачи' : 'задач'
+  return `${n} ${word} с пометками`
+}

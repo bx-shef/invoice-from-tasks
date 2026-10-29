@@ -1,11 +1,13 @@
 <script setup lang="ts">
+// Вид — дизайн v2 (раздел 1): QR слева, справа — согласие, сумма с дельтой, две тонкие полоски,
+// пометки и «Пересчитать» тихой ссылкой. Только просмотр, ~120 px.
 // Поле «Экономика счёта» (свой тип, решение владельца 2026-10-07) в карточке счёта: значение —
 // JSON итога (economics.ts → invoiceEconomy), здесь — сводка: выставлено, по формуле, дельта,
 // прибыль или убыток, задачи с пометками. «Пересчитать» спрашивает, откуда брать задачи и как
 // считать, и прогоняет тот же сбор, что «Заполнить из задач» (строки в счёт НЕ пишет): поля задач и
 // это поле обновляются правами сотрудника.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
-import { parseInvoiceEconomy, type InvoiceEconomy } from '#shared/domain/economics'
+import { economyDeltaLabel, flaggedLabel, parseInvoiceEconomy, type InvoiceEconomy } from '#shared/domain/economics'
 import { camelFieldKey } from '#shared/domain/userFields'
 import { publicInvoiceUrl, publicQrUrl } from '#shared/domain/invoiceLinks'
 import { formatMoney } from '~/utils/fillPreview'
@@ -73,6 +75,7 @@ const bars = computed(() => {
 })
 
 const copied = ref(false)
+const qrOpen = ref(false)
 async function copyQr() {
   if (!links.value) return
   try {
@@ -146,80 +149,75 @@ function when(iso: string): string {
 
 <template>
   <div
-    class="p-2 text-sm space-y-2"
+    class="p-2 text-sm"
     data-testid="economics-field"
   >
-    <div class="flex flex-wrap gap-3">
-      <!-- QR и ссылки: картинка — та же, что подставит шаблон документа -->
+    <div class="flex gap-4">
+      <!-- QR и согласие — всегда, даже пока экономика не посчитана (находка панели) -->
       <div
         v-if="links"
-        class="ec-card p-2 flex flex-col items-center gap-1 w-32"
+        class="flex flex-col items-center gap-1 shrink-0"
       >
-        <a
-          :href="links.page"
-          target="_blank"
-          rel="noopener"
-          title="Открыть расшифровку"
+        <button
+          type="button"
+          class="ec-qr"
+          aria-label="Показать QR-код крупно"
+          @click="qrOpen = true"
         >
           <img
             :src="links.qr"
             alt="QR-код расшифровки"
-            class="size-24 rounded bg-white p-1"
+            class="size-[84px]"
             data-testid="economics-qr"
           >
-        </a>
+        </button>
         <a
           :href="links.page"
           target="_blank"
           rel="noopener"
-          class="text-xs underline"
+          class="text-xs ec-muted hover:underline"
         >Расшифровка</a>
-        <button
-          type="button"
-          class="text-xs underline opacity-70"
-          :title="links.qr"
-          @click="copyQr"
-        >
-          {{ copied ? 'Скопировано' : 'Адрес картинки' }}
-        </button>
       </div>
 
-      <div class="flex-1 min-w-56 space-y-2">
+      <div class="flex-1 min-w-0 space-y-1.5">
         <div
           v-if="approval"
-          class="flex items-center gap-2"
+          class="flex flex-wrap items-center gap-2"
           data-testid="economics-approval"
         >
+          <B24Badge
+            :color="approval.approved ? 'air-primary-success' : 'air-primary-warning'"
+            :label="approval.approved ? 'Согласовано клиентом' : 'Клиент ещё не согласовал'"
+          />
           <span
-            class="size-5 rounded-full flex items-center justify-center text-white text-xs"
-            :class="approval.approved ? 'bg-(--ui-color-accent-main-success)' : 'bg-(--ui-color-accent-main-warning)'"
-            aria-hidden="true"
-          >{{ approval.approved ? '✓' : '…' }}</span>
-          <span>{{ approval.approved ? `Согласовано клиентом${approval.at ? `, ${when(approval.at)}` : ''}` : 'Клиент ещё не согласовал' }}</span>
+            v-if="approval.approved && approval.at"
+            class="text-xs ec-muted"
+          >{{ when(approval.at) }}</span>
         </div>
 
         <template v-if="econ">
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="flex flex-wrap items-baseline gap-2">
+            <span class="text-xl font-semibold tabular-nums">{{ formatMoney(econ.billed) }}</span>
+            <span class="text-xs ec-muted">{{ econ.currency }}</span>
             <B24Badge
               v-if="verdict"
               :color="verdict.color"
-              :label="verdict.label"
+              :label="economyDeltaLabel(econ)"
+              :title="verdict.label"
+              :aria-label="`${verdict.label}: ${economyDeltaLabel(econ)}`"
               data-testid="economics-verdict"
             />
-            <span
-              class="text-lg font-semibold tabular-nums"
-              :class="econ.delta < 0 ? 'text-(--ui-color-accent-main-alert)' : econ.delta > 0 ? 'text-(--ui-color-accent-main-success)' : ''"
-            >{{ signed(econ.delta) }} {{ econ.currency }}{{ pct(econ.diffPercent) }}</span>
           </div>
-          <!-- Полосы: выставлено против формулы — длина от большего -->
-          <div class="space-y-1 max-w-md">
+
+          <!-- Полоски «выставлено / по формуле»: длина от большего -->
+          <div class="space-y-1 max-w-sm">
             <div
               v-for="bar in bars"
               :key="bar.label"
-              class="grid grid-cols-[6rem_1fr_auto] items-center gap-2"
+              class="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2"
             >
-              <span class="opacity-70">{{ bar.label }}</span>
-              <span class="h-2.5 rounded-full bg-(--ui-color-bg-content-secondary) overflow-hidden">
+              <span class="ec-muted">{{ bar.label }}</span>
+              <span class="h-1.5 rounded-full bg-(--ui-color-bg-content-tertiary) overflow-hidden">
                 <span
                   class="block h-full rounded-full"
                   :class="bar.color"
@@ -229,119 +227,134 @@ function when(iso: string): string {
               <span class="text-right tabular-nums">{{ formatMoney(bar.value) }}</span>
             </div>
           </div>
-          <div class="flex flex-wrap gap-1">
-            <B24Badge
-              v-if="econ.counts.loss"
-              color="air-primary-alert"
-              size="xs"
-              :label="`убыток: ${econ.counts.loss}`"
-            />
-            <B24Badge
-              v-if="econ.counts.over"
-              color="air-primary-warning"
-              size="xs"
-              :label="`завышение: ${econ.counts.over}`"
-            />
-            <B24Badge
-              v-if="econ.counts.missing"
-              color="air-secondary"
-              size="xs"
-              :label="`нет данных: ${econ.counts.missing}`"
-            />
-          </div>
-          <button
-            v-if="flagged.length"
-            type="button"
-            class="text-xs underline opacity-80"
-            @click="expanded = !expanded"
-          >
-            {{ expanded ? 'Скрыть задачи' : `Задачи с пометками (${flagged.length})` }}
-          </button>
-          <ul
-            v-if="expanded"
-            class="space-y-0.5"
-          >
-            <li
-              v-for="t in flagged"
-              :key="t.taskId"
-            >
-              <InvoiceTaskLink
-                :origin="origin"
-                :task-id="t.taskId"
-              />
-              {{ t.title }} —
-              <span :class="t.delta < 0 ? 'text-(--ui-color-accent-main-alert)' : 'text-(--ui-color-accent-main-success)'">{{ signed(t.delta) }}{{ pct(t.diffPercent) }}</span>
-            </li>
-          </ul>
-          <div class="text-xs opacity-60">
-            Посчитано {{ when(econ.at) }} · порог {{ econ.threshold }}%
-          </div>
         </template>
         <div
           v-else
-          class="opacity-70"
+          class="ec-empty"
         >
-          Экономика ещё не посчитана
+          Экономики пока нет. Откройте счёт и нажмите «Собрать строки» — или посчитайте здесь.
         </div>
+
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          <template v-if="econ">
+            <button
+              v-if="flagged.length"
+              type="button"
+              class="hover:underline"
+              @click="expanded = !expanded"
+            >
+              ⚑ {{ flaggedLabel(flagged.length) }}
+            </button>
+            <span
+              v-else
+              class="ec-muted"
+            >Пометок нет</span>
+          </template>
+          <B24Popover v-model:open="asking">
+            <button
+              type="button"
+              class="ec-link"
+              data-testid="economics-recalc"
+            >
+              {{ econ ? 'Пересчитать' : 'Посчитать' }}
+            </button>
+            <template #content>
+              <div class="p-3 space-y-2 w-64">
+                <B24Select
+                  v-model="mode"
+                  :items="modeItems"
+                  value-key="value"
+                  size="sm"
+                  class="w-full"
+                  aria-label="Как считать"
+                />
+                <B24Button
+                  size="sm"
+                  color="air-primary"
+                  label="Посчитать"
+                  block
+                  :loading="busy"
+                  :disabled="busy"
+                  data-testid="economics-run"
+                  @click="recalc"
+                />
+              </div>
+            </template>
+          </B24Popover>
+          <span
+            v-if="econ"
+            class="ec-muted"
+          >посчитано {{ when(econ.at) }}</span>
+        </div>
+        <ul
+          v-if="econ && expanded"
+          class="space-y-0.5 text-xs"
+        >
+          <li
+            v-for="t in flagged"
+            :key="t.taskId"
+          >
+            <InvoiceTaskLink
+              :origin="origin"
+              :task-id="t.taskId"
+            />
+            {{ t.title }} —
+            <span :class="t.delta < 0 ? 'text-(--ui-color-accent-main-alert)' : 'text-(--ui-color-accent-main-success)'">{{ signed(t.delta) }}{{ pct(t.diffPercent) }}</span>
+          </li>
+        </ul>
+        <p
+          v-if="error"
+          class="text-xs text-(--ui-color-accent-main-alert)"
+        >
+          {{ error }}
+        </p>
       </div>
     </div>
-    <details class="text-xs opacity-70">
-      <summary class="cursor-pointer">
-        Как считается
-      </summary>
-      <p class="mt-1">
-        По каждой задаче, привязанной к счёту: <b>по формуле</b> — часы × ставка сотрудника + наценка,
-        с НДС (без времени — часы оценивает ИИ); <b>выставлено</b> — сумма строки этой задачи в счёте
-        с НДС. <b>Дельта</b> = выставлено − по формуле, <b>разница</b> — дельта в % от формулы.
-        Пометки: «убыток» — выставлено меньше формулы больше чем на порог, «завышение» — больше на
-        порог, «нет данных» — часы оценил ИИ или сравнить не с чем. Считается при «Собрать строки» в окне счёта
-        или кнопкой здесь.
-      </p>
-    </details>
 
-    <div
-      v-if="asking"
-      class="flex flex-wrap items-end gap-2"
+    <B24Modal
+      v-if="links"
+      v-model:open="qrOpen"
+      title="QR-код расшифровки"
     >
-      <B24Select
-        v-model="mode"
-        :items="modeItems"
-        value-key="value"
-        size="sm"
-        class="w-56"
-        aria-label="Как считать"
-      />
-      <B24Button
-        size="sm"
-        color="air-primary"
-        label="Посчитать"
-        :loading="busy"
-        :disabled="busy"
-        data-testid="economics-run"
-        @click="recalc"
-      />
-    </div>
-    <B24Button
-      v-else
-      size="xs"
-      color="air-secondary"
-      :label="econ ? 'Пересчитать' : 'Посчитать'"
-      data-testid="economics-recalc"
-      @click="asking = true"
-    />
-    <p
-      v-if="error"
-      class="text-(--ui-color-accent-main-alert)"
-    >
-      {{ error }}
-    </p>
+      <template #body>
+        <div class="flex flex-col items-center gap-3 pb-2">
+          <img
+            :src="links.qr"
+            alt="QR-код расшифровки"
+            class="size-64"
+          >
+          <B24Button
+            color="air-secondary"
+            :label="copied ? 'Скопировано' : 'Скопировать ссылку'"
+            @click="copyQr"
+          />
+        </div>
+      </template>
+    </B24Modal>
   </div>
 </template>
 
 <style>
-.ec-card {
-  background: var(--ui-color-bg-content-primary, #fff);
-  border: 1px solid var(--ui-color-design-plain-content-divider, rgb(0 0 0 / 0.08));
+.ec-qr {
+  padding: 4px;
   border-radius: 12px;
+  border: 1px solid var(--tai-border, rgb(0 0 0 / 0.08));
+  background: #fff;
+}
+.ec-muted {
+  color: var(--tai-text-3, #5e5e68);
+}
+.ec-link {
+  color: var(--tai-accent, #4b3cd0);
+}
+.ec-link:hover {
+  text-decoration: underline;
+}
+.ec-empty {
+  border: 1px dashed var(--tai-border-dash, #b8b4c4);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-align: center;
+  color: var(--tai-text-2, #45454c);
 }
 </style>
