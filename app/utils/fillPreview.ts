@@ -330,3 +330,19 @@ export function issueText(issue: FillIssue): string {
 export function taskHref(origin: string, taskId: number): string {
   return `${origin}${taskPath(taskId)}`
 }
+
+/** Фильтр строк предпросмотра (дизайн v2): все, с пометками экономики, с часами без автора. */
+export type RowFilter = 'all' | 'flagged' | 'noAuthor'
+
+export const ROW_FILTERS: ReadonlyArray<{ value: RowFilter, label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'flagged', label: 'С пометками' },
+  { value: 'noAuthor', label: 'Часы без автора' }
+]
+
+/** Проходит ли строка фильтр; `flagged` — пометка экономики её задачи (убыток, завышение, нет данных). */
+export function rowMatches(row: DraftRow, flag: string | null | undefined, filter: RowFilter): boolean {
+  if (filter === 'flagged') return !!flag
+  if (filter === 'noAuthor') return !!row.people?.some(p => p.noAuthor)
+  return true
+}

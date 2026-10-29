@@ -24,6 +24,9 @@ import {
   previewContext,
   previewLine,
   previewTotals,
+  ROW_FILTERS,
+  rowMatches,
+  type RowFilter,
   rowVariants,
   type RowVariant,
   taskLinks,
@@ -86,6 +89,10 @@ const lines = computed(() => {
   const ctx = previewContext(props.conversion, props.userLabel)
   return props.rows.map(row => previewLine(row, props.unit, ctx))
 })
+/** Фильтр строк: «Все / С пометками / Часы без автора» (дизайн v2). */
+const filter = ref<RowFilter>('all')
+const flagByTask = computed(() => new Map((props.economics ?? []).map(e => [e.taskId, e.flag])))
+const visible = computed(() => lines.value.map(line => rowMatches(line.row, flagByTask.value.get(line.row.taskId), filter.value)))
 /**
  * Строки задачи: три варианта суммы друг под другом, название — одна общая ячейка (владелец
  * 2026-10-25). Без экономики (или не первая строка задачи) — одна строка с расчётом, как раньше.
@@ -176,12 +183,31 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
       v-if="rows.length"
       class="overflow-x-auto"
     >
-      <p
-        class="text-xs opacity-70 mb-2"
-        data-testid="fill-placement"
-      >
-        {{ note }}
-      </p>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <p
+          class="text-xs opacity-70"
+          data-testid="fill-placement"
+        >
+          {{ note }}
+        </p>
+        <div
+          class="flex gap-1 rounded-full bg-(--ui-color-bg-content-secondary) p-1"
+          role="group"
+          aria-label="Какие строки показать"
+          data-testid="fill-filter"
+        >
+          <B24Button
+            v-for="f in ROW_FILTERS"
+            :key="f.value"
+            size="sm"
+            :color="filter === f.value ? 'air-primary' : 'air-tertiary'"
+            :label="f.label"
+            :aria-pressed="filter === f.value"
+            class="rounded-full"
+            @click="filter = f.value"
+          />
+        </div>
+      </div>
       <table
         class="fill-table w-full text-sm"
         data-testid="fill-preview"
@@ -234,7 +260,7 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
             :key="line.row.key"
           >
             <tr
-              v-for="(v, vi) in variants[n]"
+              v-for="(v, vi) in (visible[n] ? variants[n] : [])"
               :key="v?.key ?? 'one'"
               class="align-top"
               :class="[vi === 0 ? 'border-t border-(--ui-color-divider-less)' : '', { 'fill-outlier': outlierIds.has(line.row.taskId) }]"
@@ -283,6 +309,12 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
                     :people="line.row.people!"
                     :user-label="userLabel"
                     class="mt-1"
+                  />
+                  <InvoiceMoneyBars
+                    v-if="econByRow[n]"
+                    :formula="econByRow[n]!.formula"
+                    :billed="econByRow[n]!.billed"
+                    class="mt-1.5 max-w-56"
                   />
                   <span class="block text-xs opacity-60 mt-0.5">
                     <span :title="line.rateTitle">{{ line.basis }}</span> ·
@@ -346,6 +378,15 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
               </template>
             </tr>
           </template>
+          <tr v-if="!visible.some(Boolean)">
+            <td
+              :colspan="PREVIEW_COLUMNS.length + 3"
+              class="py-4 text-center text-sm opacity-70"
+              data-testid="fill-filter-empty"
+            >
+              Таких строк нет — выберите «Все»
+            </td>
+          </tr>
         </tbody>
         <tfoot>
           <tr
