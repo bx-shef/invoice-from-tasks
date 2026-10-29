@@ -23,14 +23,17 @@ const task: TaskInfo = {
 
 const entries: TimeEntry[] = [
   { id: 101, taskId: 10, userId: 7, seconds: 3600, comment: 'Вёрстка шапки', date: '2026-05-10' },
-  { id: 102, taskId: 10, userId: 9, seconds: 1800, comment: 'Правки по макету', date: '2026-06-02' }
+  { id: 102, taskId: 10, userId: 7, seconds: 1800, comment: 'Правки по макету', date: '2026-06-02' }
 ]
+
+/** Время двух сотрудников (7 и 9) — для «записей времени» и «времени по людям». */
+const mixedEntries: TimeEntry[] = [entries[0]!, { ...entries[1]!, userId: 9 }]
 
 function input(patch: Partial<FillInput> = {}): FillInput {
   return {
     mode: 'task',
     tasks: [task],
-    entries,
+    entries: patch.mode === 'time' ? mixedEntries : entries,
     rates: [
       { userId: 7, rate: 100, from: '2026-01-01' },
       { userId: 7, rate: 200, from: '2026-06-01' },
@@ -566,5 +569,28 @@ describe('ID задачи клиента в названии строки (#34)'
       expect(finishRows(built, null, true).rows.every(r => r.name.startsWith('[10-456] '))).toBe(true)
       expect(finishRows(built, null, false).rows.some(r => r.name.startsWith('['))).toBe(false)
     }
+  })
+})
+
+describe('тип 1 — время по людям (владелец 2026-10-29)', () => {
+  it('у каждого участника своя ставка на дату его последней записи; сумма — сумма участников', () => {
+    const { rows, errors } = buildRows(input({ entries: mixedEntries }))
+    expect(errors).toEqual([])
+    const row = rows[0]!
+    // 7: 1 ч × 100 (ставка на 10.05); 9: 0,5 ч × 80
+    expect(row.people?.map(p => [p.userId, p.hours, p.baseRate, p.sum])).toEqual([[7, 1, 100, 100], [9, 0.5, 80, 40]])
+    expect(row.formulaSum).toBe(140)
+    expect(row.hours).toBe(1.5)
+  })
+  it('запись без автора — по ставке ответственного, с предупреждением', () => {
+    const { rows, warnings } = buildRows(input({ entries: [entries[0]!, { ...entries[1]!, userId: null }] }))
+    const none = rows[0]!.people!.find(p => p.noAuthor)
+    expect(none).toMatchObject({ userId: 7, baseRate: 200, hours: 0.5, sum: 100 })
+    expect(warnings.some(w => w.message.includes('без автора записи'))).toBe(true)
+  })
+  it('нет ставки у участника — ошибка, строки нет', () => {
+    const { rows, errors } = buildRows(input({ entries: [entries[0]!, { ...entries[1]!, userId: 42 }] }))
+    expect(rows).toEqual([])
+    expect(errors[0]?.message).toContain('нет ставки для #42')
   })
 })

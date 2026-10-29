@@ -95,10 +95,33 @@ export interface DraftRow {
   /** Часы — оценка ИИ: в задаче нет затраченного времени. */
   estimated?: boolean
   /**
+   * Время по людям (тип «Задача — одна строка», владелец 2026-10-29): у каждого участника своя
+   * ставка; часы без автора записи — по ставке ответственного (`noAuthor`). Сумма строки — сумма
+   * сумм участников.
+   */
+  people?: PersonHours[]
+  /**
    * «Стоимость работ» задачи — итог строки С НАЛОГОМ, который платит клиент: в счёт уходит ровно
    * эта цена × 1, цена без налога — обратным счётом (toProductRows, решение владельца).
    */
   fixedGross?: number
+}
+
+/** Часы одного участника задачи и их цена. */
+export interface PersonHours {
+  userId: number
+  seconds: number
+  roundedSeconds: number
+  hours: number
+  /** Ставка без наценки и дата, на которую она выбрана (последняя запись участника). */
+  baseRate: number
+  rateDate: string
+  /** Цена часа с наценкой в валюте счёта, без НДС. */
+  hourPrice: number
+  /** Часы × цена часа, без НДС. */
+  sum: number
+  /** Записи без автора — посчитаны по ставке ответственного. */
+  noAuthor?: boolean
 }
 
 export interface FillIssue {
@@ -235,9 +258,9 @@ function placed(input: FillInput, hourPrice: number, hours: number): Pick<DraftR
  * Строка с «Стоимостью работ» (тип «Задача — одна строка»): клиент платит ровно `gross` — цена × 1;
  * сумма без налога для предпросмотра — обратным счётом. Формула остаётся для сравнения.
  */
-function fixedPlaced(input: FillInput, hourPrice: number, hours: number, gross: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum' | 'fixedGross'> {
+function fixedPlaced(input: FillInput, hourPrice: number, hours: number, gross: number, formula = roundMoney(hourPrice * hours)): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum' | 'fixedGross'> {
   const net = netOfGross(gross, input.vatRate)
-  return { hourPrice, price: net, quantity: 1, sum: net, taxRate: input.vatRate, formulaSum: roundMoney(hourPrice * hours), fixedGross: gross }
+  return { hourPrice, price: net, quantity: 1, sum: net, taxRate: input.vatRate, formulaSum: formula, fixedGross: gross }
 }
 
 /** Цена без налога из итога с налогом, до копеек. */
@@ -296,6 +319,11 @@ function zeroAfterRounding(seconds: number): string {
   return `время ${formatDuration(seconds)} после округления стало нулём — строка пропущена`
 }
 
+/**
+ * Тип «Задача — одна строка»: сумма задачи = время каждого участника × его ставка на дату его
+ * последней записи (+ наценка задачи); записи без автора — по ставке ответственного, с
+ * предупреждением (владелец 2026-10-29, дизайн v2). Округление — по каждому участнику.
+ */
 function buildTaskRows(input: FillInput, result: FillResult): void {
   const { rounding: step, roundingDirection: direction } = input.settings
   for (const task of input.tasks) {
@@ -309,27 +337,57 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
     if (total === 0) problems.push('журнал времени задачи не прочитан (нет доступа к записям времени?)')
-    const dates = [...new Set(entries.map(e => e.date).filter((d): d is string => !!d))].sort()
-    const lastDate = dates.at(-1) ?? null
-    if (total > 0 && !lastDate) problems.push('у записей времени нет даты — не на что выбрать ставку')
-    let rate: RateEntry | null = null
-    if (task.responsibleId !== null && lastDate) {
-      rate = findRate(input.rates, task.responsibleId, lastDate, input.clients)
-      if (!rate) problems.push(`нет ставки для ${userLabel(input, task.responsibleId)} на ${formatRuDate(lastDate)}`)
-    }
-    if (problems.length || !rate || task.responsibleId === null || !lastDate) {
+    if (entries.some(e => !e.date)) problems.push('у записей времени нет даты — не на что выбрать ставку')
+    if (problems.length || task.responsibleId === null) {
       for (const message of problems) result.errors.push({ taskId: task.id, message })
       continue
     }
-    const changed = rateChangeWarning(input, task.responsibleId, dates, rate)
-    if (changed) result.warnings.push({ taskId: task.id, message: changed })
-    const rounded = roundSeconds(total, step, direction)
+    // Участники: автор записи, без автора — ответственный (отдельной группой, чтобы подсветить)
+    const groups = new Map<string, { userId: number, noAuthor: boolean, entries: TimeEntry[] }>()
+    for (const e of entries) {
+      const noAuthor = e.userId === null
+      const userId = e.userId ?? task.responsibleId
+      const key = noAuthor ? 'none' : `u${userId}`
+      const g = groups.get(key) ?? { userId, noAuthor, entries: [] }
+      g.entries.push(e)
+      groups.set(key, g)
+    }
+    const markup = resolveMarkup(input.settings.markup, task.tags)
+    const people: PersonHours[] = []
+    let failed = false
+    for (const g of groups.values()) {
+      const dates = [...new Set(g.entries.map(e => e.date!))].sort()
+      const lastDate = dates.at(-1)!
+      const rate = findRate(input.rates, g.userId, lastDate, input.clients)
+      if (!rate) {
+        result.errors.push({ taskId: task.id, message: `нет ставки для ${userLabel(input, g.userId)} на ${formatRuDate(lastDate)}` })
+        failed = true
+        continue
+      }
+      const changed = rateChangeWarning(input, g.userId, dates, rate)
+      if (changed) result.warnings.push({ taskId: task.id, message: changed })
+      const seconds = g.entries.reduce((sum, e) => sum + e.seconds, 0)
+      const rounded = roundSeconds(seconds, step, direction)
+      const hours = secondsToHours(rounded)
+      const hourPrice = applyMarkup(rate.rate * (input.conversion?.factor ?? 1), markup.percent)
+      people.push({ userId: g.userId, seconds, roundedSeconds: rounded, hours, baseRate: rate.rate, rateDate: lastDate, hourPrice, sum: roundMoney(hourPrice * hours), ...(g.noAuthor ? { noAuthor: true } : {}) })
+    }
+    if (failed) continue
+    const noAuthor = people.find(p => p.noAuthor)
+    if (noAuthor) {
+      result.warnings.push({ taskId: task.id, message: `${formatDuration(noAuthor.roundedSeconds)} без автора записи — посчитаны по ставке ответственного ${userLabel(input, task.responsibleId)} (${noAuthor.baseRate}); укажите автора записи, если работал другой` })
+    }
+    const rounded = people.reduce((sum, p) => sum + p.roundedSeconds, 0)
     if (rounded === 0) {
       result.warnings.push({ taskId: task.id, message: zeroAfterRounding(total) })
       continue
     }
     const hours = secondsToHours(rounded)
-    const { price: hourPrice, ...markup } = priceFor(input, task, rate)
+    const sum = roundMoney(people.reduce((acc, p) => acc + p.sum, 0))
+    // Цена часа строки — средняя по участникам: в режиме «цена часа × часы» строка = эта цена × часы
+    const hourPrice = people.length === 1 ? people[0]!.hourPrice : roundMoney(sum / hours)
+    const main = people.find(p => p.userId === task.responsibleId && !p.noAuthor) ?? people[0]!
+    const lastDate = people.map(p => p.rateDate).sort().at(-1)!
     result.rows.push({
       key: `t${task.id}`,
       taskId: task.id,
@@ -339,12 +397,22 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
       seconds: total,
       roundedSeconds: rounded,
       hours,
-      baseRate: rate.rate,
+      baseRate: main.baseRate,
       rateDate: lastDate,
-      ...markup,
-      ...(task.workCost !== null ? fixedPlaced(input, hourPrice, hours, task.workCost) : placed(input, hourPrice, hours))
+      markupPercent: markup.percent,
+      markupSource: markup.source,
+      ...(markup.tag ? { markupTag: markup.tag } : {}),
+      ...(task.workCost !== null ? fixedPlaced(input, hourPrice, hours, task.workCost, sum) : placedSum(input, hourPrice, hours, sum)),
+      people
     })
   }
+}
+
+/** Как `placed`, но сумма задана (сумма участников): не пересчитываем её из средней цены. */
+function placedSum(input: FillInput, hourPrice: number, hours: number, sum: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum'> {
+  return input.settings.priceMode === 'sum'
+    ? { hourPrice, price: sum, quantity: 1, sum, taxRate: input.vatRate, formulaSum: sum }
+    : { hourPrice, price: hourPrice, quantity: hours, sum: roundMoney(hourPrice * hours), taxRate: input.vatRate, formulaSum: sum }
 }
 
 function buildTimeRows(input: FillInput, result: FillResult): void {
