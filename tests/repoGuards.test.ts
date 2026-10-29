@@ -190,3 +190,15 @@ describe('реестр REST-методов (docs/REST_METHODS.md)', () => {
     expect(missing, `Нет в docs/REST_METHODS.md:\n${missing.join('\n')}`).toEqual([])
   })
 })
+
+describe('оформление (дизайн v2)', () => {
+  it('iris.css подключён, а переменные b24ui, которые он переопределяет, есть в установленной b24ui', () => {
+    expect(readFileSync('nuxt.config.ts', 'utf8')).toContain('~/assets/css/iris.css')
+    const iris = readFileSync('app/assets/css/iris.css', 'utf8')
+    const dir = 'node_modules/@bitrix24/b24ui-nuxt/dist/runtime/air-design-tokens'
+    const tokens = readdirSync(dir).filter(f => f.endsWith('.css')).map(f => readFileSync(join(dir, f), 'utf8')).join('\n')
+    const ours = [...new Set([...iris.matchAll(/(--(?:ui|air)-[a-z0-9-]+):/g)].map(m => m[1]!))]
+    expect(ours.length).toBeGreaterThan(5)
+    expect(ours.filter(v => !tokens.includes(`${v}:`))).toEqual([])
+  })
+})

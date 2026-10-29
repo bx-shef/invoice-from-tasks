@@ -10,14 +10,5 @@
     color-scheme: dark;
   }
 
-  /* Фон и текст страницы — токенами b24ui, с запасными значениями на случай их отсутствия. */
-  body {
-    background-color: var(--air-theme-bg-color, #f1f3f5);
-    color: var(--b24ui-color-text-primary, #111418);
-  }
-
-  .dark body {
-    background-color: var(--air-theme-bg-color, #0b1020);
-    color: var(--b24ui-color-text-primary, #e6e9ef);
-  }
+  /* Фон и шрифт страницы — app/assets/css/iris.css (дизайн v2). */
 }

@@ -69,7 +69,6 @@
 body {
   font-family: var(--tai-font);
   background: var(--tai-bg-glow), var(--tai-bg);
-  background-attachment: fixed;
 }
 
 /* «Перелив» — для заголовка и акцентных надписей */
