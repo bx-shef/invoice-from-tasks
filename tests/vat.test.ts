@@ -227,4 +227,11 @@ describe('фикс-строки: итог от цены с налогом', () =
     expect(vatTotals(rows).total).toBe(2000)
     expect(lineAmounts(rows[0]!).total).toBe(700)
   })
+  it('смесь фикс-строк и обычных, количество больше 1: итог — сумма с налогом каждой', () => {
+    const rows = [
+      { price: 583.33, quantity: 1, taxRate: 20 as const, fixedGross: 700 },
+      { price: 170, quantity: 2.5, taxRate: 20 as const }
+    ]
+    expect(vatTotals(rows).total).toBe(700 + 510)
+  })
 })

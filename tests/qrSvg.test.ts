@@ -21,6 +21,21 @@ describe('qrSvg', () => {
       expect((r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7)).toBe(false)
     }
   })
+  it('под знаком теряется не больше 10% тёмных модулей — коррекция H держит до 30%', () => {
+    const n = m.size
+    let dark = 0
+    let hidden = 0
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (!m.get(r, c)) continue
+        dark++
+        if (underLogo(n, r, c)) hidden++
+      }
+    }
+    expect(hidden / dark).toBeLessThan(0.1)
+    expect(hidden).toBeGreaterThan(0)
+  })
+
   it('стиль из запроса', () => {
     expect([qrStyleOf('bw'), qrStyleOf('x'), qrStyleOf(undefined)]).toEqual(['bw', 'iris', 'iris'])
   })

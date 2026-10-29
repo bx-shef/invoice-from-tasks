@@ -35,6 +35,7 @@ export function underLogo(n: number, r: number, c: number): boolean {
   return c >= c0 - 0.6 && c <= c0 + cs + 0.6 && r >= c0 - 0.6 && r <= c0 + cs + 0.6
 }
 
+/** SVG кода: модули, «глазки», плитка со знаком; размер задаёт потребитель (viewBox в модулях). */
 export function qrSvg(m: QrMatrix, style: QrStyle = 'iris'): string {
   const n = m.size
   const P = QR_QUIET
@@ -51,7 +52,7 @@ export function qrSvg(m: QrMatrix, style: QrStyle = 'iris'): string {
     + `<rect x="${x + 2}" y="${y + 2}" width="3" height="3" rx="1" fill="url(#g)"/>`
   const cs = n * QR_LOGO_SHARE
   const c0 = (n - cs) / 2
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-P} ${-P} ${n + 2 * P} ${n + 2 * P}" shape-rendering="geometricPrecision">`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${(n + 2 * P) * 10}" height="${(n + 2 * P) * 10}" viewBox="${-P} ${-P} ${n + 2 * P} ${n + 2 * P}" shape-rendering="geometricPrecision">`
     + `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset=".55" stop-color="${b}"/><stop offset="1" stop-color="${c}"/></linearGradient></defs>`
     + `<rect x="${-P}" y="${-P}" width="${n + 2 * P}" height="${n + 2 * P}" rx="3" fill="#fff"/>`
     + `<g fill="url(#g)">${dots.join('')}</g>${eye(0, 0)}${eye(n - 7, 0)}${eye(0, n - 7)}`
