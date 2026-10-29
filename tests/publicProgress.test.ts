@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decisionProgress, ofWorksLabel, worksLabel } from '../app/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, waitingLabel, worksLabel } from '../app/utils/publicProgress'
 
 describe('decisionProgress', () => {
   const rows = [{ taskId: 1, sum: 100.1 }, { taskId: 2, sum: 50 }, { taskId: 1, sum: 0.2 }, { taskId: null, sum: 999 }, { taskId: 3, sum: null }]
@@ -24,5 +24,14 @@ describe('worksLabel', () => {
 describe('ofWorksLabel', () => {
   it.each([[1, '1 работы'], [2, '2 работ'], [5, '5 работ'], [11, '11 работ'], [21, '21 работы']])('%i', (n, s) => {
     expect(ofWorksLabel(n)).toBe(s)
+  })
+})
+
+describe('waitingLabel', () => {
+  it.each([[1, '1 работа ждёт решения'], [3, '3 работы ждут решения'], [5, '5 работ ждут решения'], [21, '21 работа ждёт решения']])('%i', (n, s) => {
+    expect(waitingLabel(n)).toBe(s)
+  })
+  it('пустой список', () => {
+    expect(decisionProgress([], {}, [])).toMatchObject({ all: 0, wait: 0, decided: 0, acceptedSum: 0 })
   })
 })

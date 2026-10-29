@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { decisionProgress, ofWorksLabel, worksLabel } from '~/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, waitingLabel } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -428,7 +428,8 @@ const rowItems = computed(() => {
     </div>
     <div
       v-else
-      class="mx-auto max-w-3xl p-3 sm:p-4 pb-24 sm:pb-24 space-y-4 text-base"
+      class="mx-auto max-w-3xl p-3 sm:p-4 space-y-4 text-base"
+      :class="invoice?.approval && decisions && decisionTasks.length && !invoice.approval.mark.approved ? 'pb-60 sm:pb-40' : 'pb-24'"
     >
       <h1 class="sr-only">
         Документы для счёта
@@ -463,7 +464,7 @@ const rowItems = computed(() => {
             <span
               class="pub-stage"
               :class="{ 'is-wait': invoice.approval && !invoice.approval.mark.approved, 'is-ok': invoice.approval?.mark.approved }"
-            >{{ invoice.approval && !invoice.approval.mark.approved ? 'Ждёт вашего согласования' : invoice.stage }}</span>
+            >{{ invoice.approval ? (invoice.approval.mark.approved ? 'Согласовано' : 'Ждёт вашего согласования') : invoice.stage }}</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-2 text-base">
             <div
@@ -507,7 +508,10 @@ const rowItems = computed(() => {
           data-testid="public-progress"
         >
           <div class="flex flex-wrap items-baseline justify-between gap-2">
-            <div class="font-medium">
+            <div
+              class="font-medium"
+              role="status"
+            >
               {{ invoice.approval.mark.approved ? 'Счёт согласован' : `Решено ${progress.decided} из ${ofWorksLabel(progress.all)}` }}
             </div>
             <div class="text-sm">
@@ -516,6 +520,7 @@ const rowItems = computed(() => {
             </div>
           </div>
           <div
+            v-if="!invoice.approval.mark.approved"
             class="pub-bar"
             role="img"
             :aria-label="`Делаем ${progress.yes}, не делаем ${progress.no}, позже ${progress.later}, ждёт ${progress.wait}`"
@@ -533,7 +538,10 @@ const rowItems = computed(() => {
               :style="{ width: `${100 * progress.later / progress.all}%` }"
             />
           </div>
-          <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <div
+            v-if="!invoice.approval.mark.approved"
+            class="flex flex-wrap items-center justify-between gap-2 text-sm"
+          >
             <div class="flex flex-wrap gap-x-4 gap-y-1 opacity-85">
               <span><i class="pub-dot is-yes" />Делаем {{ progress.yes }}</span>
               <span><i class="pub-dot is-no" />Не делаем {{ progress.no }}</span>
@@ -932,10 +940,12 @@ const rowItems = computed(() => {
     <div
       v-if="invoice?.approval && decisions && decisionTasks.length && !invoice.approval.mark.approved && !openRows.size"
       class="pub-sticky"
+      role="region"
+      aria-label="Решения по работам"
       data-testid="public-decisions"
     >
       <span class="text-sm">
-        <b>{{ progress.wait ? `${worksLabel(progress.wait)} ждёт решения` : 'Все работы решены' }}</b>
+        <b>{{ progress.wait ? waitingLabel(progress.wait) : 'Все работы решены' }}</b>
         <span class="opacity-65"> · решения сохраняются сразу</span>
       </span>
       <span class="flex gap-2 ms-auto">
@@ -1145,20 +1155,12 @@ const rowItems = computed(() => {
   white-space: nowrap;
 }
 .pub-stage.is-wait {
-  background: #FFF4D6;
-  color: #7A5300;
+  background: var(--tai-warning-bg);
+  color: var(--tai-warning);
 }
 .pub-stage.is-ok {
-  background: #E3F6E8;
-  color: #16683A;
-}
-.dark .pub-stage.is-wait {
-  background: #3A2F12;
-  color: #F5D27A;
-}
-.dark .pub-stage.is-ok {
-  background: #16301F;
-  color: #8EE0A8;
+  background: var(--tai-success-bg);
+  color: var(--tai-success);
 }
 .pub-bar {
   display: flex;
@@ -1170,13 +1172,13 @@ const rowItems = computed(() => {
 .pub-bar span {
   transition: width .25s;
 }
-.is-yes {
+.pub-bar .is-yes, .pub-dot.is-yes {
   --c: var(--ui-color-accent-main-success, #1f8a4c);
 }
-.is-no {
+.pub-bar .is-no, .pub-dot.is-no {
   --c: #8E8E99;
 }
-.is-later {
+.pub-bar .is-later, .pub-dot.is-later {
   --c: var(--ui-color-copilot-accent-primary, #6E5BFF);
 }
 .pub-bar span, .pub-dot {

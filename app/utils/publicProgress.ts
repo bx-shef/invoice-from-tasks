@@ -43,3 +43,8 @@ export function worksLabel(n: number): string {
 export function ofWorksLabel(n: number): string {
   return `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'работы' : 'работ'}`
 }
+
+/** «1 работа ждёт решения», «3 работы ждут решения». */
+export function waitingLabel(n: number): string {
+  return `${worksLabel(n)} ${n % 10 === 1 && n % 100 !== 11 ? 'ждёт' : 'ждут'} решения`
+}
