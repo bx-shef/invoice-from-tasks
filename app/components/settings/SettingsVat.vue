@@ -23,7 +23,7 @@ const HELP_URL = 'https://helpdesk.bitrix24.ru/open/15987420/'
 const companiesKnown = ref(false)
 
 onMounted(async () => {
-  // Ставки и реквизиты — независимо: сбой одного не прячет другое. Без ставок портала вкладка
+  // Ставки и реквизиты — независимо: сбой одного не прячет другое. Без ставок портала раздел
   // работает на «Без НДС» и сохранённых ставках.
   const vats = catalog.vatRates().then((list) => {
     portalVats.value = list

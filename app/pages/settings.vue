@@ -3,6 +3,7 @@
 // остальные сотрудники — объяснение, к кому обратиться. Права ещё раз проверяет сервер.
 import { parseSettings, settingsProblems, type AppSettings } from '#shared/domain/settings'
 import { formatUsage } from '#shared/domain/storageBudget'
+import { SETTINGS_GROUPS, effectiveSection, settingsGroupsFor, type SettingsSection } from '~/utils/settingsNav'
 
 const b24 = useB24()
 const app = useAppSettings()
@@ -12,25 +13,11 @@ const draft = ref<AppSettings | null>(null)
 const loadError = ref('')
 const saving = ref(false)
 
-/**
- * Разделы — боковым меню из 4 групп (дизайн v2, раздел 4): Расчёт · Клиент · ИИ · Система; на узком
- * экране — прокручиваемая лента. Разделы не размонтируются (v-show): черновик и поля живут.
- */
-type Section = 'general' | 'rates' | 'markup' | 'vat' | 'clientFields' | 'publicPage' | 'prompts' | 'access' | 'storage'
-const GROUPS: ReadonlyArray<{ title: string, items: ReadonlyArray<{ value: Section, label: string }> }> = [
-  { title: 'Расчёт', items: [{ value: 'general', label: 'Общие' }, { value: 'rates', label: 'Ставки' }, { value: 'markup', label: 'Наценки' }, { value: 'vat', label: 'НДС' }] },
-  { title: 'Клиент', items: [{ value: 'clientFields', label: 'Поля клиента' }, { value: 'publicPage', label: 'Публичная страница' }] },
-  { title: 'ИИ', items: [{ value: 'prompts', label: 'Промпты' }] },
-  { title: 'Система', items: [{ value: 'access', label: 'Доступ' }, { value: 'storage', label: 'Хранилище' }] }
-]
-const groups = computed(() => app.isAdmin.value
-  ? GROUPS
-  : GROUPS.map(g => ({ ...g, items: g.items.filter(i => i.value === 'rates') })).filter(g => g.items.length))
-const section = ref<Section>('general')
-watchEffect(() => {
-  if (!app.isAdmin.value && app.loaded.value) section.value = 'rates'
-})
-const sectionTitle = computed(() => GROUPS.flatMap(g => g.items).find(i => i.value === section.value)?.label ?? '')
+/** Разделы скрываются v-show (черновик живёт); админские не монтируются у редактора ставок. */
+const groups = computed(() => settingsGroupsFor(app.isAdmin.value))
+const selected = ref<SettingsSection>('general')
+const section = computed(() => effectiveSection(selected.value, app.isAdmin.value))
+const sectionTitle = computed(() => SETTINGS_GROUPS.flatMap(g => g.items).find(i => i.value === section.value)?.label ?? '')
 
 const usage = computed(() => (draft.value ? app.usageWith({ settings: draft.value }) : null))
 const problems = computed(() => (draft.value ? settingsProblems(draft.value) : []))
@@ -100,7 +87,10 @@ async function save() {
                 v-for="g in groups"
                 :key="g.title"
               >
-                <div class="settings-nav-group">
+                <div
+                  class="settings-nav-group"
+                  role="presentation"
+                >
                   {{ g.title }}
                 </div>
                 <button
@@ -109,18 +99,25 @@ async function save() {
                   type="button"
                   class="settings-nav-item"
                   :class="{ 'is-active': section === i.value }"
-                  :aria-current="section === i.value ? 'page' : undefined"
-                  @click="section = i.value"
+                  :aria-pressed="section === i.value"
+                  @click="selected = i.value"
                 >
                   {{ i.label }}
                 </button>
               </template>
             </nav>
-            <section class="settings-panel">
-              <h2 class="text-base font-semibold mb-3">
+            <section
+              class="settings-panel"
+              aria-labelledby="settings-section-title"
+            >
+              <h2
+                id="settings-section-title"
+                class="text-base font-semibold mb-3"
+              >
                 {{ sectionTitle }}
               </h2>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'general'"
                 data-testid="settings-section-general"
               >
@@ -135,6 +132,7 @@ async function save() {
                 <SettingsRates />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'markup'"
                 data-testid="settings-section-markup"
               >
@@ -143,6 +141,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'vat'"
                 data-testid="settings-section-vat"
               >
@@ -151,6 +150,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'clientFields'"
                 data-testid="settings-section-clientFields"
               >
@@ -159,6 +159,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'publicPage'"
                 data-testid="settings-section-publicPage"
               >
@@ -167,6 +168,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'prompts'"
                 data-testid="settings-section-prompts"
               >
@@ -175,6 +177,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'access'"
                 data-testid="settings-section-access"
               >
@@ -183,6 +186,7 @@ async function save() {
                 />
               </div>
               <div
+                v-if="app.isAdmin.value"
                 v-show="section === 'storage'"
                 data-testid="settings-section-storage"
               >
@@ -210,7 +214,7 @@ async function save() {
               :class="usage.fits ? 'opacity-70' : 'text-(--ui-color-accent-main-alert)'"
             >
               Место: {{ formatUsage(usage) }}<template v-if="!usage.fits">
-                — не влезает: сократите промпты или замерьте предел (вкладка «Хранилище»)
+                — не влезает: сократите промпты или замерьте предел (раздела «Хранилище»)
               </template>
             </span>
           </div>
@@ -229,7 +233,7 @@ async function save() {
   </InPortalGate>
 </template>
 
-<style>
+<style scoped>
 .settings-layout {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -263,6 +267,10 @@ async function save() {
   border-radius: 10px;
   color: var(--tai-text);
 }
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--tai-accent);
+  outline-offset: 1px;
+}
 .settings-nav-item:hover {
   background: var(--tai-surface-2);
 }
@@ -288,6 +296,10 @@ async function save() {
     flex-direction: row;
     overflow-x: auto;
     white-space: nowrap;
+  }
+  .settings-nav-item {
+    flex-shrink: 0;
+    min-height: 40px;
   }
   .settings-nav-group {
     display: none;

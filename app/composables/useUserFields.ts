@@ -1,6 +1,6 @@
-// Пользовательские поля для вкладки «Поля клиента»: списки UF задач, компаний, контактов и счёта и
+// Пользовательские поля для раздела «Поля клиента»: списки UF задач, компаний, контактов и счёта и
 // создание полей приложения кнопкой (#34). Параметры — app/utils/userFieldRequests.ts, разбор —
-// shared/domain/userFields.ts. Создавать UF может только администратор — вкладка только для него.
+// shared/domain/userFields.ts. Создавать UF может только администратор — раздел только для него.
 
 import { fieldNames, missingAppFields, parseUserFields, unlabeledFieldIds, withFieldLabels, type AppFieldSpec, type UserFieldOption } from '#shared/domain/userFields'
 import { fieldTypeCalls, registeredTypeIds } from '#shared/domain/appFieldTypes'

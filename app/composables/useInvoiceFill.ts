@@ -281,7 +281,7 @@ export function useInvoiceFill() {
    */
   async function setWorkCost(taskId: number, value: number | null): Promise<void> {
     const field = settings.value.taskFields.workCost
-    if (!field) throw new Error('В настройках не выбрано поле «Стоимость работ» (вкладка «Поля клиента»)')
+    if (!field) throw new Error('В настройках не выбрано поле «Стоимость работ» (раздел «Поля клиента»)')
     if (value !== null && (!Number.isFinite(value) || value < 0)) throw new Error('Сумма — неотрицательное число')
     await b24.call('tasks.task.update', { taskId, fields: { [field]: value === null ? '' : value } })
     tasks.value = tasks.value.map(t => (t.id === taskId ? { ...t, workCost: value } : t))
