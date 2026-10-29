@@ -8,8 +8,8 @@ useSeoMeta({
 </script>
 
 <template>
-  <!-- Вне портала (дизайн v2): только левая часть главной — что это и где взять -->
   <main class="min-h-dvh p-4 sm:p-8 flex items-center justify-center">
+    <!-- Вне портала (дизайн v2): только левая часть главной — что это и где взять -->
     <section class="idx-hero max-w-2xl w-full space-y-4">
       <span class="idx-chip">Приложение для Битрикс24</span>
       <h1 class="text-3xl font-semibold">

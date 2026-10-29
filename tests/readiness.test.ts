@@ -26,4 +26,14 @@ describe('readiness', () => {
     expect(r.find(i => i.key === 'publicPage')).toMatchObject({ ok: true, text: 'Публичная страница: 2 стадии, есть согласование' })
     expect(r.find(i => i.key === 'access')!.text).toBe('Ставки меняют ещё 1 сотрудник кроме админов')
   })
+  it('НДС задан и поле клиента выбрано', () => {
+    const s = { ...base, vat: [{ companyId: 1, rate: 20 }] as typeof base.vat, clientFields: { task: 'UF_X', taskDomain: '' } }
+    const r = readiness(s, [])
+    expect(r.find(i => i.key === 'vat')).toMatchObject({ ok: true, text: 'НДС задан (реквизитов вашей компании: 1)' })
+    expect(r.find(i => i.key === 'clientFields')).toMatchObject({ ok: true, required: false })
+  })
+  it.each([[5, '5 сотрудников'], [11, '11 сотрудников'], [21, '21 сотрудник'], [3, '3 сотрудника']])('склонение: %i', (n, w) => {
+    const r = readiness({ ...base, currency: 'BYN' }, Array.from({ length: n }, (_, i) => ({ userId: i + 1 })))
+    expect(r[0]!.text).toBe(`Ставки: ${w} · BYN`)
+  })
 })

@@ -14,6 +14,10 @@ const problems = computed(() => settingsProblems(app.settings.value))
 const ready = computed(() => readiness(app.settings.value, app.rates.value))
 const readyCount = computed(() => ready.value.filter(i => i.ok).length)
 const canSettings = computed(() => app.isAdmin.value || app.mayEditRates.value)
+// Строковое имя в :is Nuxt не резолвит — берём компонент явно
+const NuxtLinkComponent = resolveComponent('NuxtLink')
+/** Пункт ведёт в раздел, только если его можно открыть: редактору ставок — лишь «Ставки». */
+const linkable = (section: string) => app.isAdmin.value || (app.mayEditRates.value && section === 'rates')
 const loadError = ref('')
 const serverIssues = ref<ServerProblem[]>([])
 const appCode = ref('')
@@ -79,7 +83,18 @@ onMounted(async () => {
           </div>
         </div>
         <div
-          v-if="app.loaded.value && !loadError"
+          v-if="!app.loaded.value && !loadError"
+          class="space-y-2"
+          aria-busy="true"
+        >
+          <B24Skeleton
+            v-for="n in 5"
+            :key="n"
+            class="h-10 w-full"
+          />
+        </div>
+        <div
+          v-else-if="app.loaded.value && !loadError"
           class="space-y-2"
           data-testid="app-readiness"
         >
@@ -87,17 +102,17 @@ onMounted(async () => {
             Готовность портала · {{ readyCount }} из {{ ready.length }}
           </div>
           <component
-            :is="canSettings ? 'NuxtLink' : 'div'"
+            :is="linkable(i.section) ? NuxtLinkComponent : 'div'"
             v-for="i in ready"
             :key="i.key"
-            :to="canSettings ? `/settings?section=${i.section}` : undefined"
+            :to="linkable(i.section) ? `/settings?section=${i.section}` : undefined"
             class="home-check"
-            :class="{ 'is-warn': !i.ok, 'is-link': canSettings }"
+            :class="{ 'is-warn': !i.ok && i.required, 'is-off': !i.ok && !i.required, 'is-link': linkable(i.section) }"
           >
             <span
               class="home-check-icon"
               aria-hidden="true"
-            >{{ i.ok ? '✓' : '!' }}</span>
+            >{{ i.ok ? '✓' : i.required ? '!' : '–' }}</span>
             <span class="flex-1">{{ i.text }}</span>
             <span
               v-if="!i.ok && i.required"
@@ -263,6 +278,10 @@ onMounted(async () => {
 .home-check.is-warn .home-check-icon {
   background: var(--tai-warning-bg);
   color: var(--tai-warning);
+}
+.home-check.is-off .home-check-icon {
+  background: var(--tai-surface-2);
+  color: var(--tai-text-3);
 }
 .home-card {
   padding: 16px;
