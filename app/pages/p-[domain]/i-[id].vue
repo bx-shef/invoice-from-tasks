@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { decisionProgress, ofWorksLabel, waitingLabel } from '~/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -234,13 +234,10 @@ function decide(map: Record<number, DecisionInput>) {
     }
   })
 }
-/** Подсветка строки по решению: разрешено — зелёная полоса и фон, не делаем — бледно, отложено — фиолетовая полоса. */
-function decisionClass(taskId: number | undefined): string {
+/** Полоса слева по решению (дизайн v2): делаем — зелёная, не делаем — серая, позже — фиолетовая. */
+function rowDecisionClass(taskId: number | undefined): string {
   const d = taskId ? decisions.value?.[taskId] : undefined
-  if (d === 'yes') return 'border-l-4 border-l-(--ui-color-accent-main-success) bg-(--ui-color-accent-soft-green-3) -ml-3 pl-2 rounded-l'
-  if (d === 'no') return 'opacity-70'
-  if (d === 'later') return 'border-l-4 border-l-(--ui-color-copilot-accent-primary) -ml-3 pl-2 rounded-l'
-  return ''
+  return d ? `is-${d}` : ''
 }
 /** «Отложить»: окно выбора срока по задаче (владелец 2026-10-25). */
 const postponeTask = ref<number | null>(null)
@@ -272,19 +269,12 @@ function dateTime(value: string): string {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
 }
 
-/** Раскрытые строки «Работ»: подробности задачи по нажатию на строку. */
+/** Раскрытые строки «Работ» (дизайн v2): подробности — в самой строке, без окна и размытия. */
 const openRows = ref(new Set<string>())
-/**
- * Раскрытие — одна строка за раз, к началу экрана, остальное под размытием (владелец 2026-10-25:
- * «подробности теряются»). Повторное нажатие или клик по фону — закрыть.
- */
 function toggleRow(value: string) {
-  const opening = !openRows.value.has(value)
-  openRows.value = opening ? new Set([value]) : new Set()
-  if (opening) void nextTick(() => document.getElementById(`row-${value}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-}
-function closeRows() {
-  openRows.value = new Set()
+  const next = new Set(openRows.value)
+  if (!next.delete(value)) next.add(value)
+  openRows.value = next
 }
 
 const tasksById = computed(() => new Map((invoice.value?.tasks ?? []).map(t => [t.id, t])))
@@ -302,11 +292,6 @@ function toggleResult(id: number) {
   const next = new Set(fullResult.value)
   if (!next.delete(id)) next.add(id)
   fullResult.value = next
-}
-
-/** Строка счёта без приставки «[87-119884] » — для счётчика решений; в «Работах» название как в счёте (владелец 2026-10-25). */
-function rowTitle(name: string): string {
-  return name.replace(/^\[[^\]]*\]\s*/, '') || name
 }
 
 /** Результаты задачи: сначала клиента (его задача — то, что он ставил), затем наши; без дублей. */
@@ -650,7 +635,7 @@ const rowItems = computed(() => {
           <div class="text-sm uppercase opacity-75">
             Работы
           </div>
-          <!-- Строка — чтобы вспомнить: №, что за задача, состояние, дата, цена. Подробности — по раскрытию. -->
+          <!-- Строка — чтобы вспомнить: №, что за задача, код, дата, цена. Подробности — «Подробнее» в самой строке. -->
           <!-- Решения по работе — прямо в её строке (владелец 2026-10-25: два списка рядом — странно) -->
           <div
             class="hd-card px-3"
@@ -660,102 +645,101 @@ const rowItems = computed(() => {
               v-for="item in rowItems"
               :id="`row-${item.value}`"
               :key="item.value"
-              class="border-b last:border-b-0 border-(--ui-color-design-plain-content-divider) scroll-mt-3"
-              :class="[openRows.has(item.value) ? 'relative z-40 -mx-3 px-3 rounded-xl bg-(--ui-color-bg-content-primary) shadow-2xl ring-2 ring-(--ui-color-accent-main-primary)' : '', decisionClass(item.task?.id)]"
+              class="pub-row"
+              :class="rowDecisionClass(item.task?.id)"
               :data-decision="item.task ? decisions?.[item.task.id] : undefined"
             >
-              <!-- Строка: название раскрывает подробности; цена и решения — рядом, видны и в свёрнутом виде -->
-              <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 py-3">
-                <button
-                  type="button"
-                  class="grid basis-full sm:basis-auto flex-1 min-w-0 grid-cols-[1.5rem_1fr_auto] items-center gap-3 text-left disabled:cursor-default"
-                  :disabled="item.disabled"
-                  :aria-expanded="openRows.has(item.value)"
-                  data-testid="public-row"
-                  @click="toggleRow(item.value)"
-                >
-                  <span class="text-base opacity-75 tabular-nums">{{ item.n }}</span>
-                  <span class="min-w-0">
-                    <span
-                      class="block text-lg font-medium leading-snug"
-                      :class="{ 'line-through opacity-60': item.task && decisions?.[item.task.id] === 'no' }"
-                    >{{ item.row.name }}</span>
-                    <span class="flex flex-wrap items-center gap-2 text-sm opacity-80 mt-0.5">
-                      <B24Badge
-                        v-if="item.state"
-                        :color="item.done ? 'air-primary-success' : 'air-secondary'"
-                        size="md"
-                        :label="item.state"
-                      />
-                      <span v-if="item.date">{{ date(item.date) }}</span>
-                      <B24Badge
-                        v-if="item.task && decisions?.[item.task.id]"
-                        :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-primary-copilot'"
-                        size="md"
-                        :label="decisions[item.task.id] === 'yes' ? '✓ разрешено к выполнению' : decisions[item.task.id] === 'no' ? 'не делаем' : 'отложено'"
-                        data-testid="public-decision-badge"
-                      />
-                    </span>
-                  </span>
+              <!-- Строка v2: №, название во всю ширину, код и дата мелко, сумма справа; решение — один переключатель -->
+              <div class="grid grid-cols-[1.5rem_1fr_auto] gap-x-3 gap-y-1 py-3">
+                <span class="text-sm opacity-60 tabular-nums pt-0.5">{{ item.n }}</span>
+                <span class="min-w-0">
                   <span
-                    v-if="!item.disabled"
-                    class="opacity-60 transition-transform"
-                    :class="{ 'rotate-180': openRows.has(item.value) }"
-                    aria-hidden="true"
-                  >⌄</span>
-                </button>
+                    :id="`row-name-${item.value}`"
+                    class="block text-base font-medium leading-snug pub-row-name [overflow-wrap:anywhere]"
+                    data-testid="public-row-name"
+                  >{{ rowTitle(item.row.name) }}</span>
+                  <span class="block text-xs opacity-65 mt-0.5 [overflow-wrap:anywhere]">
+                    {{ [rowCode(item.row.name), item.done ? '' : item.state, item.date ? date(item.date) : ''].filter(Boolean).join(' · ') }}
+                  </span>
+                </span>
+                <!-- Телефон: сумма под названием, чтобы длинная сумма не сжимала его в ноль -->
                 <span
                   v-if="item.row.sum !== null"
-                  class="whitespace-nowrap text-lg font-semibold tabular-nums pl-9 sm:pl-0"
+                  class="whitespace-nowrap font-semibold tabular-nums pub-row-sum max-sm:col-start-2 max-sm:row-start-2"
                 >{{ money(item.row.sum, invoice.currencyId) }}</span>
                 <span
                   v-else
-                  class="whitespace-nowrap text-sm opacity-75 pl-9 sm:pl-0"
+                  class="whitespace-nowrap text-sm opacity-65 max-sm:col-start-2 max-sm:row-start-2"
                 >без строки</span>
-                <!-- Телефон: «Подтверждаю / Не делаем» в ряд, «Отложить» под ними; компьютер — всё рядом с ценой -->
+
                 <div
-                  v-if="decisions && item.task"
-                  class="grid grid-cols-2 w-full sm:flex sm:w-auto gap-2 shrink-0"
+                  v-if="(decisions && item.task) || item.done || !item.disabled"
+                  class="col-start-2 col-span-2 flex flex-wrap items-center gap-2 pt-1"
                 >
-                  <B24Button
-                    :color="decisions[item.task.id] === 'yes' ? 'air-primary-success' : 'air-secondary-accent-1'"
-                    size="md"
-                    :label="decisions[item.task.id] === 'yes' ? '✓ Подтверждено' : 'Подтверждаю'"
-                    class="justify-center"
-                    :aria-pressed="decisions[item.task.id] === 'yes'"
-                    data-testid="public-decide-yes"
-                    @click="decide({ [item.task.id]: 'yes' })"
-                  />
-                  <B24Button
-                    :color="decisions[item.task.id] === 'no' ? 'air-primary-alert' : 'air-secondary-alert'"
-                    size="md"
-                    :label="decisions[item.task.id] === 'no' ? '✕ Не делаем' : 'Не делаем'"
-                    class="justify-center"
-                    :aria-pressed="decisions[item.task.id] === 'no'"
-                    data-testid="public-decide-no"
-                    @click="decide({ [item.task.id]: 'no' })"
-                  />
-                  <B24Button
-                    :color="decisions[item.task.id] === 'later' ? 'air-primary-copilot' : 'air-tertiary'"
-                    size="md"
-                    :label="decisions[item.task.id] === 'later' ? `⏸ До ${invoice.approval?.postponed?.[item.task.id] ? date(invoice.approval.postponed[item.task.id]!) : '…'}` : 'Отложить'"
-                    class="justify-center col-span-2"
-                    :aria-pressed="decisions[item.task.id] === 'later'"
-                    title="Решение по работе не сейчас"
-                    data-testid="public-decide-later"
-                    @click="postponeTask = item.task.id"
-                  />
+                  <div
+                    v-if="decisions && item.task"
+                    class="pub-seg"
+                    role="group"
+                    :aria-labelledby="`row-name-${item.value}`"
+                  >
+                    <button
+                      type="button"
+                      class="is-yes"
+                      :aria-pressed="decisions[item.task.id] === 'yes'"
+                      data-testid="public-decide-yes"
+                      @click="decide({ [item.task.id]: 'yes' })"
+                    >
+                      ✓ Делаем
+                    </button>
+                    <button
+                      type="button"
+                      class="is-no"
+                      :aria-pressed="decisions[item.task.id] === 'no'"
+                      data-testid="public-decide-no"
+                      @click="decide({ [item.task.id]: 'no' })"
+                    >
+                      ✕ Не делаем
+                    </button>
+                    <button
+                      type="button"
+                      class="is-later"
+                      :aria-pressed="decisions[item.task.id] === 'later'"
+                      title="Решение по работе не сейчас"
+                      aria-haspopup="dialog"
+                      data-testid="public-decide-later"
+                      @click="postponeTask = item.task.id"
+                    >
+                      {{ decisions[item.task.id] === 'later' && invoice.approval?.postponed?.[item.task.id] ? `До ${date(invoice.approval.postponed[item.task.id]!)}` : 'Позже' }}
+                    </button>
+                  </div>
+                  <!-- Решение видно по нажатой кнопке; пилюля — только «принята» исполнителем (другой смысл, свой цвет) -->
+                  <span
+                    v-if="item.done"
+                    class="pub-pill is-done"
+                  >принята</span>
+                  <button
+                    v-if="!item.disabled"
+                    type="button"
+                    class="ms-auto text-sm text-(--tai-accent) hover:underline px-2 py-2"
+                    :aria-expanded="openRows.has(item.value)"
+                    :aria-controls="`row-details-${item.value}`"
+                    data-testid="public-row"
+                    @click="toggleRow(item.value)"
+                  >
+                    {{ openRows.has(item.value) ? 'Скрыть' : 'Подробнее' }}
+                  </button>
                 </div>
               </div>
               <template v-if="openRows.has(item.value)">
-                <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
+                <!-- Подробности в строке (v2): результат зелёной чертой, задача, постановщик, что сделать -->
                 <div
                   v-if="item.task"
-                  class="space-y-3 text-base pb-3"
+                  :id="`row-details-${item.value}`"
+                  class="pub-details space-y-3 text-base mb-3 sm:ml-9"
                 >
                   <div
                     v-if="lastResult(item.task)"
-                    class="pub-result p-4 space-y-2"
+                    class="pub-result space-y-2"
                     data-testid="public-task"
                   >
                     <div class="flex items-center gap-2 text-lg font-semibold">
@@ -798,7 +782,7 @@ const rowItems = computed(() => {
                   />
 
                   <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
-                  <div class="pub-tile p-4 space-y-3">
+                  <div class="pub-tile space-y-3">
                     <div class="flex flex-wrap gap-2">
                       <B24Button
                         v-if="item.task.clientTaskUrl"
@@ -929,16 +913,9 @@ const rowItems = computed(() => {
         </section>
       </template>
     </div>
-    <div
-      v-if="openRows.size"
-      class="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm"
-      aria-hidden="true"
-      data-testid="public-row-backdrop"
-      @click="closeRows"
-    />
     <!-- Липкая панель решений (дизайн v2): сколько ждёт и решения на всё разом -->
     <div
-      v-if="invoice?.approval && decisions && decisionTasks.length && !invoice.approval.mark.approved && !openRows.size"
+      v-if="invoice?.approval && decisions && decisionTasks.length && !invoice.approval.mark.approved"
       class="pub-sticky"
       role="region"
       aria-label="Решения по работам"
@@ -967,7 +944,7 @@ const rowItems = computed(() => {
       </span>
     </div>
     <B24Button
-      v-if="invoice?.approval && !openRows.size"
+      v-if="invoice?.approval"
       color="air-primary"
       size="lg"
       label="Замечание"
@@ -1134,15 +1111,10 @@ const rowItems = computed(() => {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
 }
 
-/* Карточки раскрытой задачи — как в мобильном Б24 */
+/* Подробности работы (дизайн v2): результат — зелёной чертой слева, без рамок */
 .pub-result {
-  border: 2px solid var(--ui-color-accent-main-primary, #2066b0);
-  border-radius: 18px;
-  background: var(--ui-color-bg-content-primary, #fff);
-}
-.pub-tile {
-  border-radius: 18px;
-  background: var(--ui-color-bg-content-secondary, #f5f7f8);
+  border-left: 3px solid var(--ui-color-accent-main-success, #1f8a4c);
+  padding: 2px 0 2px 12px;
 }
 
 /* Шапка, прогресс и липкая панель решений (дизайн v2) */
@@ -1207,6 +1179,85 @@ const rowItems = computed(() => {
   border: 1px solid var(--tai-border);
   background: var(--tai-surface);
   box-shadow: 0 10px 30px rgb(30 20 90 / 0.12);
+}
+
+/* Строки «Работ» (дизайн v2) */
+.pub-row {
+  border-bottom: 1px solid var(--tai-border);
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-left: 3px solid transparent;
+}
+.pub-row:last-child {
+  border-bottom: 0;
+}
+.pub-row.is-yes {
+  border-left-color: var(--ui-color-accent-main-success, #1f8a4c);
+}
+.pub-row.is-no {
+  border-left-color: #8E8E99;
+}
+.pub-row.is-later {
+  border-left-color: var(--ui-color-copilot-accent-primary, #6E5BFF);
+}
+.pub-row.is-no .pub-row-name {
+  opacity: .6;
+}
+.pub-row.is-no .pub-row-sum {
+  text-decoration: line-through;
+  opacity: .55;
+}
+.pub-seg {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pub-seg button {
+  min-height: 40px;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--tai-border);
+  background: var(--tai-surface);
+  font-size: 14px;
+  color: var(--tai-text);
+}
+.pub-seg button:hover {
+  background: var(--tai-surface-2);
+}
+.pub-seg button:focus-visible {
+  outline: 2px solid var(--tai-accent);
+  outline-offset: 1px;
+}
+.pub-seg button.is-yes[aria-pressed="true"] {
+  background: var(--ui-color-accent-main-success, #1f8a4c);
+  border-color: transparent;
+  color: #fff;
+}
+.pub-seg button.is-no[aria-pressed="true"] {
+  background: var(--ui-color-accent-main-alert, #c0392b);
+  border-color: transparent;
+  color: #fff;
+}
+.pub-seg button.is-later[aria-pressed="true"] {
+  background: var(--ui-color-copilot-accent-primary, #6E5BFF);
+  border-color: transparent;
+  color: #fff;
+}
+.pub-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--tai-surface-2);
+}
+.pub-pill.is-done {
+  background: var(--tai-accent-soft);
+  color: var(--tai-accent);
+}
+.pub-details {
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--tai-surface-2);
 }
 
 /* Вход (дизайн v2): светлый фон с мягким свечением (iris.css), перелив — только на главной кнопке */

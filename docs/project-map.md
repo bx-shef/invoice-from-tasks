@@ -1,6 +1,6 @@
 # Срез проекта
 
-> Last reviewed: 2026-10-25
+> Last reviewed: 2026-10-29
 
 Что сделано, что дальше, что мешает. Обновляется при каждом мерже (`docs/AGENT_RULES.md` §4.3).
 
@@ -49,7 +49,7 @@
 | QR в документах: `/qr/<портал>/<счёт>.png`, поле «QR-код расшифровки» → картинка-заглушка `{UfCrmSmartInvoiceShIftQr}` в шаблоне | 🧪 (шаблоны акта и счёт-протокола подготовлены; генерация документа на портале — ждёт подтверждения владельца) | `server/routes/qr/`, `docs/guide/90-faq.md` | да |
 | Экономика ([#47](https://github.com/bx-shef/invoice-from-tasks/pull/47)–[#53](https://github.com/bx-shef/invoice-from-tasks/pull/53)): формула против выставленного с НДС, «Стоимость работ» (фикс), оценка часов ИИ, дельта и разница % в поля задач, «Экономика счёта» (JSON, QR, согласование, полосы) | 👀 (счёт 161) | `shared/domain/economics.ts`, `estimate.ts`, `app/pages/uf/economics.vue` | да |
 | Задачи — только привязанные к счёту (источник «сделка» убран, 2026-10-09) | 👀 (счёт 161: 29 задач — портал отдаёт столько же) | `app/pages/invoice.vue` | да |
-| Решения клиента по каждой работе ([#55](https://github.com/bx-shef/invoice-from-tasks/pull/55)): «Подтверждаю / Не делаем», «Подтвердить всё / Всё не делаем»; поле счёта JSON; отказ — дело; все «да» — «Согласовано» | 👀 (после «Создать поля») | `shared/domain/decisions.ts`, `server/api/public/decide.post.ts` | да |
+| Решения клиента по каждой работе ([#55](https://github.com/bx-shef/invoice-from-tasks/pull/55)): переключатель «Делаем / Не делаем / Позже», «Подтвердить всё / Не делаем всё»; поле счёта JSON; отказ — дело; все «да» — «Согласовано» | 👀 (после «Создать поля») | `shared/domain/decisions.ts`, `server/api/public/decide.post.ts` | да |
 | ИИ — любой OpenAI-совместимый ([#59](https://github.com/bx-shef/invoice-from-tasks/pull/59), [#60](https://github.com/bx-shef/invoice-from-tasks/pull/60)): `LLM_*` важнее `BITRIXGPT_*`; подписи «ИИ»; код отказа в сообщении и журнале; ключ Вайбкода «только чтение» — подсказка | 👀 (Вайбкод, BitrixGPT 5.5) | `server/utils/llm.ts`, `aiGateway.ts` | да |
 | Меньше запросов ([#55](https://github.com/bx-shef/invoice-from-tasks/pull/55), [#61](https://github.com/bx-shef/invoice-from-tasks/pull/61)): настройки, записи времени и результаты задач — пакетами; таймаут портала 60 с, `/api` 150 с | 👀 | `useB24.ts`, `useInvoiceFill.ts`, `app/config/b24.ts` | да |
 | Справка и ИИ-чат ([#48](https://github.com/bx-shef/invoice-from-tasks/pull/48)–[#54](https://github.com/bx-shef/invoice-from-tasks/pull/54)): docs/guide на сайте как skills-site — главная с плитками, FAQ раскрывашками, поиск BM25, чат потоком, «Что это значит?» слайдером | 👀 | `app/pages/help.vue`, `shared/domain/kb.ts`, `kbStream.ts` | да |

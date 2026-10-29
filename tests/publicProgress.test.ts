@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decisionProgress, ofWorksLabel, waitingLabel, worksLabel } from '../app/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, worksLabel } from '../app/utils/publicProgress'
 
 describe('decisionProgress', () => {
   const rows = [{ taskId: 1, sum: 100.1 }, { taskId: 2, sum: 50 }, { taskId: 1, sum: 0.2 }, { taskId: null, sum: 999 }, { taskId: 3, sum: null }]
@@ -33,5 +33,19 @@ describe('waitingLabel', () => {
   })
   it('пустой список', () => {
     expect(decisionProgress([], {}, [])).toMatchObject({ all: 0, wait: 0, decided: 0, acceptedSum: 0 })
+  })
+})
+
+describe('rowCode / rowTitle', () => {
+  it('разбирает приставку', () => {
+    expect(rowCode('[87-119884] Импорт')).toBe('87-119884')
+    expect(rowTitle('[87-119884] Импорт')).toBe('Импорт')
+  })
+  it('без приставки', () => {
+    expect(rowCode('Импорт [x]')).toBe('')
+    expect(rowTitle('Импорт [x]')).toBe('Импорт [x]')
+  })
+  it('только приставка — название не пустеет', () => {
+    expect(rowTitle('[1-2]')).toBe('[1-2]')
   })
 })
