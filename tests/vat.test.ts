@@ -220,3 +220,18 @@ describe('разбор ответов портала', () => {
     expect(parseMyCompanies(null)).toEqual([])
   })
 })
+
+describe('фикс-строки: итог от цены с налогом', () => {
+  it('700 + 600 + 600 + 100 с НДС 20% — ровно 2000, а не 1999,99', () => {
+    const rows = [700, 600, 600, 100].map(g => ({ price: Math.round(g / 1.2 * 100) / 100, quantity: 1, taxRate: 20 as const, fixedGross: g }))
+    expect(vatTotals(rows).total).toBe(2000)
+    expect(lineAmounts(rows[0]!).total).toBe(700)
+  })
+  it('смесь фикс-строк и обычных, количество больше 1: итог — сумма с налогом каждой', () => {
+    const rows = [
+      { price: 583.33, quantity: 1, taxRate: 20 as const, fixedGross: 700 },
+      { price: 170, quantity: 2.5, taxRate: 20 as const }
+    ]
+    expect(vatTotals(rows).total).toBe(700 + 510)
+  })
+})

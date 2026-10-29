@@ -292,7 +292,16 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
                 :class="[vi === variants[n]!.length - 1 ? 'pb-2' : '', vi === 0 ? 'pt-2' : 'pt-0.5', v && !v.chosen ? 'opacity-60' : '']"
               >
                 <template v-if="v">
-                  <span :class="v.chosen ? 'font-semibold' : ''">{{ v.chosen ? '▶ ' : '' }}{{ v.label }}</span>
+                  <!-- Не «▶»: в Windows символ рисуется синим эмодзи-квадратом (владелец 2026-10-29) -->
+                  <span class="inline-flex items-center gap-1.5">
+                    <B24Badge
+                      v-if="v.chosen"
+                      color="air-primary-success"
+                      size="xs"
+                      label="в счёт"
+                    />
+                    <span :class="v.chosen ? 'font-semibold' : ''">{{ v.label }}</span>
+                  </span>
                   <span class="block opacity-75">{{ v.detail }}</span>
                 </template>
                 <span
