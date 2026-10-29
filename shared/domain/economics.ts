@@ -182,3 +182,12 @@ export function flaggedLabel(n: number): string {
   const word = m10 === 1 && m100 !== 11 ? 'задача' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'задачи' : 'задач'
   return `${n} ${word} с пометками`
 }
+
+/** Плитка «Часы» окна счёта: всего часов (до сотых), задач и сколько из них оценил ИИ. */
+export function economyHours(items: readonly Pick<TaskEconomy, 'hours' | 'estimated'>[]): { total: number, tasks: number, estimated: number } {
+  return {
+    total: Math.round(items.reduce((sum, e) => sum + e.hours, 0) * 100) / 100,
+    tasks: items.length,
+    estimated: items.filter(e => e.estimated).length
+  }
+}

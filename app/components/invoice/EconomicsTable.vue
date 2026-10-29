@@ -2,7 +2,7 @@
 // Экономика задач в окне счёта (economics.ts): сводка — выставлено, по формуле, дельта; ниже —
 // задачи: часы (с пометкой «оценка ИИ»), формула, выставлено («Стоимость работ» — с пометкой),
 // дельта и разница. Суммы — с НДС, как платит клиент. Пометки — цветной полосой слева и бейджем.
-import type { TaskEconomy } from '#shared/domain/economics'
+import { economyHours, type TaskEconomy } from '#shared/domain/economics'
 import { formatMoney } from '~/utils/fillPreview'
 
 // summaryOnly — только сводка: задачи — в общей таблице предпросмотра (владелец 2026-10-25)
@@ -20,6 +20,8 @@ const totals = computed(() => {
   const delta = billed - formula
   return { formula, billed, delta, percent: formula > 0 ? Math.round(delta / formula * 1000) / 10 : null }
 })
+/** Плитка «Часы» (дизайн v2): всего часов и сколько задач оценил ИИ. */
+const hours = computed(() => economyHours(props.items))
 const flaggedCount = computed(() => props.items.filter(e => e.flag === 'loss' || e.flag === 'over').length)
 
 function pct(v: number | null): string {
@@ -50,7 +52,7 @@ function hoursText(h: number): string {
       <span class="text-xs opacity-60">суммы с НДС · пометка — отклонение больше {{ threshold }}%</span>
     </div>
 
-    <div class="grid gap-2 sm:grid-cols-3">
+    <div class="grid gap-2 grid-cols-2 sm:grid-cols-4">
       <div class="rounded-lg border border-(--ui-color-divider-less) p-3">
         <div class="text-xs opacity-60">
           Выставлено клиенту
@@ -81,6 +83,22 @@ function hoursText(h: number): string {
           :class="tone(totals.delta)"
         >
           {{ signed(totals.delta) }} <span class="text-xs font-normal">{{ pct(totals.percent) }}</span>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border border-(--ui-color-divider-less) p-3"
+        data-testid="economics-hours"
+      >
+        <div class="text-xs opacity-60">
+          Часы
+        </div>
+        <div class="text-lg font-semibold tabular-nums">
+          {{ hoursText(hours.total) }}
+        </div>
+        <div class="text-xs opacity-60">
+          задач: {{ hours.tasks }}<template v-if="hours.estimated">
+            · оценено ИИ: {{ hours.estimated }}
+          </template>
         </div>
       </div>
     </div>
