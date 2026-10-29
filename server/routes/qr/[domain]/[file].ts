@@ -4,6 +4,8 @@
 // данные счёта сервер здесь не читает, поэтому отдаём всем.
 
 import QRCode from 'qrcode'
+import sharp from 'sharp'
+import { qrStyleOf, qrSvg } from '#shared/domain/qrSvg'
 import { publicInvoiceUrl, qrInvoiceId } from '#shared/domain/invoiceLinks'
 import { isAllowedPortalHost, parseSelfHostedHosts, portalHostname } from '../../../utils/b24Host'
 
@@ -18,7 +20,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   }
   if (!siteUrl) throw createError({ statusCode: 503, statusMessage: 'SITE_URL не задан' })
-  const png = await QRCode.toBuffer(publicInvoiceUrl(siteUrl, domain, id), { type: 'png', errorCorrectionLevel: 'M', margin: 2, width: 300 })
+  // Фирменный вид (дизайн v2): коррекция H — выдерживает знак в центре; 600 px — для печати.
+  // `?style=bw` — чёрно-белый. Матрица — qrcode, рисунок — shared/domain/qrSvg, PNG — sharp.
+  const { modules } = QRCode.create(publicInvoiceUrl(siteUrl, domain, id), { errorCorrectionLevel: 'H' })
+  const svg = qrSvg({ size: modules.size, get: (r, c) => Boolean(modules.get(r, c)) }, qrStyleOf(getQuery(event).style))
+  const png = await sharp(Buffer.from(svg)).resize(600, 600).png().toBuffer()
   setResponseHeader(event, 'Content-Type', 'image/png')
   setResponseHeader(event, 'Cache-Control', 'public, max-age=86400')
   return png
