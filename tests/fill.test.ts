@@ -107,7 +107,7 @@ describe('тип 1 — задача как строка', () => {
   it('записи со временем, но без даты — ошибка: не на что выбрать ставку', () => {
     const { rows, errors } = buildRows(input({ entries: entries.map(e => ({ ...e, date: null })) }))
     expect(rows).toEqual([])
-    expect(errors).toEqual([{ taskId: 10, message: 'у записей времени нет даты — не на что выбрать ставку' }])
+    expect(errors).toEqual([{ taskId: 10, message: 'у записей времени #7 нет даты — не на что выбрать ставку' }])
   })
 
   it('нет ставки ответственного — ошибка, строки нет', () => {
@@ -592,5 +592,26 @@ describe('тип 1 — время по людям (владелец 2026-10-29)'
     const { rows, errors } = buildRows(input({ entries: [entries[0]!, { ...entries[1]!, userId: 42 }] }))
     expect(rows).toEqual([])
     expect(errors[0]?.message).toContain('нет ставки для #42')
+  })
+})
+
+describe('время по людям — деньги и подписи', () => {
+  it('разные цены часа: в режиме «цена часа» строка — сумма × 1, без расхождения с формулой', () => {
+    const row = buildRows(input({ entries: mixedEntries, settings: settings({ priceMode: 'hour' }) })).rows[0]!
+    expect([row.price, row.quantity, row.sum, row.formulaSum]).toEqual([140, 1, 140, 140])
+  })
+  it('один участник — по-прежнему цена часа × часы', () => {
+    const row = buildRows(input({ settings: settings({ priceMode: 'hour' }) })).rows[0]!
+    expect(row.quantity).toBe(1.5)
+    expect(row.price).toBe(row.hourPrice)
+  })
+  it('«Стоимость работ»: формула — сумма участников', () => {
+    const row = buildRows(input({ entries: mixedEntries, tasks: [{ ...task, workCost: 300 }] })).rows[0]!
+    expect([row.fixedGross, row.formulaSum]).toEqual([300, 140])
+  })
+  it('запись без даты у одного участника — ошибка про него, а не про всю задачу молча', () => {
+    const { rows, errors } = buildRows(input({ entries: [entries[0]!, { ...entries[1]!, userId: 9, date: null }] }))
+    expect(rows).toEqual([])
+    expect(errors[0]?.message).toContain('#9 нет даты')
   })
 })

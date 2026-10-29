@@ -337,7 +337,6 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     if (!task.title) problems.push('у задачи нет названия')
     if (task.responsibleId === null) problems.push('у задачи нет ответственного')
     if (total === 0) problems.push('журнал времени задачи не прочитан (нет доступа к записям времени?)')
-    if (entries.some(e => !e.date)) problems.push('у записей времени нет даты — не на что выбрать ставку')
     if (problems.length || task.responsibleId === null) {
       for (const message of problems) result.errors.push({ taskId: task.id, message })
       continue
@@ -356,8 +355,13 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     const people: PersonHours[] = []
     let failed = false
     for (const g of groups.values()) {
-      const dates = [...new Set(g.entries.map(e => e.date!))].sort()
-      const lastDate = dates.at(-1)!
+      const dates = [...new Set(g.entries.map(e => e.date).filter((d): d is string => !!d))].sort()
+      const lastDate = dates.at(-1)
+      if (!lastDate) {
+        result.errors.push({ taskId: task.id, message: `у записей времени ${userLabel(input, g.userId)} нет даты — не на что выбрать ставку` })
+        failed = true
+        continue
+      }
       const rate = findRate(input.rates, g.userId, lastDate, input.clients)
       if (!rate) {
         result.errors.push({ taskId: task.id, message: `нет ставки для ${userLabel(input, g.userId)} на ${formatRuDate(lastDate)}` })
@@ -384,7 +388,7 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
     }
     const hours = secondsToHours(rounded)
     const sum = roundMoney(people.reduce((acc, p) => acc + p.sum, 0))
-    // Цена часа строки — средняя по участникам: в режиме «цена часа × часы» строка = эта цена × часы
+    // Цена часа строки — средняя по участникам (для подписи); строка — точная сумма участников
     const hourPrice = people.length === 1 ? people[0]!.hourPrice : roundMoney(sum / hours)
     const main = people.find(p => p.userId === task.responsibleId && !p.noAuthor) ?? people[0]!
     const lastDate = people.map(p => p.rateDate).sort().at(-1)!
@@ -402,15 +406,18 @@ function buildTaskRows(input: FillInput, result: FillResult): void {
       markupPercent: markup.percent,
       markupSource: markup.source,
       ...(markup.tag ? { markupTag: markup.tag } : {}),
-      ...(task.workCost !== null ? fixedPlaced(input, hourPrice, hours, task.workCost, sum) : placedSum(input, hourPrice, hours, sum)),
+      ...(task.workCost !== null ? fixedPlaced(input, hourPrice, hours, task.workCost, sum) : placedSum(input, hourPrice, hours, sum, new Set(people.map(p => p.hourPrice)).size > 1)),
       people
     })
   }
 }
 
-/** Как `placed`, но сумма задана (сумма участников): не пересчитываем её из средней цены. */
-function placedSum(input: FillInput, hourPrice: number, hours: number, sum: number): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum'> {
-  return input.settings.priceMode === 'sum'
+/**
+ * Как `placed`, но сумма задана (сумма участников). Цены часа участников разные — строка «сумма × 1»
+ * и в режиме «цена часа»: средняя цена × часы разошлась бы с суммой на копейки (находка панели).
+ */
+function placedSum(input: FillInput, hourPrice: number, hours: number, sum: number, mixed: boolean): Pick<DraftRow, 'hourPrice' | 'price' | 'quantity' | 'sum' | 'taxRate' | 'formulaSum'> {
+  return input.settings.priceMode === 'sum' || mixed
     ? { hourPrice, price: sum, quantity: 1, sum, taxRate: input.vatRate, formulaSum: sum }
     : { hourPrice, price: hourPrice, quantity: hours, sum: roundMoney(hourPrice * hours), taxRate: input.vatRate, formulaSum: sum }
 }

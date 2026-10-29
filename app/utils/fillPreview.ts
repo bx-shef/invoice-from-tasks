@@ -138,6 +138,8 @@ function markupLabel(row: DraftRow): string {
  */
 export function rateBasis(row: DraftRow, ctx: PreviewContext): string {
   const converted = ctx.convertedFrom ? ` ${ctx.convertedFrom} по курсу` : ''
+  // Несколько участников — у каждого своя ставка (см. «Время по людям»), одной ставки строки нет
+  if (row.people && new Set(row.people.map(p => p.baseRate)).size > 1) return `ставки по людям${converted} + наценка ${formatNumber(row.markupPercent)}% (${markupLabel(row)})`
   return `ставка ${formatMoney(row.baseRate)}${converted} + наценка ${formatNumber(row.markupPercent)}% (${markupLabel(row)})`
 }
 
@@ -147,7 +149,7 @@ export function rateBasis(row: DraftRow, ctx: PreviewContext): string {
  * «11,33 ч × 161,50 = 425,00» читалось как ошибка счёта (замечание владельца).
  */
 export function calcText(row: DraftRow, ctx: PreviewContext): string {
-  const who = ctx.userLabel(row.userId)
+  const who = row.people && row.people.length > 1 ? row.people.map(p => ctx.userLabel(p.userId)).join(', ') : ctx.userLabel(row.userId)
   if (row.fixedGross !== undefined) {
     const formula = row.formulaSum !== undefined ? ` · по формуле ${hoursText(row)} × ${formatMoney(row.hourPrice)} = ${formatMoney(row.formulaSum)}` : ''
     return `${who} · фикс: «Стоимость работ» ${formatMoney(row.fixedGross)} с налогом = ${formatMoney(row.sum)} без налога${formula}`
