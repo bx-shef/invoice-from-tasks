@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Ставки часа: «сотрудник — ставка — с даты», по желанию — для клиента (компании или контакта).
-// Сохраняются отдельно от прочих настроек: их меняют и назначенные не-администраторы.
-import { MAX_RATE, validateRates, type RateEntry } from '#shared/domain/rates'
+// Хранятся отдельно от прочих настроек: их меняют и назначенные не-администраторы. Кнопки своей нет —
+// сохраняет общая панель страницы через defineExpose.
+import { MAX_RATE, serializeRates, validateRates, type RateEntry } from '#shared/domain/rates'
 import { formatUsage } from '#shared/domain/storageBudget'
 
 const app = useAppSettings()
@@ -54,17 +55,26 @@ function rowIssues(index: number): string[] {
   return issues.value.filter(i => i.index === index).map(i => i.message)
 }
 
+const dirty = computed(() => serializeRates(draft.value) !== serializeRates(app.rates.value))
+/** Почему ставки сейчас не сохранить ('' — можно). */
+const blocked = computed(() => {
+  if (app.loadFailed.value) return 'настройки не загрузились'
+  if (issues.value.length) return 'в ставках ошибки'
+  if (!usage.value.fits) return 'ставки не влезают'
+  return ''
+})
+
+/** Бросает ошибку — тост показывает страница. */
 async function save() {
   saving.value = true
   try {
     await app.saveRates(draft.value)
-    toast.add({ title: 'Ставки сохранены', color: 'air-primary-success' })
-  } catch (e) {
-    toast.add({ title: 'Не удалось сохранить ставки', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
   } finally {
     saving.value = false
   }
 }
+
+defineExpose({ dirty, blocked, saving, save })
 </script>
 
 <template>
@@ -187,17 +197,6 @@ async function save() {
       >
         Место в настройках: {{ formatUsage(usage) }}<template v-if="usage.fits">, влезет ещё примерно {{ usage.rateCapacityLeft }} ставок</template><template v-else> — не влезает, удалите старые ставки</template>
       </span>
-    </div>
-
-    <div class="flex gap-2">
-      <B24Button
-        color="air-primary"
-        label="Сохранить ставки"
-        :loading="saving"
-        :disabled="saving || issues.length > 0 || !usage.fits || app.loadFailed.value"
-        data-testid="rates-save"
-        @click="save"
-      />
     </div>
   </div>
 </template>

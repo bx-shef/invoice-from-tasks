@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Настройки приложения. Администратор видит всё; назначенный редактор ставок — только ставки;
 // остальные сотрудники — объяснение, к кому обратиться. Права ещё раз проверяет сервер.
-import { parseSettings, settingsProblems, type AppSettings } from '#shared/domain/settings'
+import { parseSettings, serializeSettings, settingsProblems, type AppSettings } from '#shared/domain/settings'
 import { formatUsage } from '#shared/domain/storageBudget'
 import { SETTINGS_GROUPS, effectiveSection, settingsGroupsFor, type SettingsSection } from '~/utils/settingsNav'
 
@@ -12,6 +12,17 @@ const toast = useToast()
 const draft = ref<AppSettings | null>(null)
 const loadError = ref('')
 const saving = ref(false)
+const rates = ref<{ dirty: boolean, blocked: string, saving: boolean, save: () => Promise<void> } | null>(null)
+
+/** Что изменено и не сохранено — для общей панели. */
+const settingsDirty = computed(() => !!draft.value && serializeSettings(draft.value) !== serializeSettings(app.settings.value))
+const changed = computed(() => [settingsDirty.value && app.isAdmin.value ? 'настройки' : '', rates.value?.dirty ? 'ставки' : ''].filter(Boolean))
+const blockReason = computed(() => {
+  if (settingsDirty.value && app.isAdmin.value && !usage.value?.fits) return 'настройки не влезают'
+  if (rates.value?.dirty && rates.value.blocked) return rates.value.blocked
+  return ''
+})
+const busy = computed(() => saving.value || !!rates.value?.saving)
 
 /** Разделы скрываются v-show (черновик живёт); админские не монтируются у редактора ставок. */
 const groups = computed(() => settingsGroupsFor(app.isAdmin.value))
@@ -34,17 +45,31 @@ onMounted(async () => {
   }
 })
 
+/** Одна кнопка: сохраняет изменённое — настройки (админ) и ставки (свой запрос, свои права). */
 async function save() {
-  if (!draft.value) return
+  if (!draft.value || blockReason.value) return
   saving.value = true
+  const failed: string[] = []
   try {
-    await app.saveSettings(draft.value)
-    toast.add({ title: 'Настройки сохранены', color: 'air-primary-success' })
-  } catch (e) {
-    toast.add({ title: 'Не удалось сохранить настройки', description: e instanceof Error ? e.message : String(e), color: 'air-primary-alert' })
+    if (settingsDirty.value && app.isAdmin.value) {
+      try {
+        await app.saveSettings(draft.value)
+      } catch (e) {
+        failed.push(`настройки: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (rates.value?.dirty) {
+      try {
+        await rates.value.save()
+      } catch (e) {
+        failed.push(`ставки: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
   } finally {
     saving.value = false
   }
+  if (failed.length) toast.add({ title: 'Не всё сохранилось', description: failed.join('; '), color: 'air-primary-alert' })
+  else toast.add({ title: 'Сохранено', color: 'air-primary-success' })
 }
 </script>
 
@@ -129,7 +154,7 @@ async function save() {
                 v-show="section === 'rates'"
                 data-testid="settings-section-rates"
               >
-                <SettingsRates />
+                <SettingsRates ref="rates" />
               </div>
               <div
                 v-if="app.isAdmin.value"
@@ -195,28 +220,40 @@ async function save() {
             </section>
           </div>
 
-          <!-- Общая кнопка сохраняет всё, кроме ставок: у ставок своя кнопка и свои права. -->
+          <!-- Одна панель на всё (дизайн v2): что изменено, место, кнопка. Ставки сохраняются своим запросом. -->
           <div
-            v-if="app.isAdmin.value"
+            v-if="app.isAdmin.value || app.mayEditRates.value"
             class="fixed inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-center gap-3 border-t py-3 px-3 bg-(--air-theme-bg-color) border-(--ui-color-divider-less)"
+            data-testid="settings-savebar"
           >
-            <B24Button
-              color="air-primary"
-              label="Сохранить настройки"
-              :loading="saving"
-              :disabled="saving || !usage?.fits"
-              data-testid="settings-save"
-              @click="save"
-            />
             <span
-              v-if="usage"
+              class="text-sm"
+              :class="changed.length ? '' : 'opacity-60'"
+              data-testid="settings-changed"
+            >
+              {{ changed.length ? `Изменено: ${changed.join(', ')}` : 'Изменений нет' }}
+            </span>
+            <span
+              v-if="usage && app.isAdmin.value"
               class="text-sm"
               :class="usage.fits ? 'opacity-70' : 'text-(--ui-color-accent-main-alert)'"
             >
               Место: {{ formatUsage(usage) }}<template v-if="!usage.fits">
-                — не влезает: сократите промпты или замерьте предел (раздела «Хранилище»)
+                — не влезает: сократите промпты или замерьте предел (раздел «Хранилище»)
               </template>
             </span>
+            <span
+              v-if="blockReason"
+              class="text-sm text-(--ui-color-accent-main-alert)"
+            >{{ blockReason }}</span>
+            <B24Button
+              color="air-primary"
+              label="Сохранить"
+              :loading="busy"
+              :disabled="busy || !changed.length || !!blockReason"
+              data-testid="settings-save"
+              @click="save"
+            />
           </div>
         </template>
       </template>
