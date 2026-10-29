@@ -3,6 +3,7 @@ import type { DraftRow } from '#shared/domain/fill'
 import { vatTotals } from '#shared/domain/vat'
 import {
   alignClass,
+  rowMatches,
   rowVariants,
   driftNote,
   formatMoney,
@@ -289,5 +290,16 @@ describe('rowVariants', () => {
   it('без фикса с временем: в счёт — реальные часы, оценки нет', () => {
     const v = rowVariants(base as never, 408)
     expect(v.map(x => [x.key, x.amount, x.chosen])).toEqual([['real', 408, true], ['ai', null, false], ['fixed', null, false]])
+  })
+})
+
+describe('rowMatches', () => {
+  const row = { people: [{ noAuthor: true }] } as never
+  it('фильтры: все, с пометками, часы без автора', () => {
+    expect(rowMatches(row, null, 'all')).toBe(true)
+    expect(rowMatches(row, null, 'flagged')).toBe(false)
+    expect(rowMatches(row, 'loss', 'flagged')).toBe(true)
+    expect(rowMatches(row, null, 'noAuthor')).toBe(true)
+    expect(rowMatches({ people: [{ noAuthor: false }] } as never, null, 'noAuthor')).toBe(false)
   })
 })
