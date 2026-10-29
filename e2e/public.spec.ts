@@ -86,3 +86,22 @@ test('публичная страница: короткий код — ошиб�
   await input.fill('abcd')
   await expect(page.getByTestId('public-error')).toHaveText('')
 })
+
+test('публичная страница: прогресс решений и липкая панель', async ({ page }, info) => {
+  await page.setViewportSize({ width: 360, height: 740 })
+  const log = await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  await expect(page.getByTestId('public-progress')).toBeVisible()
+  await expect(page.getByTestId('public-decisions')).toBeVisible()
+  await page.getByTestId('public-decide-all-yes').click()
+  await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"yes"')
+  await expect(page.getByTestId('public-progress')).toContainText('Решено')
+  // Плавающая «Замечание» не наезжает на липкую панель на узком экране
+  const bar = await page.getByTestId('public-decisions').boundingBox()
+  const fab = await page.getByTestId('public-comment-fab').boundingBox()
+  expect(bar && fab && fab.y + fab.height <= bar.y).toBe(true)
+  const shot = await page.screenshot({ fullPage: false, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/progress.png` : undefined })
+  await info.attach('progress', { body: shot, contentType: 'image/png' })
+})
