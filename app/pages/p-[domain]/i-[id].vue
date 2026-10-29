@@ -391,6 +391,7 @@ const rowItems = computed(() => {
             :b24ui="{ trailing: 'pe-1' }"
             aria-label="Код доступа"
             data-testid="public-code"
+            @update:model-value="error = ''"
           >
             <template #trailing>
               <B24Button
@@ -417,6 +418,12 @@ const rowItems = computed(() => {
           :disabled="busy"
           data-testid="public-open"
         />
+        <!-- Ошибка видна под полем; здесь — озвучка скринридером при отправке -->
+        <span
+          class="sr-only"
+          aria-live="polite"
+          data-testid="public-error"
+        >{{ error }}</span>
         <p class="text-xs text-center opacity-65">
           Нет кода? Напишите менеджеру, выдавшему счёт.
         </p>
@@ -1103,5 +1110,11 @@ const rowItems = computed(() => {
 .hd-iris-button {
   background: var(--tai-iris-fill);
   border-radius: 999px;
+}
+.hd-iris-button:hover {
+  filter: brightness(1.08);
+}
+.hd-iris-button:disabled {
+  opacity: .65;
 }
 </style>
