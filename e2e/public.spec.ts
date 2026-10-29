@@ -74,3 +74,15 @@ test('публичная страница: быстрые клики подря�
   await expect(page.locator('[data-decision=yes]')).toHaveCount(2)
   await expect(page.getByTestId('public-decision-badge').first()).toContainText('разрешено')
 })
+
+test('публичная страница: короткий код — ошибка под полем и для скринридера, ввод её снимает', async ({ page }) => {
+  await mockPublicApi(page)
+  await page.goto(URL)
+  const input = page.locator('[data-testid=public-code] input, input#access-code').first()
+  await input.fill('abc')
+  await page.getByTestId('public-open').click()
+  await expect(page.getByTestId('public-error')).toHaveText('Код доступа — 10 символов')
+  await expect(page.getByText('Код доступа — 10 символов').first()).toBeVisible()
+  await input.fill('abcd')
+  await expect(page.getByTestId('public-error')).toHaveText('')
+})
