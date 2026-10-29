@@ -1,21 +1,20 @@
 <script setup lang="ts">
-// «Деньги рядом» (дизайн v2, слайдер счёта): полоски одной шкалы — по формуле (акцент), оценка ИИ
-// (бирюза, если есть) и выставлено (тёмная, итог жирным). Только рисует: суммы — из экономики.
+// «Деньги рядом» (дизайн v2, слайдер счёта): полоски одной шкалы — по формуле (акцент) и выставлено
+// (тёмная, итог жирным). Полоска «оценка ИИ» из макета — когда ИИ будет оценивать все задачи.
+// Только рисует: суммы — из экономики.
 import { formatMoney } from '~/utils/fillPreview'
 
 const props = defineProps<{
   formula: number
   billed: number
-  /** Сумма по оценке ИИ; нет — полоски нет. */
-  ai?: number | null
 }>()
 
 const bars = computed(() => {
-  const max = Math.max(props.formula, props.billed, props.ai ?? 0, 0.01)
-  const out = [{ key: 'formula', label: 'по формуле', value: props.formula, color: 'bg-(--tai-accent)' }]
-  if (props.ai !== null && props.ai !== undefined) out.push({ key: 'ai', label: 'оценка ИИ', value: props.ai, color: 'bg-[#0E7A74]' })
-  out.push({ key: 'billed', label: 'выставлено', value: props.billed, color: 'bg-(--tai-text)' })
-  return out.map(b => ({ ...b, width: Math.round(b.value / max * 100) }))
+  const max = Math.max(props.formula, props.billed, 0.01)
+  return [
+    { key: 'formula', label: 'по формуле', value: props.formula, color: 'bg-(--tai-accent)' },
+    { key: 'billed', label: 'выставлено', value: props.billed, color: 'bg-(--tai-text)' }
+  ].map(b => ({ ...b, width: Math.round(b.value / max * 100) }))
 })
 </script>
 

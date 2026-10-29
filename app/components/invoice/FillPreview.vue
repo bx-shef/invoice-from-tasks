@@ -378,6 +378,15 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
               </template>
             </tr>
           </template>
+          <tr v-if="!visible.some(Boolean)">
+            <td
+              :colspan="PREVIEW_COLUMNS.length + 3"
+              class="py-4 text-center text-sm opacity-70"
+              data-testid="fill-filter-empty"
+            >
+              Таких строк нет — выберите «Все»
+            </td>
+          </tr>
         </tbody>
         <tfoot>
           <tr

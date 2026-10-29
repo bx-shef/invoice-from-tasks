@@ -303,3 +303,11 @@ describe('rowMatches', () => {
     expect(rowMatches({ people: [{ noAuthor: false }] } as never, null, 'noAuthor')).toBe(false)
   })
 })
+
+describe('rowMatches — края', () => {
+  it('без разбивки по людям строка не попадает в «Часы без автора»; пометка «нет данных» — в «С пометками»', () => {
+    expect(rowMatches({} as never, undefined, 'noAuthor')).toBe(false)
+    expect(rowMatches({} as never, 'missing', 'flagged')).toBe(true)
+    expect(rowMatches({} as never, undefined, 'flagged')).toBe(false)
+  })
+})
