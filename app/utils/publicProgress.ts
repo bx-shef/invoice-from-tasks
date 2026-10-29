@@ -58,3 +58,14 @@ export function rowCode(name: string): string {
 export function rowTitle(name: string): string {
   return name.replace(/^\[[^\]]*\]\s*/, '') || name
 }
+
+/**
+ * Поле замечания с приставкой работы: прежняя приставка «…»: заменяется, итог не длиннее max
+ * (подстановка обходит maxlength поля — режем название, текст клиента не трогаем).
+ */
+export function withRowPrefix(text: string, title: string, max: number): string {
+  const rest = text.replace(/^«[^»]*»: /, '')
+  const room = Math.max(0, max - rest.length - 4)
+  const name = title.length > room ? `${title.slice(0, Math.max(0, room - 1))}…` : title
+  return room > 1 ? `«${name}»: ${rest}` : rest
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel } from '~/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -252,13 +252,11 @@ const thread = computed(() => [...(invoice.value?.approval?.comments ?? [])].rev
 /** «Замечание к этой работе»: поле внизу с названием работы — и фокус в него. */
 function commentOnRow(title: string) {
   commentError.value = ''
-  commentSent.value = false
-  const prefix = `«${title}»: `
-  if (!commentText.value.startsWith(prefix)) commentText.value = prefix + commentText.value
+  commentText.value = withRowPrefix(commentText.value, title, MAX_COMMENT_LENGTH)
   void nextTick(() => {
     const el = document.querySelector<HTMLTextAreaElement>('#public-comment-text textarea, textarea#public-comment-text')
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el?.focus()
+    el?.focus({ preventScroll: true })
   })
 }
 
@@ -856,6 +854,7 @@ const rowItems = computed(() => {
                       <button
                         type="button"
                         class="text-(--tai-accent) hover:underline px-2 py-1"
+                        :aria-label="`Замечание к работе «${rowTitle(item.row.name)}»`"
                         data-testid="public-row-comment"
                         @click="commentOnRow(rowTitle(item.row.name))"
                       >

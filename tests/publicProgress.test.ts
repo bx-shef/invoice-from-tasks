@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, worksLabel } from '../app/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, worksLabel } from '../app/utils/publicProgress'
 
 describe('decisionProgress', () => {
   const rows = [{ taskId: 1, sum: 100.1 }, { taskId: 2, sum: 50 }, { taskId: 1, sum: 0.2 }, { taskId: null, sum: 999 }, { taskId: 3, sum: null }]
@@ -47,5 +47,24 @@ describe('rowCode / rowTitle', () => {
   })
   it('только приставка — название не пустеет', () => {
     expect(rowTitle('[1-2]')).toBe('[1-2]')
+  })
+})
+
+describe('withRowPrefix', () => {
+  it('ставит приставку и не дублирует её', () => {
+    expect(withRowPrefix('', 'A', 100)).toBe('«A»: ')
+    expect(withRowPrefix('«A»: текст', 'A', 100)).toBe('«A»: текст')
+  })
+  it('другая работа заменяет прежнюю приставку', () => {
+    expect(withRowPrefix('«A»: текст', 'B', 100)).toBe('«B»: текст')
+  })
+  it('итог не длиннее предела: режется название, не текст', () => {
+    const r = withRowPrefix('x'.repeat(10), 'Очень длинное название работы', 20)
+    expect(r.length).toBeLessThanOrEqual(20)
+    expect(r.endsWith('x'.repeat(10))).toBe(true)
+    expect(r).toContain('…')
+  })
+  it('текст уже на пределе — без приставки', () => {
+    expect(withRowPrefix('x'.repeat(20), 'A', 20)).toBe('x'.repeat(20))
   })
 })

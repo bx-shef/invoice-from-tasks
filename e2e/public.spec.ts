@@ -138,6 +138,7 @@ test('публичная страница: замечания — перепис
   const mine = page.getByTestId('public-comment')
   await expect(mine).toHaveCount(2)
   await expect(mine.first()).toContainText('Первое')
+  await expect(mine.nth(1)).toContainText('Второе')
   await expect(page.getByText('Принято')).toBeVisible()
   await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/thread.png` : undefined })
 })
