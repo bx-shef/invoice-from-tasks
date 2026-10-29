@@ -278,6 +278,12 @@ const footerPadding = (strong: boolean, i: number) => strong ? 'py-2' : i === 0 
                       @click="emit('editCost', line.row.taskId)"
                     >{{ line.kind === 'fixed' ? 'изменить стоимость' : 'задать стоимость' }}</button>
                   </span>
+                  <InvoicePeopleHours
+                    v-if="line.row.people && line.row.people.length > 1 || line.row.people?.some(p => p.noAuthor)"
+                    :people="line.row.people!"
+                    :user-label="userLabel"
+                    class="mt-1"
+                  />
                   <span class="block text-xs opacity-60 mt-0.5">
                     <span :title="line.rateTitle">{{ line.basis }}</span> ·
                     <InvoiceTaskLink
