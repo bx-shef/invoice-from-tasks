@@ -1,0 +1,81 @@
+/* Дизайн v2 («Эстетика + перелив», «Ледяной неон», «Василёк»): токены --tai-* из архива дизайна
+   (tokens.css) и переопределение переменных b24ui ОДИН раз — в шаблонах цвета не задаём.
+   Светлая — :root/.light, тёмная — .dark (так её ставит b24ui, colorMode в app.config.ts).
+   Шрифт Inter Tight — локально (@fontsource), страница клиента открывается без портала. */
+@import "@fontsource-variable/inter-tight";
+
+:root, .light {
+  --tai-bg: #FBFAFD;
+  --tai-bg-glow:
+    radial-gradient(120% 60% at 0% 0%, rgba(236,232,255,1) 0%, rgba(236,232,255,0) 55%),
+    radial-gradient(90% 55% at 100% 30%, rgba(229,243,255,1) 0%, rgba(229,243,255,0) 60%),
+    radial-gradient(90% 50% at 30% 100%, rgba(230,255,250,1) 0%, rgba(230,255,250,0) 60%);
+  --tai-surface: #FFFFFF;
+  --tai-surface-2: #F6F5FA;
+  --tai-surface-3: #EEECF4;
+  --tai-text: #1F1F23;
+  --tai-text-2: #45454C;
+  --tai-text-3: #5E5E68;
+  --tai-accent: #4B3CD0;
+  --tai-accent-hover: #3E30B8;
+  --tai-accent-soft: #EFEDFF;
+  --tai-border: #E6E3EE;
+  --tai-success: #1E7A3C; --tai-success-bg: #E7F5EC; --tai-success-icon: #2E9150;
+  --tai-warning: #8A5300; --tai-warning-bg: #FFF3DC; --tai-warning-icon: #B87A12;
+  --tai-danger: #B42318; --tai-danger-bg: #FDECEA; --tai-danger-icon: #D23B2F;
+  --tai-info: #2A5FB0; --tai-info-bg: #EAF1FD;
+  --tai-iris: linear-gradient(90deg, #6E5BFF, #3FA9FF, #7CFFE4);
+  --tai-iris-fill: linear-gradient(135deg, #4B3CD0 0%, #1F6FC8 55%, #137A78 100%);
+  --tai-iris-text: linear-gradient(90deg, #4B3CD0, #1F6FC8 50%, #0E7A74);
+  --tai-font: 'Inter Tight Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dark {
+  --tai-bg: #121118;
+  --tai-bg-glow: none;
+  --tai-surface: #1C1B24;
+  --tai-surface-2: #24232E;
+  --tai-surface-3: #2D2B39;
+  --tai-text: #ECEBF2;
+  --tai-text-2: #C9C7D4;
+  --tai-text-3: #A3A1B0;
+  /* Заливка кнопок — #6E5BFF (белый текст 4.8:1); светлый #A9B4FF — для ссылок и фокуса */
+  --tai-accent: #6E5BFF;
+  --tai-accent-hover: #8475FF;
+  --tai-accent-soft: rgba(110,91,255,.22);
+  --tai-border: #2F2D3A;
+  --tai-success: #6FD49A; --tai-success-bg: rgba(46,145,80,.18); --tai-success-icon: #6FD49A;
+  --tai-warning: #F2B654; --tai-warning-bg: rgba(184,122,18,.20); --tai-warning-icon: #F2B654;
+  --tai-danger: #FF8E85; --tai-danger-bg: rgba(210,59,47,.20); --tai-danger-icon: #FF8E85;
+  --tai-info: #8DB8FF; --tai-info-bg: rgba(62,123,219,.20);
+  --tai-iris-text: linear-gradient(90deg, #A9A0FF, #7CC6FF 50%, #8CFFE8);
+}
+
+/* Переменные b24ui → токены. Без слоя: перекрывают слой theme b24ui. */
+:root, .light, .dark {
+  --ui-font-family-primary: var(--tai-font);
+  --ui-font-family-secondary: var(--tai-font);
+  --ui-color-accent-main-primary: var(--tai-accent);
+  --ui-color-accent-main-primary-alt: var(--tai-accent-hover);
+  --ui-color-accent-main-success: var(--tai-success-icon);
+  --ui-color-accent-main-alert: var(--tai-danger-icon);
+  --ui-color-accent-main-warning: var(--tai-warning-icon);
+  --ui-color-bg-content-primary: var(--tai-surface);
+  --ui-color-bg-content-secondary: var(--tai-surface-2);
+  --ui-color-bg-content-tertiary: var(--tai-surface-3);
+  --air-theme-bg-color: var(--tai-bg);
+}
+
+body {
+  font-family: var(--tai-font);
+  background: var(--tai-bg-glow), var(--tai-bg);
+  background-attachment: fixed;
+}
+
+/* «Перелив» — для заголовка и акцентных надписей */
+.tai-iris-text {
+  background: var(--tai-iris-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
