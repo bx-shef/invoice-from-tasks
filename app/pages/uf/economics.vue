@@ -7,7 +7,7 @@
 // считать, и прогоняет тот же сбор, что «Заполнить из задач» (строки в счёт НЕ пишет): поля задач и
 // это поле обновляются правами сотрудника.
 import type { FillMode, TaskSource } from '#shared/domain/fill'
-import { parseInvoiceEconomy, type InvoiceEconomy } from '#shared/domain/economics'
+import { economyDeltaLabel, flaggedLabel, parseInvoiceEconomy, type InvoiceEconomy } from '#shared/domain/economics'
 import { camelFieldKey } from '#shared/domain/userFields'
 import { publicInvoiceUrl, publicQrUrl } from '#shared/domain/invoiceLinks'
 import { formatMoney } from '~/utils/fillPreview'
@@ -76,19 +76,6 @@ const bars = computed(() => {
 
 const copied = ref(false)
 const qrOpen = ref(false)
-/** Пилюля дельты: «−204,60 · −4,7%», в ноль — «в ноль». */
-const deltaLabel = computed(() => {
-  const e = econ.value
-  if (!e || e.verdict === 'even') return 'в ноль'
-  return `${signed(e.delta)}${e.diffPercent === null ? '' : ` · ${e.diffPercent > 0 ? '+' : ''}${e.diffPercent.toLocaleString('ru-RU')}%`}`
-})
-function tasksWord(n: number): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  if (m10 === 1 && m100 !== 11) return 'задача'
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'задачи'
-  return 'задач'
-}
 async function copyQr() {
   if (!links.value) return
   try {
@@ -165,10 +152,8 @@ function when(iso: string): string {
     class="p-2 text-sm"
     data-testid="economics-field"
   >
-    <div
-      v-if="econ"
-      class="flex gap-4"
-    >
+    <div class="flex gap-4">
+      <!-- QR и согласие — всегда, даже пока экономика не посчитана (находка панели) -->
       <div
         v-if="links"
         class="flex flex-col items-center gap-1 shrink-0"
@@ -176,7 +161,7 @@ function when(iso: string): string {
         <button
           type="button"
           class="ec-qr"
-          title="Показать крупно"
+          aria-label="Показать QR-код крупно"
           @click="qrOpen = true"
         >
           <img
@@ -210,56 +195,68 @@ function when(iso: string): string {
           >{{ when(approval.at) }}</span>
         </div>
 
-        <div class="flex flex-wrap items-baseline gap-2">
-          <span class="text-xl font-semibold tabular-nums">{{ formatMoney(econ.billed) }}</span>
-          <span class="text-xs ec-muted">{{ econ.currency }}</span>
-          <B24Badge
-            v-if="verdict"
-            :color="verdict.color"
-            :label="deltaLabel"
-            data-testid="economics-verdict"
-          />
-        </div>
-
-        <!-- Полоски «выставлено / по формуле»: длина от большего -->
-        <div class="space-y-1 max-w-sm">
-          <div
-            v-for="bar in bars"
-            :key="bar.label"
-            class="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2"
-          >
-            <span class="ec-muted">{{ bar.label }}</span>
-            <span class="h-1.5 rounded-full bg-(--ui-color-bg-content-tertiary) overflow-hidden">
-              <span
-                class="block h-full rounded-full"
-                :class="bar.color"
-                :style="{ width: `${bar.width}%` }"
-              />
-            </span>
-            <span class="text-right tabular-nums">{{ formatMoney(bar.value) }}</span>
+        <template v-if="econ">
+          <div class="flex flex-wrap items-baseline gap-2">
+            <span class="text-xl font-semibold tabular-nums">{{ formatMoney(econ.billed) }}</span>
+            <span class="text-xs ec-muted">{{ econ.currency }}</span>
+            <B24Badge
+              v-if="verdict"
+              :color="verdict.color"
+              :label="economyDeltaLabel(econ)"
+              :title="verdict.label"
+              :aria-label="`${verdict.label}: ${economyDeltaLabel(econ)}`"
+              data-testid="economics-verdict"
+            />
           </div>
+
+          <!-- Полоски «выставлено / по формуле»: длина от большего -->
+          <div class="space-y-1 max-w-sm">
+            <div
+              v-for="bar in bars"
+              :key="bar.label"
+              class="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2"
+            >
+              <span class="ec-muted">{{ bar.label }}</span>
+              <span class="h-1.5 rounded-full bg-(--ui-color-bg-content-tertiary) overflow-hidden">
+                <span
+                  class="block h-full rounded-full"
+                  :class="bar.color"
+                  :style="{ width: `${bar.width}%` }"
+                />
+              </span>
+              <span class="text-right tabular-nums">{{ formatMoney(bar.value) }}</span>
+            </div>
+          </div>
+        </template>
+        <div
+          v-else
+          class="ec-empty"
+        >
+          Экономики пока нет. Откройте счёт и нажмите «Собрать строки» — или посчитайте здесь.
         </div>
 
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-          <button
-            v-if="flagged.length"
-            type="button"
-            class="hover:underline"
-            @click="expanded = !expanded"
-          >
-            ⚑ {{ flagged.length }} {{ tasksWord(flagged.length) }} с пометками
-          </button>
-          <span
-            v-else
-            class="ec-muted"
-          >Пометок нет</span>
+          <template v-if="econ">
+            <button
+              v-if="flagged.length"
+              type="button"
+              class="hover:underline"
+              @click="expanded = !expanded"
+            >
+              ⚑ {{ flaggedLabel(flagged.length) }}
+            </button>
+            <span
+              v-else
+              class="ec-muted"
+            >Пометок нет</span>
+          </template>
           <B24Popover v-model:open="asking">
             <button
               type="button"
               class="ec-link"
               data-testid="economics-recalc"
             >
-              Пересчитать
+              {{ econ ? 'Пересчитать' : 'Посчитать' }}
             </button>
             <template #content>
               <div class="p-3 space-y-2 w-64">
@@ -284,10 +281,13 @@ function when(iso: string): string {
               </div>
             </template>
           </B24Popover>
-          <span class="ec-muted">посчитано {{ when(econ.at) }}</span>
+          <span
+            v-if="econ"
+            class="ec-muted"
+          >посчитано {{ when(econ.at) }}</span>
         </div>
         <ul
-          v-if="expanded"
+          v-if="econ && expanded"
           class="space-y-0.5 text-xs"
         >
           <li
@@ -302,54 +302,14 @@ function when(iso: string): string {
             <span :class="t.delta < 0 ? 'text-(--ui-color-accent-main-alert)' : 'text-(--ui-color-accent-main-success)'">{{ signed(t.delta) }}{{ pct(t.diffPercent) }}</span>
           </li>
         </ul>
+        <p
+          v-if="error"
+          class="text-xs text-(--ui-color-accent-main-alert)"
+        >
+          {{ error }}
+        </p>
       </div>
     </div>
-
-    <!-- Пусто: пунктирная рамка и тихая ссылка -->
-    <div
-      v-else
-      class="ec-empty"
-    >
-      Экономики пока нет. Откройте счёт и нажмите «Собрать строки» — или
-      <B24Popover v-model:open="asking">
-        <button
-          type="button"
-          class="ec-link"
-          data-testid="economics-recalc"
-        >
-          пересчитать здесь
-        </button>
-        <template #content>
-          <div class="p-3 space-y-2 w-64">
-            <B24Select
-              v-model="mode"
-              :items="modeItems"
-              value-key="value"
-              size="sm"
-              class="w-full"
-              aria-label="Как считать"
-            />
-            <B24Button
-              size="sm"
-              color="air-primary"
-              label="Посчитать"
-              block
-              :loading="busy"
-              :disabled="busy"
-              data-testid="economics-run"
-              @click="recalc"
-            />
-          </div>
-        </template>
-      </B24Popover>.
-    </div>
-
-    <p
-      v-if="error"
-      class="mt-1 text-xs text-(--ui-color-accent-main-alert)"
-    >
-      {{ error }}
-    </p>
 
     <B24Modal
       v-if="links"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flagOf, invoiceEconomy, parseInvoiceEconomy, taskEconomics, taskFieldValues, hasDelta } from '#shared/domain/economics'
+import { economyDeltaLabel, flagOf, flaggedLabel, hasDelta, invoiceEconomy, parseInvoiceEconomy, taskEconomics, taskFieldValues } from '#shared/domain/economics'
 import { buildEstimateMessages, MAX_ESTIMATE_HOURS, parseEstimateItems, pickEstimates } from '#shared/domain/estimate'
 import { moneyOf } from '#shared/domain/tasks'
 import type { DraftRow } from '#shared/domain/fill'
@@ -87,5 +87,17 @@ describe('hasDelta', () => {
   it('без часов (формула 0) дельты нет', () => {
     expect(hasDelta({ formula: 0 })).toBe(false)
     expect(hasDelta({ formula: 28.34 })).toBe(true)
+  })
+})
+
+describe('подписи поля «Экономика счёта»', () => {
+  it('пилюля дельты: знак, %, в ноль, без процента', () => {
+    expect(economyDeltaLabel({ delta: -204.6, diffPercent: -4.7, verdict: 'loss' })).toBe('−204,60 · −4,7%')
+    expect(economyDeltaLabel({ delta: 280, diffPercent: 11.9, verdict: 'profit' })).toBe('+280,00 · +11,9%')
+    expect(economyDeltaLabel({ delta: 0, diffPercent: 0, verdict: 'even' })).toBe('в ноль')
+    expect(economyDeltaLabel({ delta: 50, diffPercent: null, verdict: 'profit' })).toBe('+50,00')
+  })
+  it('склонение «задача / задачи / задач»', () => {
+    expect([1, 2, 5, 11, 12, 21, 24, 25].map(flaggedLabel)).toEqual(['1 задача с пометками', '2 задачи с пометками', '5 задач с пометками', '11 задач с пометками', '12 задач с пометками', '21 задача с пометками', '24 задачи с пометками', '25 задач с пометками'])
   })
 })
