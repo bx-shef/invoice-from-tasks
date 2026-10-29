@@ -345,22 +345,28 @@ const rowItems = computed(() => {
     >
       <form
         v-if="!invoice && !closedText"
-        class="hd-card w-full max-w-sm p-6 sm:p-8 space-y-5 shadow-xl"
+        class="hd-card hd-login-card w-full max-w-sm p-6 sm:p-7 space-y-4"
         data-testid="public-code-form"
         @submit.prevent="open"
       >
-        <div class="text-center space-y-1">
-          <div class="text-xl">
+        <div class="flex items-center gap-3">
+          <span
+            class="hd-login-logo"
+            aria-hidden="true"
+          >{{ domain.slice(0, 2).toUpperCase() }}</span>
+          <span class="text-sm opacity-70 truncate">{{ domain }}</span>
+        </div>
+        <div class="space-y-1">
+          <div class="text-xl font-semibold">
             Документы для счёта
           </div>
-          <div class="text-base opacity-80">
-            {{ domain }}
+          <div class="text-sm opacity-75">
+            Введите код доступа — его выдаёт ваш менеджер. Браузер запомнит код.
           </div>
         </div>
         <B24FormField
           label="Код доступа"
-          description="Код выдаёт ваш менеджер — браузер его запомнит"
-          :b24ui="{ label: 'w-full text-center', description: 'text-center' }"
+          :error="error || undefined"
         >
           <!-- Логин для менеджера паролей: домен портала — браузер предложит тот же код на всех счетах. -->
           <input
@@ -402,20 +408,17 @@ const rowItems = computed(() => {
         </B24FormField>
         <B24Button
           type="submit"
-          color="air-primary-success"
+          color="air-primary"
           size="lg"
           block
+          class="hd-iris-button"
           label="Открыть"
           :loading="busy"
           :disabled="busy"
           data-testid="public-open"
         />
-        <p
-          v-if="error"
-          class="text-base text-center text-(--ui-color-accent-main-alert)"
-          data-testid="public-error"
-        >
-          {{ error }}
+        <p class="text-xs text-center opacity-65">
+          Нет кода? Напишите менеджеру, выдавшему счёт.
         </p>
       </form>
     </div>
@@ -1076,11 +1079,29 @@ const rowItems = computed(() => {
   background: var(--ui-color-bg-content-secondary, #f5f7f8);
 }
 
-/* Фон входа — мягкий градиент Б24 (без фото: страница лёгкая и на телефоне); ночью — тёмный */
+/* Вход (дизайн v2): светлый фон с мягким свечением (iris.css), перелив — только на главной кнопке */
 .hd-login {
-  background: linear-gradient(135deg, #2fc6f6 0%, #1f8fd8 45%, #12b97f 100%);
+  background: var(--tai-bg-glow), var(--tai-bg);
 }
-.dark .hd-login {
-  background: linear-gradient(135deg, #0b2a3d 0%, #0d1f33 50%, #0b2e25 100%);
+.hd-login-card {
+  border-radius: 16px;
+  border-color: var(--tai-border);
+  box-shadow: 0 12px 40px rgb(30 20 90 / 0.08);
+}
+.hd-login-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--tai-iris-fill);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.hd-iris-button {
+  background: var(--tai-iris-fill);
+  border-radius: 999px;
 }
 </style>
