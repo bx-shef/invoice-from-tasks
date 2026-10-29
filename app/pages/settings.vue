@@ -3,6 +3,7 @@
 // остальные сотрудники — объяснение, к кому обратиться. Права ещё раз проверяет сервер.
 import { parseSettings, serializeSettings, settingsProblems, type AppSettings } from '#shared/domain/settings'
 import { formatUsage } from '#shared/domain/storageBudget'
+import { planSave, saveSummary } from '~/utils/saveBar'
 import { SETTINGS_GROUPS, effectiveSection, settingsGroupsFor, type SettingsSection } from '~/utils/settingsNav'
 
 const b24 = useB24()
@@ -12,17 +13,19 @@ const toast = useToast()
 const draft = ref<AppSettings | null>(null)
 const loadError = ref('')
 const saving = ref(false)
-const rates = ref<{ dirty: boolean, blocked: string, saving: boolean, save: () => Promise<void> } | null>(null)
+const ratesForm = useTemplateRef<{ dirty: boolean, blocked: string, saving: boolean, save: () => Promise<void> }>('ratesForm')
 
-/** Что изменено и не сохранено — для общей панели. */
+/** Что изменено и что можно сохранить — app/utils/saveBar.ts. */
 const settingsDirty = computed(() => !!draft.value && serializeSettings(draft.value) !== serializeSettings(app.settings.value))
-const changed = computed(() => [settingsDirty.value && app.isAdmin.value ? 'настройки' : '', rates.value?.dirty ? 'ставки' : ''].filter(Boolean))
-const blockReason = computed(() => {
-  if (settingsDirty.value && app.isAdmin.value && !usage.value?.fits) return 'настройки не влезают'
-  if (rates.value?.dirty && rates.value.blocked) return rates.value.blocked
-  return ''
-})
-const busy = computed(() => saving.value || !!rates.value?.saving)
+const plan = computed(() => planSave({
+  isAdmin: app.isAdmin.value,
+  settingsDirty: settingsDirty.value,
+  settingsBlocked: usage.value && !usage.value.fits ? 'не влезают' : '',
+  ratesDirty: !!ratesForm.value?.dirty,
+  ratesBlocked: ratesForm.value?.blocked ?? ''
+}))
+const canSave = computed(() => plan.value.saveSettings || plan.value.saveRates)
+const busy = computed(() => saving.value || !!ratesForm.value?.saving)
 
 /** Разделы скрываются v-show (черновик живёт); админские не монтируются у редактора ставок. */
 const groups = computed(() => settingsGroupsFor(app.isAdmin.value))
@@ -45,31 +48,36 @@ onMounted(async () => {
   }
 })
 
-/** Одна кнопка: сохраняет изменённое — настройки (админ) и ставки (свой запрос, свои права). */
+/** Одна кнопка: сохраняет то, что можно, — настройки (админ) и ставки (свой запрос, свои права). */
 async function save() {
-  if (!draft.value || blockReason.value) return
+  const p = plan.value
+  if (!draft.value || !canSave.value) return
   saving.value = true
+  const saved: string[] = []
   const failed: string[] = []
+  const message = (e: unknown) => e instanceof Error ? e.message : String(e)
   try {
-    if (settingsDirty.value && app.isAdmin.value) {
+    if (p.saveSettings) {
       try {
         await app.saveSettings(draft.value)
+        saved.push('настройки')
       } catch (e) {
-        failed.push(`настройки: ${e instanceof Error ? e.message : String(e)}`)
+        failed.push(`настройки: ${message(e)}`)
       }
     }
-    if (rates.value?.dirty) {
+    if (p.saveRates && ratesForm.value) {
       try {
-        await rates.value.save()
+        await ratesForm.value.save()
+        saved.push('ставки')
       } catch (e) {
-        failed.push(`ставки: ${e instanceof Error ? e.message : String(e)}`)
+        failed.push(`ставки: ${message(e)}`)
       }
     }
   } finally {
     saving.value = false
   }
-  if (failed.length) toast.add({ title: 'Не всё сохранилось', description: failed.join('; '), color: 'air-primary-alert' })
-  else toast.add({ title: 'Сохранено', color: 'air-primary-success' })
+  const s = saveSummary(saved, failed)
+  toast.add({ title: s.title, description: s.description, color: s.ok ? 'air-primary-success' : 'air-primary-alert' })
 }
 </script>
 
@@ -154,7 +162,7 @@ async function save() {
                 v-show="section === 'rates'"
                 data-testid="settings-section-rates"
               >
-                <SettingsRates ref="rates" />
+                <SettingsRates ref="ratesForm" />
               </div>
               <div
                 v-if="app.isAdmin.value"
@@ -228,10 +236,10 @@ async function save() {
           >
             <span
               class="text-sm"
-              :class="changed.length ? '' : 'opacity-60'"
+              :class="plan.changed.length ? '' : 'opacity-60'"
               data-testid="settings-changed"
             >
-              {{ changed.length ? `Изменено: ${changed.join(', ')}` : 'Изменений нет' }}
+              {{ plan.changed.length ? `Изменено: ${plan.changed.join(', ')}` : 'Изменений нет' }}
             </span>
             <span
               v-if="usage && app.isAdmin.value"
@@ -243,14 +251,15 @@ async function save() {
               </template>
             </span>
             <span
-              v-if="blockReason"
+              v-if="plan.blocked.length"
               class="text-sm text-(--ui-color-accent-main-alert)"
-            >{{ blockReason }}</span>
+              data-testid="settings-blocked"
+            >Не сохранится — {{ plan.blocked.join('; ') }}</span>
             <B24Button
               color="air-primary"
               label="Сохранить"
               :loading="busy"
-              :disabled="busy || !changed.length || !!blockReason"
+              :disabled="busy || !canSave"
               data-testid="settings-save"
               @click="save"
             />
