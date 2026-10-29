@@ -150,5 +150,6 @@ test('публичная страница: плитка документа — �
   await page.getByTestId('public-open').click()
   const doc = page.getByTestId('public-document').first()
   await expect(doc).toContainText('Скачать PDF')
+  await expect(doc).toContainText('Акт')
   await expect(doc).not.toContainText('57')
 })

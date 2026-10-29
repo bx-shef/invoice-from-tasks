@@ -70,8 +70,15 @@ export function withRowPrefix(text: string, title: string, max: number): string 
   return room > 1 ? `«${name}»: ${rest}` : rest
 }
 
-/** Название документа без внутренней части: «Акт (Беларусь) 63» → «Акт» (дизайн v2). */
-export function docTitle(title: string): string {
-  const t = title.replace(/\s*\([^)]*\)/g, '').replace(/\s+№?\s*\d+\s*$/, '').trim()
-  return t || title
+/**
+ * Короткие названия документов (дизайн v2): «Акт (Беларусь) 63» → «Акт». Только простой вид
+ * «Название (…) 63» / «Название 63»; иначе — как есть. Если короткие совпадут у разных
+ * документов — для всех полные: плитки должны различаться.
+ */
+export function docTitles(titles: string[]): string[] {
+  const short = titles.map((t) => {
+    const m = /^([^()\d№]+?)\s*(?:\([^()]*\))?\s*№?\s*\d+$/.exec((t ?? '').trim())
+    return m?.[1]?.trim() || t
+  })
+  return new Set(short).size === short.length ? short : titles
 }

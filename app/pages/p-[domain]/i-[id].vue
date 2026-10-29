@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, docTitle } from '~/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, docTitles } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -247,6 +247,8 @@ function postpone(period: PostponePeriod) {
 }
 /** Окна «Позже»: компьютер — модальное окно, телефон — панель снизу. */
 const isDesktop = useMediaQuery('(min-width: 640px)')
+/** Короткие названия документов — app/utils/publicProgress.ts. */
+const shortDocs = computed(() => docTitles((invoice.value?.documents ?? []).map(d => d.title)))
 /** Переписка по порядку: старые сверху (с сервера приходят новые первыми). */
 const thread = computed(() => [...(invoice.value?.approval?.comments ?? [])].reverse())
 /** «Замечание к этой работе»: поле внизу с названием работы — и фокус в него. */
@@ -598,11 +600,12 @@ const rowItems = computed(() => {
           </div>
           <div class="flex flex-wrap gap-3">
             <button
-              v-for="d in invoice.documents"
+              v-for="(d, di) in invoice.documents"
               :key="d.id"
               type="button"
               class="pub-doc text-left disabled:opacity-75"
-              :aria-label="`Скачать ${d.title} (PDF)`"
+              :aria-label="`${shortDocs[di]} — скачать PDF${shortDocs[di] === d.title ? '' : ` (${d.title})`}`"
+              :aria-busy="downloading === d.id"
               :disabled="downloading !== null"
               data-testid="public-document"
               @click="download(d.id, d.title)"
@@ -610,7 +613,7 @@ const rowItems = computed(() => {
               <img
                 v-if="previews[d.id]"
                 :src="previews[d.id]"
-                :alt="d.title"
+                alt=""
                 class="w-full h-auto rounded border border-(--ui-color-design-plain-content-divider) bg-white"
                 data-testid="public-document-preview"
               >
@@ -621,10 +624,10 @@ const rowItems = computed(() => {
                 PDF
               </div>
               <div
-                class="text-sm font-medium leading-tight"
+                class="text-sm font-medium leading-tight [overflow-wrap:anywhere]"
                 :title="d.title"
               >
-                {{ docTitle(d.title) }}
+                {{ shortDocs[di] }}
               </div>
               <div class="text-xs text-(--tai-accent)">
                 {{ downloading === d.id ? 'Скачиваю…' : 'Скачать PDF' }}
