@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, worksLabel } from '../app/utils/publicProgress'
+import { docTitle, decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel, withRowPrefix, worksLabel } from '../app/utils/publicProgress'
 
 describe('decisionProgress', () => {
   const rows = [{ taskId: 1, sum: 100.1 }, { taskId: 2, sum: 50 }, { taskId: 1, sum: 0.2 }, { taskId: null, sum: 999 }, { taskId: 3, sum: null }]
@@ -66,5 +66,17 @@ describe('withRowPrefix', () => {
   })
   it('текст уже на пределе — без приставки', () => {
     expect(withRowPrefix('x'.repeat(20), 'A', 20)).toBe('x'.repeat(20))
+  })
+})
+
+describe('docTitle', () => {
+  it.each([
+    ['Акт (Беларусь) 63', 'Акт'],
+    ['Акт 57', 'Акт'],
+    ['Счёт № 12', 'Счёт'],
+    ['Договор оказания услуг', 'Договор оказания услуг'],
+    ['63', '63']
+  ])('%s', (a, b) => {
+    expect(docTitle(a)).toBe(b)
   })
 })

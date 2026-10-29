@@ -69,3 +69,9 @@ export function withRowPrefix(text: string, title: string, max: number): string 
   const name = title.length > room ? `${title.slice(0, Math.max(0, room - 1))}…` : title
   return room > 1 ? `«${name}»: ${rest}` : rest
 }
+
+/** Название документа без внутренней части: «Акт (Беларусь) 63» → «Акт» (дизайн v2). */
+export function docTitle(title: string): string {
+  const t = title.replace(/\s*\([^)]*\)/g, '').replace(/\s+№?\s*\d+\s*$/, '').trim()
+  return t || title
+}

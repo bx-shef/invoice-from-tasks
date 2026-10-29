@@ -142,3 +142,13 @@ test('публичная страница: замечания — перепис
   await expect(page.getByText('Принято')).toBeVisible()
   await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/thread.png` : undefined })
 })
+
+test('публичная страница: плитка документа — короткое название и «Скачать PDF»', async ({ page }) => {
+  await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  const doc = page.getByTestId('public-document').first()
+  await expect(doc).toContainText('Скачать PDF')
+  await expect(doc).not.toContainText('57')
+})
