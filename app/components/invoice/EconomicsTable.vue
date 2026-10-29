@@ -2,7 +2,7 @@
 // Экономика задач в окне счёта (economics.ts): сводка — выставлено, по формуле, дельта; ниже —
 // задачи: часы (с пометкой «оценка ИИ»), формула, выставлено («Стоимость работ» — с пометкой),
 // дельта и разница. Суммы — с НДС, как платит клиент. Пометки — цветной полосой слева и бейджем.
-import type { TaskEconomy } from '#shared/domain/economics'
+import { economyHours, type TaskEconomy } from '#shared/domain/economics'
 import { formatMoney } from '~/utils/fillPreview'
 
 // summaryOnly — только сводка: задачи — в общей таблице предпросмотра (владелец 2026-10-25)
@@ -21,10 +21,7 @@ const totals = computed(() => {
   return { formula, billed, delta, percent: formula > 0 ? Math.round(delta / formula * 1000) / 10 : null }
 })
 /** Плитка «Часы» (дизайн v2): всего часов и сколько задач оценил ИИ. */
-const hours = computed(() => ({
-  total: Math.round(props.items.reduce((sum, e) => sum + e.hours, 0) * 100) / 100,
-  estimated: props.items.filter(e => e.estimated).length
-}))
+const hours = computed(() => economyHours(props.items))
 const flaggedCount = computed(() => props.items.filter(e => e.flag === 'loss' || e.flag === 'over').length)
 
 function pct(v: number | null): string {
@@ -99,8 +96,8 @@ function hoursText(h: number): string {
           {{ hoursText(hours.total) }}
         </div>
         <div class="text-xs opacity-60">
-          {{ items.length }} задач<template v-if="hours.estimated">
-            · {{ hours.estimated }} оценены ИИ
+          задач: {{ hours.tasks }}<template v-if="hours.estimated">
+            · оценено ИИ: {{ hours.estimated }}
           </template>
         </div>
       </div>
