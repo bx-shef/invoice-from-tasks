@@ -86,3 +86,17 @@ test('публичная страница: короткий код — ошиб�
   await input.fill('abcd')
   await expect(page.getByTestId('public-error')).toHaveText('')
 })
+
+test('публичная страница: прогресс решений и липкая панель', async ({ page }, info) => {
+  const log = await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  await expect(page.getByTestId('public-progress')).toBeVisible()
+  await expect(page.getByTestId('public-decisions')).toBeVisible()
+  await page.getByTestId('public-decide-all-yes').click()
+  await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"yes"')
+  await expect(page.getByTestId('public-progress')).toContainText('Решено')
+  const shot = await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/progress.png` : undefined })
+  await info.attach('progress', { body: shot, contentType: 'image/png' })
+})

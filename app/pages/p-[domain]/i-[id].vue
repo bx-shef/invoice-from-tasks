@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { decisionProgress, ofWorksLabel, worksLabel } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -196,11 +197,7 @@ const decisionTasks = computed(() => {
     return { id: t.id, title: row ? rowTitle(row.name) : t.title }
   })
 })
-const decisionCount = computed(() => {
-  const d = decisions.value ?? {}
-  const ids = decisionTasks.value.map(t => t.id)
-  return { yes: ids.filter(id => d[id] === 'yes').length, no: ids.filter(id => d[id] === 'no').length, later: ids.filter(id => d[id] === 'later').length, all: ids.length }
-})
+const progress = computed(() => decisionProgress(decisionTasks.value.map(t => t.id), decisions.value ?? {}, invoice.value?.rows ?? []))
 /**
  * Решения — без блокировки кнопок (отчёт клиента 2026-10-27: «нажимаю — ничего не происходит»):
  * раньше клик во время записи молча игнорировался, а перечитывание после первого ответа затирало
@@ -450,27 +447,23 @@ const rowItems = computed(() => {
           class="hd-card p-4 space-y-3"
           data-testid="public-summary"
         >
+          <!-- Шапка v2: «Счёт №… от …», сумма крупно, пилюля стадии справа -->
           <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="space-y-1">
-              <div class="text-xl font-semibold leading-tight">
-                Документы для счёта №{{ invoice.number || invoiceId }}{{ invoice.date ? ` от ${date(invoice.date)}` : '' }}
+            <div class="space-y-1 min-w-0">
+              <div class="text-sm opacity-75">
+                Счёт №{{ invoice.number || invoiceId }}{{ invoice.date ? ` от ${date(invoice.date)}` : '' }}
               </div>
-              <div class="flex flex-wrap items-center gap-2 text-base opacity-80">
-                <B24Badge
-                  color="air-secondary-accent"
-                  size="md"
-                  :label="invoice.stage"
-                />
-              </div>
-            </div>
-            <div class="w-full sm:w-auto flex sm:block items-baseline justify-between gap-3 sm:text-right border-t sm:border-0 border-(--ui-color-design-plain-content-divider) pt-2 sm:pt-0">
-              <div class="text-sm uppercase opacity-75">
-                Итого
-              </div>
-              <div class="text-2xl font-semibold whitespace-nowrap">
+              <div
+                class="text-3xl font-semibold leading-tight whitespace-nowrap"
+                data-testid="public-total"
+              >
                 {{ money(invoice.total, invoice.currencyId) }}
               </div>
             </div>
+            <span
+              class="pub-stage"
+              :class="{ 'is-wait': invoice.approval && !invoice.approval.mark.approved, 'is-ok': invoice.approval?.mark.approved }"
+            >{{ invoice.approval && !invoice.approval.mark.approved ? 'Ждёт вашего согласования' : invoice.stage }}</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-2 text-base">
             <div
@@ -507,9 +500,67 @@ const rowItems = computed(() => {
           </div>
         </section>
 
-        <!-- Согласование одной плашкой, как «Документ прошёл проверку»: галка — согласовано, иначе ждёт -->
+        <!-- Прогресс решений (дизайн v2): «Решено N из M», полоса по долям, сумма принятого -->
         <section
-          v-if="invoice.approval"
+          v-if="invoice.approval && decisions && decisionTasks.length"
+          class="hd-card p-4 space-y-3"
+          data-testid="public-progress"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <div class="font-medium">
+              {{ invoice.approval.mark.approved ? 'Счёт согласован' : `Решено ${progress.decided} из ${ofWorksLabel(progress.all)}` }}
+            </div>
+            <div class="text-sm">
+              <span class="opacity-70">к оплате по принятым: </span>
+              <b data-testid="public-accepted-sum">{{ money(progress.acceptedSum, invoice.currencyId) }}</b>
+            </div>
+          </div>
+          <div
+            class="pub-bar"
+            role="img"
+            :aria-label="`Делаем ${progress.yes}, не делаем ${progress.no}, позже ${progress.later}, ждёт ${progress.wait}`"
+          >
+            <span
+              class="is-yes"
+              :style="{ width: `${100 * progress.yes / progress.all}%` }"
+            />
+            <span
+              class="is-no"
+              :style="{ width: `${100 * progress.no / progress.all}%` }"
+            />
+            <span
+              class="is-later"
+              :style="{ width: `${100 * progress.later / progress.all}%` }"
+            />
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div class="flex flex-wrap gap-x-4 gap-y-1 opacity-85">
+              <span><i class="pub-dot is-yes" />Делаем {{ progress.yes }}</span>
+              <span><i class="pub-dot is-no" />Не делаем {{ progress.no }}</span>
+              <span v-if="progress.later"><i class="pub-dot is-later" />Позже {{ progress.later }}</span>
+              <span><i class="pub-dot" />Ждёт {{ progress.wait }}</span>
+            </div>
+            <button
+              v-if="progress.yes < progress.all"
+              type="button"
+              class="text-(--tai-accent) hover:underline"
+              data-testid="public-decide-all-yes-link"
+              @click="decideAll('yes')"
+            >
+              Отметить все «Делаем»
+            </button>
+          </div>
+          <p
+            v-if="commentError"
+            class="text-(--ui-color-accent-main-alert)"
+          >
+            {{ commentError }}
+          </p>
+        </section>
+
+        <!-- Согласование одной плашкой, когда решений по работам нет: галка — согласовано, иначе ждёт -->
+        <section
+          v-if="invoice.approval && !(decisions && decisionTasks.length)"
           class="hd-card p-4 flex flex-wrap items-center gap-3"
           data-testid="public-approval-status"
         >
@@ -527,39 +578,8 @@ const rowItems = computed(() => {
             <div class="text-base opacity-80">
               {{ invoice.approval.mark.approved
                 ? (invoice.approval.mark.approvedAt ? dateTime(invoice.approval.mark.approvedAt) : '')
-                : decisions
-                  ? `Отметьте каждую работу ниже или все сразу · подтверждено ${decisionCount.yes} из ${decisionCount.all}${decisionCount.no ? `, не делаем ${decisionCount.no}` : ''}${decisionCount.later ? `, отложено ${decisionCount.later}` : ''}`
-                  : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
+                : 'Всё верно — «Согласовать»; нужно поправить — комментарий ниже' }}
             </div>
-          </div>
-          <div
-            v-if="decisions && decisionTasks.length"
-            class="w-full space-y-2"
-            data-testid="public-decisions"
-          >
-            <div class="flex flex-wrap gap-2 pt-2">
-              <B24Button
-                color="air-primary-success"
-                label="Подтвердить всё"
-                :loading="deciding > 0"
-                class="flex-1 sm:flex-none justify-center"
-                data-testid="public-decide-all-yes"
-                @click="decideAll('yes')"
-              />
-              <B24Button
-                color="air-secondary"
-                label="Всё не делаем"
-                class="flex-1 sm:flex-none justify-center"
-                data-testid="public-decide-all-no"
-                @click="decideAll('no')"
-              />
-            </div>
-            <p
-              v-if="commentError"
-              class="text-(--ui-color-accent-main-alert)"
-            >
-              {{ commentError }}
-            </p>
           </div>
           <B24Button
             v-if="!decisions && !invoice.approval.mark.approved && invoice.approval.mark.enabled"
@@ -908,12 +928,41 @@ const rowItems = computed(() => {
       data-testid="public-row-backdrop"
       @click="closeRows"
     />
+    <!-- Липкая панель решений (дизайн v2): сколько ждёт и решения на всё разом -->
+    <div
+      v-if="invoice?.approval && decisions && decisionTasks.length && !invoice.approval.mark.approved && !openRows.size"
+      class="pub-sticky"
+      data-testid="public-decisions"
+    >
+      <span class="text-sm">
+        <b>{{ progress.wait ? `${worksLabel(progress.wait)} ждёт решения` : 'Все работы решены' }}</b>
+        <span class="opacity-65"> · решения сохраняются сразу</span>
+      </span>
+      <span class="flex gap-2 ms-auto">
+        <B24Button
+          color="air-secondary"
+          label="Не делаем всё"
+          class="rounded-full"
+          data-testid="public-decide-all-no"
+          @click="decideAll('no')"
+        />
+        <B24Button
+          color="air-primary"
+          label="Подтвердить всё"
+          class="hd-iris-button"
+          :loading="deciding > 0"
+          data-testid="public-decide-all-yes"
+          @click="decideAll('yes')"
+        />
+      </span>
+    </div>
     <B24Button
       v-if="invoice?.approval && !openRows.size"
       color="air-primary"
       size="lg"
       label="Замечание"
-      class="fixed bottom-4 right-4 z-40 shadow-lg rounded-full"
+      class="fixed right-4 z-40 shadow-lg rounded-full"
+      :class="decisions && decisionTasks.length && !invoice.approval.mark.approved ? 'bottom-36 sm:bottom-24' : 'bottom-4'"
       data-testid="public-comment-fab"
       @click="openComment"
     />
@@ -1084,6 +1133,78 @@ const rowItems = computed(() => {
 .pub-tile {
   border-radius: 18px;
   background: var(--ui-color-bg-content-secondary, #f5f7f8);
+}
+
+/* Шапка, прогресс и липкая панель решений (дизайн v2) */
+.pub-stage {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: var(--tai-surface-2);
+  color: var(--tai-text-2, inherit);
+  white-space: nowrap;
+}
+.pub-stage.is-wait {
+  background: #FFF4D6;
+  color: #7A5300;
+}
+.pub-stage.is-ok {
+  background: #E3F6E8;
+  color: #16683A;
+}
+.dark .pub-stage.is-wait {
+  background: #3A2F12;
+  color: #F5D27A;
+}
+.dark .pub-stage.is-ok {
+  background: #16301F;
+  color: #8EE0A8;
+}
+.pub-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--tai-surface-2);
+}
+.pub-bar span {
+  transition: width .25s;
+}
+.is-yes {
+  --c: var(--ui-color-accent-main-success, #1f8a4c);
+}
+.is-no {
+  --c: #8E8E99;
+}
+.is-later {
+  --c: var(--ui-color-copilot-accent-primary, #6E5BFF);
+}
+.pub-bar span, .pub-dot {
+  background: var(--c, var(--tai-border));
+}
+.pub-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.pub-sticky {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 24px));
+  z-index: 35;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--tai-border);
+  background: var(--tai-surface);
+  box-shadow: 0 10px 30px rgb(30 20 90 / 0.12);
 }
 
 /* Вход (дизайн v2): светлый фон с мягким свечением (iris.css), перелив — только на главной кнопке */
