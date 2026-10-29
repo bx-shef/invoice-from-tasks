@@ -21,7 +21,7 @@ export default defineNuxtConfig({
     head: { link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }] }
   },
 
-  css: ['~/assets/css/main.css'],
+  css: ['~/assets/css/main.css', '~/assets/css/iris.css'],
 
   runtimeConfig: {
     public: {
