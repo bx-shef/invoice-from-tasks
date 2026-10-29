@@ -41,13 +41,17 @@ test('публичная страница: «Отложить» спрашива
   await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"87":"later:2w"')
 })
 
-test('публичная страница: плавающая «Замечание» открывает окно с полем', async ({ page }, info) => {
+test('публичная страница: «Написать» у работы подставляет её в поле замечания', async ({ page }, info) => {
   await mockPublicApi(page)
   await page.goto(URL)
   await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
   await page.getByTestId('public-open').click()
-  await page.getByTestId('public-comment-fab').click()
-  await expect(page.getByTestId('public-comment-text')).toBeVisible()
+  await expect(page.getByTestId('public-comment-fab')).toHaveCount(0)
+  await page.getByTestId('public-row').first().click()
+  await page.getByTestId('public-row-comment').first().click()
+  const text = page.locator('[data-testid=public-comment-text] textarea, textarea[data-testid=public-comment-text]').first()
+  await expect(text).toBeFocused()
+  await expect(text).toHaveValue(/^«Импорт банковских выписок»: /)
   await info.attach('comment', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
@@ -98,10 +102,9 @@ test('публичная страница: прогресс решений и л
   await page.getByTestId('public-decide-all-yes').click()
   await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"yes"')
   await expect(page.getByTestId('public-progress')).toContainText('Решено')
-  // Плавающая «Замечание» не наезжает на липкую панель на узком экране
+  // Липкая панель на узком экране не шире экрана
   const bar = await page.getByTestId('public-decisions').boundingBox()
-  const fab = await page.getByTestId('public-comment-fab').boundingBox()
-  expect(bar && fab && fab.y + fab.height <= bar.y).toBe(true)
+  expect(bar && bar.x >= 0 && bar.x + bar.width <= 360).toBe(true)
   const shot = await page.screenshot({ fullPage: false, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/progress.png` : undefined })
   await info.attach('progress', { body: shot, contentType: 'image/png' })
 })
@@ -119,4 +122,22 @@ test('публичная страница: строка работы — пер�
   await expect(page.getByTestId('public-task').first()).toBeVisible()
   await expect(page.getByTestId('public-row').first()).toHaveText('Скрыть')
   await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/rows.png` : undefined })
+})
+
+test('публичная страница: замечания — переписка по порядку, ответ менеджера слева', async ({ page }) => {
+  const inv = sampleInvoice()
+  const approval = inv.invoice.approval as { comments: unknown[] }
+  approval.comments = [
+    { id: 2, created: '2026-10-28T18:00:00Z', text: 'Второе', closed: false, answer: null },
+    { id: 1, created: '2026-10-28T17:00:00Z', text: 'Первое', closed: true, answer: 'Принято' }
+  ]
+  await mockPublicApi(page, inv)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  const mine = page.getByTestId('public-comment')
+  await expect(mine).toHaveCount(2)
+  await expect(mine.first()).toContainText('Первое')
+  await expect(page.getByText('Принято')).toBeVisible()
+  await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/thread.png` : undefined })
 })

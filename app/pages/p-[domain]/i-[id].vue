@@ -150,7 +150,6 @@ async function sendComment() {
     })
     commentText.value = ''
     commentSent.value = true
-    commentOpen.value = false
     // Перечитывание счёта долгое (задачи, документы) — кнопку не держим: список обновится сам
     void refreshApproval().catch(() => {})
   } catch (e) {
@@ -246,16 +245,21 @@ function postpone(period: PostponePeriod) {
   postponeTask.value = null
   if (id !== null) void decide({ [id]: `later:${period}` })
 }
-/**
- * Замечание — в окне по плавающей кнопке (владелец 2026-10-25: «непонятно, как вносить»):
- * компьютер — модальное окно, телефон — выезжающая снизу панель.
- */
-const commentOpen = ref(false)
+/** Окна «Позже»: компьютер — модальное окно, телефон — панель снизу. */
 const isDesktop = useMediaQuery('(min-width: 640px)')
-function openComment() {
+/** Переписка по порядку: старые сверху (с сервера приходят новые первыми). */
+const thread = computed(() => [...(invoice.value?.approval?.comments ?? [])].reverse())
+/** «Замечание к этой работе»: поле внизу с названием работы — и фокус в него. */
+function commentOnRow(title: string) {
   commentError.value = ''
   commentSent.value = false
-  commentOpen.value = true
+  const prefix = `«${title}»: `
+  if (!commentText.value.startsWith(prefix)) commentText.value = prefix + commentText.value
+  void nextTick(() => {
+    const el = document.querySelector<HTMLTextAreaElement>('#public-comment-text textarea, textarea#public-comment-text')
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el?.focus()
+  })
 }
 
 const postponeOptions = Object.entries(POSTPONE_PERIODS) as Array<[PostponePeriod, string]>
@@ -844,6 +848,20 @@ const rowItems = computed(() => {
                         {{ item.task.description }}
                       </p>
                     </div>
+                    <div
+                      v-if="invoice.approval"
+                      class="flex items-center justify-between gap-2 text-sm pt-1"
+                    >
+                      <span class="opacity-65">Замечание к этой работе</span>
+                      <button
+                        type="button"
+                        class="text-(--tai-accent) hover:underline px-2 py-1"
+                        data-testid="public-row-comment"
+                        @click="commentOnRow(rowTitle(item.row.name))"
+                      >
+                        Написать
+                      </button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -867,49 +885,90 @@ const rowItems = computed(() => {
           class="hd-card p-4 space-y-3"
           data-testid="public-approval"
         >
-          <div class="font-medium">
-            {{ invoice.approval.mark.approved ? 'Вопросы по счёту' : 'Есть замечания?' }}
+          <!-- Замечания (дизайн v2): переписка — свои справа, ответ менеджера слева; поле — сразу под ней -->
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 class="text-lg font-semibold">
+              {{ invoice.approval.mark.approved ? 'Вопросы по счёту' : 'Замечания' }}
+            </h2>
+            <span class="text-sm opacity-65">менеджер ответит здесь же</span>
           </div>
-          <p class="text-base opacity-80">
-            Напишите, что поправить, — менеджер получит задачу и ответит здесь же.
-          </p>
-          <B24Button
-            color="air-primary"
-            label="Написать замечание"
-            data-testid="public-comment-open"
-            @click="openComment"
-          />
-          <p
-            v-if="commentSent"
-            class="text-base text-(--ui-color-accent-main-success)"
+          <div
+            v-if="thread.length"
+            class="space-y-2"
           >
-            Комментарий отправлен
-          </p>
-          <article
-            v-for="c in invoice.approval.comments"
-            :key="c.id"
-            class="rounded border border-(--ui-color-design-plain-content-divider) p-3 space-y-2 text-base"
-            data-testid="public-comment"
-          >
-            <div class="flex justify-between gap-2 text-sm opacity-80">
-              <span>{{ dateTime(c.created) }}</span>
-              <B24Badge
-                v-if="c.closed"
-                color="air-primary-success"
-                size="md"
-                label="Закрыто"
-              />
-            </div>
-            <p class="whitespace-pre-line">
-              {{ c.text }}
-            </p>
-            <div
-              v-if="c.answer"
-              class="ml-3 pl-3 border-l-2 border-(--ui-color-accent-main-primary) whitespace-pre-line"
+            <template
+              v-for="c in thread"
+              :key="c.id"
             >
-              <b>Ответ:</b> {{ c.answer }}
+              <article
+                class="pub-msg is-mine"
+                data-testid="public-comment"
+              >
+                <div class="text-xs opacity-65 flex gap-2 justify-between">
+                  <span>Вы · {{ dateTime(c.created) }}</span>
+                  <span
+                    v-if="c.closed"
+                    class="text-(--tai-success)"
+                  >закрыто</span>
+                </div>
+                <p class="whitespace-pre-line [overflow-wrap:anywhere]">
+                  {{ c.text }}
+                </p>
+              </article>
+              <article
+                v-if="c.answer"
+                class="pub-msg"
+              >
+                <div class="text-xs opacity-65">
+                  Менеджер
+                </div>
+                <p class="whitespace-pre-line [overflow-wrap:anywhere]">
+                  {{ c.answer }}
+                </p>
+              </article>
+            </template>
+          </div>
+          <form
+            class="space-y-2"
+            @submit.prevent="sendComment"
+          >
+            <B24Textarea
+              id="public-comment-text"
+              v-model="commentText"
+              :maxlength="MAX_COMMENT_LENGTH"
+              :rows="3"
+              autoresize
+              :maxrows="12"
+              class="w-full"
+              placeholder="Напишите, что поправить"
+              aria-label="Замечание"
+              data-testid="public-comment-text"
+            />
+            <div class="flex flex-wrap items-center gap-3">
+              <B24Button
+                type="submit"
+                color="air-secondary-accent"
+                label="Отправить замечание"
+                class="rounded-full"
+                :loading="sending"
+                :disabled="sending || !commentText.trim()"
+                data-testid="public-comment-send"
+              />
+              <span
+                class="text-sm"
+                aria-live="polite"
+              >
+                <span
+                  v-if="commentError"
+                  class="text-(--ui-color-accent-main-alert)"
+                >{{ commentError }}</span>
+                <span
+                  v-else-if="commentSent"
+                  class="text-(--tai-success)"
+                >Замечание отправлено — менеджер получил задачу</span>
+              </span>
             </div>
-          </article>
+          </form>
         </section>
       </template>
     </div>
@@ -943,106 +1002,6 @@ const rowItems = computed(() => {
         />
       </span>
     </div>
-    <B24Button
-      v-if="invoice?.approval"
-      color="air-primary"
-      size="lg"
-      label="Замечание"
-      class="fixed right-4 z-40 shadow-lg rounded-full"
-      :class="decisions && decisionTasks.length && !invoice.approval.mark.approved ? 'bottom-36 sm:bottom-24' : 'bottom-4'"
-      data-testid="public-comment-fab"
-      @click="openComment"
-    />
-    <B24Modal
-      v-if="isDesktop"
-      v-model:open="commentOpen"
-      title="Замечание по счёту"
-      description="Напишите, что поправить, — менеджер получит задачу и ответит на этой странице."
-    >
-      <template #body>
-        <form
-          class="space-y-3 py-2"
-          @submit.prevent="sendComment"
-        >
-          <B24Textarea
-            v-model="commentText"
-            :maxlength="MAX_COMMENT_LENGTH"
-            :rows="3"
-            autoresize
-            :maxrows="12"
-            class="w-full"
-            placeholder="Ваш комментарий"
-            aria-label="Комментарий"
-            data-testid="public-comment-text"
-          />
-          <B24Button
-            type="submit"
-            color="air-primary"
-            label="Отправить"
-            :loading="sending"
-            :disabled="sending || !commentText.trim()"
-            data-testid="public-comment-send"
-          />
-          <p
-            v-if="commentError"
-            class="text-base text-(--ui-color-accent-main-alert)"
-          >
-            {{ commentError }}
-          </p>
-          <p
-            v-else-if="commentSent"
-            class="text-base text-(--ui-color-accent-main-success)"
-          >
-            Комментарий отправлен
-          </p>
-        </form>
-      </template>
-    </B24Modal>
-    <B24Drawer
-      v-else
-      v-model:open="commentOpen"
-      title="Замечание по счёту"
-      description="Напишите, что поправить, — менеджер получит задачу и ответит на этой странице."
-    >
-      <template #body>
-        <form
-          class="space-y-3 py-2"
-          @submit.prevent="sendComment"
-        >
-          <B24Textarea
-            v-model="commentText"
-            :maxlength="MAX_COMMENT_LENGTH"
-            :rows="3"
-            autoresize
-            :maxrows="12"
-            class="w-full"
-            placeholder="Ваш комментарий"
-            aria-label="Комментарий"
-            data-testid="public-comment-text"
-          />
-          <B24Button
-            type="submit"
-            color="air-primary"
-            label="Отправить"
-            :loading="sending"
-            :disabled="sending || !commentText.trim()"
-            data-testid="public-comment-send"
-          />
-          <p
-            v-if="commentError"
-            class="text-base text-(--ui-color-accent-main-alert)"
-          >
-            {{ commentError }}
-          </p>
-          <p
-            v-else-if="commentSent"
-            class="text-base text-(--ui-color-accent-main-success)"
-          >
-            Комментарий отправлен
-          </p>
-        </form>
-      </template>
-    </B24Drawer>
     <!-- Окна — по одному правилу: компьютер — модальное окно, телефон — панель снизу (владелец 2026-10-25) -->
     <B24Modal
       v-if="isDesktop"
@@ -1253,6 +1212,17 @@ const rowItems = computed(() => {
 .pub-pill.is-done {
   background: var(--tai-accent-soft);
   color: var(--tai-accent);
+}
+.pub-msg {
+  max-width: 85%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--tai-surface-2);
+}
+.pub-msg.is-mine {
+  margin-left: auto;
+  background: var(--tai-surface);
+  border: 1px solid var(--tai-accent-soft);
 }
 .pub-details {
   padding: 14px;
