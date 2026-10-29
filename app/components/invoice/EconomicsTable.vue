@@ -20,6 +20,11 @@ const totals = computed(() => {
   const delta = billed - formula
   return { formula, billed, delta, percent: formula > 0 ? Math.round(delta / formula * 1000) / 10 : null }
 })
+/** Плитка «Часы» (дизайн v2): всего часов и сколько задач оценил ИИ. */
+const hours = computed(() => ({
+  total: Math.round(props.items.reduce((sum, e) => sum + e.hours, 0) * 100) / 100,
+  estimated: props.items.filter(e => e.estimated).length
+}))
 const flaggedCount = computed(() => props.items.filter(e => e.flag === 'loss' || e.flag === 'over').length)
 
 function pct(v: number | null): string {
@@ -50,7 +55,7 @@ function hoursText(h: number): string {
       <span class="text-xs opacity-60">суммы с НДС · пометка — отклонение больше {{ threshold }}%</span>
     </div>
 
-    <div class="grid gap-2 sm:grid-cols-3">
+    <div class="grid gap-2 grid-cols-2 sm:grid-cols-4">
       <div class="rounded-lg border border-(--ui-color-divider-less) p-3">
         <div class="text-xs opacity-60">
           Выставлено клиенту
@@ -81,6 +86,22 @@ function hoursText(h: number): string {
           :class="tone(totals.delta)"
         >
           {{ signed(totals.delta) }} <span class="text-xs font-normal">{{ pct(totals.percent) }}</span>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border border-(--ui-color-divider-less) p-3"
+        data-testid="economics-hours"
+      >
+        <div class="text-xs opacity-60">
+          Часы
+        </div>
+        <div class="text-lg font-semibold tabular-nums">
+          {{ hoursText(hours.total) }}
+        </div>
+        <div class="text-xs opacity-60">
+          {{ items.length }} задач<template v-if="hours.estimated">
+            · {{ hours.estimated }} оценены ИИ
+          </template>
         </div>
       </div>
     </div>

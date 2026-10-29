@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatMoney } from '~/utils/fillPreview'
 // Обработчик встройки CRM_SMART_INVOICE_DETAIL_TOOLBAR: карточка счёта → меню верхней кнопки →
 // «Заполнить из задач». Здесь выбирают, откуда брать задачи и как считать, смотрят предпросмотр
 // и пишут строки в счёт. Второй блок — консультации BitrixGPT.
@@ -44,7 +45,7 @@ const measuresUnread = ref<UnreadReason>('failed')
 const unit = computed(() => rowUnit(measures.value, app.settings.value.measureCode, measuresUnread.value))
 
 const modeItems = [
-  { label: 'Задача — одна строка', value: 'task', description: 'Всё время задачи по ставке ответственного' },
+  { label: 'Задача — одна строка', value: 'task', description: 'Время участников по их ставкам; без автора — по ответственному' },
   { label: 'Записи времени — строки', value: 'time', description: 'Каждая запись времени по ставке того, кто её внёс' }
 ]
 
@@ -268,29 +269,36 @@ async function consult(promptId: string) {
           data-testid="fill-error"
         />
 
+        <!-- Дизайн v2: «Как считать» карточками, главная кнопка справа -->
         <B24Card>
-          <div class="grid gap-6 md:grid-cols-2">
-            <B24FormField label="Как считать">
+          <div class="flex flex-wrap items-end gap-4">
+            <B24FormField
+              label="Как считать"
+              class="flex-1 min-w-72"
+            >
               <B24RadioGroup
                 v-model="mode"
                 :items="modeItems"
                 value-key="value"
+                variant="card"
+                orientation="horizontal"
                 :disabled="locked"
                 data-testid="fill-mode"
               />
             </B24FormField>
+            <B24Button
+              ref="collectButton"
+              color="air-primary"
+              size="lg"
+              label="Собрать строки"
+              :loading="fill.step.value === 'collecting' || measuresLoading"
+              :disabled="locked || !fill.invoice.value || measuresLoading"
+              data-testid="fill-collect"
+              @click="collect"
+            />
           </div>
           <template #footer>
             <div class="flex flex-wrap items-center gap-3">
-              <B24Button
-                ref="collectButton"
-                color="air-primary"
-                label="Собрать строки"
-                :loading="fill.step.value === 'collecting' || measuresLoading"
-                :disabled="locked || !fill.invoice.value || measuresLoading"
-                data-testid="fill-collect"
-                @click="collect"
-              />
               <span class="text-sm opacity-70">
                 Названия: {{ app.settings.value.naming === 'ai' ? 'ИИ' : 'как есть из задач' }} · округление:
                 {{ roundingText }} · в счёт: {{ app.settings.value.priceMode === 'sum' ? 'сумма строки × 1' : 'цена часа × часы' }}
@@ -398,19 +406,16 @@ async function consult(promptId: string) {
           @cancel="cancelConfirm"
         />
         <!-- Во время записи кнопки остаются на месте: иначе индикатор загрузки некому показать. -->
+        <!-- Липкая панель внизу (дизайн v2): итог и запись всегда под рукой -->
         <div
           v-else-if="fill.canWrite.value || fill.step.value === 'writing'"
-          class="flex flex-wrap gap-3"
+          class="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-(--tai-border) bg-(--tai-surface) px-4 py-3 shadow-lg"
         >
-          <B24Button
-            ref="replaceButton"
-            color="air-primary-success"
-            label="Заменить товары в счёте"
-            :loading="fill.writing.value === 'replace' || opening === 'replace'"
-            :disabled="busy || opening !== null"
-            data-testid="fill-replace"
-            @click="write(true)"
-          />
+          <span
+            v-if="result"
+            class="text-sm opacity-70 mr-auto"
+            data-testid="fill-write-summary"
+          >Строк в счёт: {{ result.rows.length }} · сумма {{ formatMoney(fill.totals.value.total) }} {{ fill.invoice.value?.currencyId ?? '' }}</span>
           <B24Button
             ref="appendButton"
             color="air-secondary"
@@ -419,6 +424,15 @@ async function consult(promptId: string) {
             :disabled="busy || opening !== null"
             data-testid="fill-append"
             @click="write(false)"
+          />
+          <B24Button
+            ref="replaceButton"
+            color="air-primary"
+            label="Заменить товары в счёте"
+            :loading="fill.writing.value === 'replace' || opening === 'replace'"
+            :disabled="busy || opening !== null"
+            data-testid="fill-replace"
+            @click="write(true)"
           />
         </div>
         <B24Alert
