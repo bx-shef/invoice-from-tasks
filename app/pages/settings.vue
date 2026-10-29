@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // Настройки приложения. Администратор видит всё; назначенный редактор ставок — только ставки;
 // остальные сотрудники — объяснение, к кому обратиться. Права ещё раз проверяет сервер.
-import type { TabsItem } from '@bitrix24/b24ui-nuxt'
 import { parseSettings, settingsProblems, type AppSettings } from '#shared/domain/settings'
 import { formatUsage } from '#shared/domain/storageBudget'
 
@@ -13,20 +12,25 @@ const draft = ref<AppSettings | null>(null)
 const loadError = ref('')
 const saving = ref(false)
 
-const tabs = computed<TabsItem[]>(() => {
-  const all: TabsItem[] = [
-    { label: 'Общие', slot: 'general' as const, value: 'general' },
-    { label: 'Ставки', slot: 'rates' as const, value: 'rates' },
-    { label: 'Наценки', slot: 'markup' as const, value: 'markup' },
-    { label: 'НДС', slot: 'vat' as const, value: 'vat' },
-    { label: 'Поля клиента', slot: 'clientFields' as const, value: 'clientFields' },
-    { label: 'Публичная страница', slot: 'publicPage' as const, value: 'publicPage' },
-    { label: 'Промпты', slot: 'prompts' as const, value: 'prompts' },
-    { label: 'Доступ', slot: 'access' as const, value: 'access' },
-    { label: 'Хранилище', slot: 'storage' as const, value: 'storage' }
-  ]
-  return app.isAdmin.value ? all : all.filter(t => t.value === 'rates')
+/**
+ * Разделы — боковым меню из 4 групп (дизайн v2, раздел 4): Расчёт · Клиент · ИИ · Система; на узком
+ * экране — прокручиваемая лента. Разделы не размонтируются (v-show): черновик и поля живут.
+ */
+type Section = 'general' | 'rates' | 'markup' | 'vat' | 'clientFields' | 'publicPage' | 'prompts' | 'access' | 'storage'
+const GROUPS: ReadonlyArray<{ title: string, items: ReadonlyArray<{ value: Section, label: string }> }> = [
+  { title: 'Расчёт', items: [{ value: 'general', label: 'Общие' }, { value: 'rates', label: 'Ставки' }, { value: 'markup', label: 'Наценки' }, { value: 'vat', label: 'НДС' }] },
+  { title: 'Клиент', items: [{ value: 'clientFields', label: 'Поля клиента' }, { value: 'publicPage', label: 'Публичная страница' }] },
+  { title: 'ИИ', items: [{ value: 'prompts', label: 'Промпты' }] },
+  { title: 'Система', items: [{ value: 'access', label: 'Доступ' }, { value: 'storage', label: 'Хранилище' }] }
+]
+const groups = computed(() => app.isAdmin.value
+  ? GROUPS
+  : GROUPS.map(g => ({ ...g, items: g.items.filter(i => i.value === 'rates') })).filter(g => g.items.length))
+const section = ref<Section>('general')
+watchEffect(() => {
+  if (!app.isAdmin.value && app.loaded.value) section.value = 'rates'
 })
+const sectionTitle = computed(() => GROUPS.flatMap(g => g.items).find(i => i.value === section.value)?.label ?? '')
 
 const usage = computed(() => (draft.value ? app.usageWith({ settings: draft.value }) : null))
 const problems = computed(() => (draft.value ? settingsProblems(draft.value) : []))
@@ -59,7 +63,7 @@ async function save() {
 
 <template>
   <InPortalGate>
-    <div class="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 pb-28">
+    <div class="p-4 sm:p-6 max-w-6xl mx-auto space-y-4 pb-28">
       <h1 class="text-xl font-semibold">
         Настройки
       </h1>
@@ -86,60 +90,106 @@ async function save() {
             :description="problems.join('; ')"
           />
 
-          <B24Tabs
-            :items="tabs"
-            class="w-full"
-            :unmount-on-hide="false"
-          >
-            <template #general>
-              <SettingsGeneral
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #rates>
-              <SettingsRates class="pt-4" />
-            </template>
-            <template #markup>
-              <SettingsMarkup
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #vat>
-              <SettingsVat
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #clientFields>
-              <SettingsClientFields
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #publicPage>
-              <SettingsPublic
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #prompts>
-              <SettingsPrompts
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #access>
-              <SettingsAccess
-                v-model="draft"
-                class="pt-4"
-              />
-            </template>
-            <template #storage>
-              <SettingsStorage class="pt-4" />
-            </template>
-          </B24Tabs>
+          <div class="settings-layout">
+            <nav
+              class="settings-nav"
+              aria-label="Разделы настроек"
+              data-testid="settings-nav"
+            >
+              <template
+                v-for="g in groups"
+                :key="g.title"
+              >
+                <div class="settings-nav-group">
+                  {{ g.title }}
+                </div>
+                <button
+                  v-for="i in g.items"
+                  :key="i.value"
+                  type="button"
+                  class="settings-nav-item"
+                  :class="{ 'is-active': section === i.value }"
+                  :aria-current="section === i.value ? 'page' : undefined"
+                  @click="section = i.value"
+                >
+                  {{ i.label }}
+                </button>
+              </template>
+            </nav>
+            <section class="settings-panel">
+              <h2 class="text-base font-semibold mb-3">
+                {{ sectionTitle }}
+              </h2>
+              <div
+                v-show="section === 'general'"
+                data-testid="settings-section-general"
+              >
+                <SettingsGeneral
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'rates'"
+                data-testid="settings-section-rates"
+              >
+                <SettingsRates />
+              </div>
+              <div
+                v-show="section === 'markup'"
+                data-testid="settings-section-markup"
+              >
+                <SettingsMarkup
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'vat'"
+                data-testid="settings-section-vat"
+              >
+                <SettingsVat
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'clientFields'"
+                data-testid="settings-section-clientFields"
+              >
+                <SettingsClientFields
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'publicPage'"
+                data-testid="settings-section-publicPage"
+              >
+                <SettingsPublic
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'prompts'"
+                data-testid="settings-section-prompts"
+              >
+                <SettingsPrompts
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'access'"
+                data-testid="settings-section-access"
+              >
+                <SettingsAccess
+                  v-model="draft"
+                />
+              </div>
+              <div
+                v-show="section === 'storage'"
+                data-testid="settings-section-storage"
+              >
+                <SettingsStorage />
+              </div>
+            </section>
+          </div>
 
           <!-- Общая кнопка сохраняет всё, кроме ставок: у ставок своя кнопка и свои права. -->
           <div
@@ -178,3 +228,69 @@ async function save() {
     </div>
   </InPortalGate>
 </template>
+
+<style>
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.settings-nav {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--tai-border);
+  background: var(--tai-surface);
+}
+.settings-nav-group {
+  margin: 10px 8px 4px;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tai-text-3);
+}
+.settings-nav-group:first-child {
+  margin-top: 0;
+}
+.settings-nav-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--tai-text);
+}
+.settings-nav-item:hover {
+  background: var(--tai-surface-2);
+}
+.settings-nav-item.is-active {
+  background: var(--tai-accent-soft);
+  color: var(--tai-accent);
+  font-weight: 600;
+}
+.settings-panel {
+  min-width: 0;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid var(--tai-border);
+  background: var(--tai-surface);
+}
+/* Узкий экран — меню лентой сверху */
+@media (max-width: 860px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .settings-nav-group {
+    display: none;
+  }
+}
+</style>
