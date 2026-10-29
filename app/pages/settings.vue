@@ -29,7 +29,10 @@ const busy = computed(() => saving.value || !!ratesForm.value?.saving)
 
 /** Разделы скрываются v-show (черновик живёт); админские не монтируются у редактора ставок. */
 const groups = computed(() => settingsGroupsFor(app.isAdmin.value))
-const selected = ref<SettingsSection>('general')
+// Раздел из адреса (?section=vat) — ссылки «готовности портала» с главной ведут сразу в нужный
+const route = useRoute()
+const fromQuery = String(route.query.section ?? '')
+const selected = ref<SettingsSection>(SETTINGS_GROUPS.flatMap(g => g.items).some(i => i.value === fromQuery) ? fromQuery as SettingsSection : 'general')
 const section = computed(() => effectiveSection(selected.value, app.isAdmin.value))
 const sectionTitle = computed(() => SETTINGS_GROUPS.flatMap(g => g.items).find(i => i.value === section.value)?.label ?? '')
 
