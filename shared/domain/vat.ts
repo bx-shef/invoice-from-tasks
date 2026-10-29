@@ -95,6 +95,17 @@ export interface VatLine {
   price: number
   quantity: number
   taxRate: VatRate
+  /**
+   * Цена С налогом, если строка уходит в счёт с ней (фикс — «Стоимость работ», fill.ts): портал
+   * считает итог от неё, а не от округлённой цены без налога. Без этого 700 + 600 + 600 + 100
+   * давали в предпросмотре 1 999,99 вместо 2 000 (583,33 × 1,2 = 699,996; владелец 2026-10-29).
+   */
+  fixedGross?: number
+}
+
+/** Строка с налогом × количество — как её сложит портал. */
+function lineGross(line: VatLine): number {
+  return (line.fixedGross ?? grossPrice(line.price, line.taxRate)) * line.quantity
 }
 
 /**
@@ -121,7 +132,7 @@ export interface LineAmounts {
  * на копейку (4,13 + 0,83 ≠ 4,95) — так же и у портала.
  */
 export function lineAmounts(line: VatLine): LineAmounts {
-  return { vat: lineVat(line), total: roundMoney(grossPrice(line.price, line.taxRate) * line.quantity) }
+  return { vat: lineVat(line), total: roundMoney(lineGross(line)) }
 }
 
 /**
@@ -134,7 +145,7 @@ export function vatTotals(lines: readonly VatLine[]): VatTotals {
   let gross = 0
   let vat = 0
   for (const line of lines) {
-    gross += grossPrice(line.price, line.taxRate) * line.quantity
+    gross += lineGross(line)
     vat += lineVat(line)
   }
   const total = roundMoney(gross)
