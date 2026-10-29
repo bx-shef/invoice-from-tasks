@@ -14,7 +14,7 @@ test('публичная страница: вход по коду, счёт и �
   await open.click()
   await expect(page.getByTestId('public-summary')).toBeVisible()
   expect(log.invoice.length).toBeGreaterThan(0)
-  await expect(page.getByTestId('public-row').filter({ hasText: 'Импорт банковских выписок' })).toBeVisible()
+  await expect(page.getByTestId('public-row-name').filter({ hasText: 'Импорт банковских выписок' })).toBeVisible()
 
   const yes = page.getByTestId('public-decide-yes')
   await expect(yes).toHaveCount(2)
@@ -72,7 +72,7 @@ test('публичная страница: быстрые клики подря�
   await expect(yes.nth(1)).toHaveAttribute('aria-pressed', 'true')
   await expect.poll(() => log.decide.length).toBe(2)
   await expect(page.locator('[data-decision=yes]')).toHaveCount(2)
-  await expect(page.getByTestId('public-decision-badge').first()).toContainText('разрешено')
+  await expect(page.getByTestId('public-decision-badge').first()).toContainText('Делаем')
 })
 
 test('публичная страница: короткий код — ошибка под полем и для скринридера, ввод её снимает', async ({ page }) => {
@@ -104,4 +104,19 @@ test('публичная страница: прогресс решений и л
   expect(bar && fab && fab.y + fab.height <= bar.y).toBe(true)
   const shot = await page.screenshot({ fullPage: false, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/progress.png` : undefined })
   await info.attach('progress', { body: shot, contentType: 'image/png' })
+})
+
+test('публичная страница: строка работы — переключатель решения и подробности в строке', async ({ page }) => {
+  const log = await mockPublicApi(page)
+  await page.goto(URL)
+  await page.locator('[data-testid=public-code] input, input#access-code').first().fill('J7AWBZDDRy')
+  await page.getByTestId('public-open').click()
+  const no = page.getByTestId('public-decide-no').first()
+  await no.click()
+  await expect(no).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => JSON.stringify(log.decide.at(-1))).toContain('"no"')
+  await page.getByTestId('public-row').first().click()
+  await expect(page.getByTestId('public-task').first()).toBeVisible()
+  await expect(page.getByTestId('public-row').first()).toHaveText('Скрыть')
+  await page.screenshot({ fullPage: true, path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/rows.png` : undefined })
 })
