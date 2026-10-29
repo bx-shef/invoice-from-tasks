@@ -72,7 +72,7 @@ test('публичная страница: быстрые клики подря�
   await expect(yes.nth(1)).toHaveAttribute('aria-pressed', 'true')
   await expect.poll(() => log.decide.length).toBe(2)
   await expect(page.locator('[data-decision=yes]')).toHaveCount(2)
-  await expect(page.getByTestId('public-decision-badge').first()).toContainText('Делаем')
+  await expect(page.getByTestId('public-decide-yes').first()).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('публичная страница: короткий код — ошибка под полем и для скринридера, ввод её снимает', async ({ page }) => {

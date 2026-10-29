@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { decisionProgress, ofWorksLabel, waitingLabel } from '~/utils/publicProgress'
+import { decisionProgress, ofWorksLabel, rowCode, rowTitle, waitingLabel } from '~/utils/publicProgress'
 // Публичная страница счёта (#34, этап 3): `/p-<домен портала>/i-<ID счёта>` — по QR-коду на счёте.
 // Клиент вводит код доступа (поле «Код доступа» его компании или контакта) и видит расшифровку:
 // клиент, «моя компания», дата, статус, строки «[123-456] …» с суммами и задачи — заголовок со
@@ -292,16 +292,6 @@ function toggleResult(id: number) {
   const next = new Set(fullResult.value)
   if (!next.delete(id)) next.add(id)
   fullResult.value = next
-}
-
-/** Код строки из приставки «[87-119884] » — мелко под названием (дизайн v2). */
-function rowCode(name: string): string {
-  return /^\[([^\]]*)\]/.exec(name)?.[1] ?? ''
-}
-
-/** Строка счёта без приставки «[87-119884] » — для счётчика решений; в «Работах» название как в счёте (владелец 2026-10-25). */
-function rowTitle(name: string): string {
-  return name.replace(/^\[[^\]]*\]\s*/, '') || name
 }
 
 /** Результаты задачи: сначала клиента (его задача — то, что он ставил), затем наши; без дублей. */
@@ -645,7 +635,7 @@ const rowItems = computed(() => {
           <div class="text-sm uppercase opacity-75">
             Работы
           </div>
-          <!-- Строка — чтобы вспомнить: №, что за задача, состояние, дата, цена. Подробности — по раскрытию. -->
+          <!-- Строка — чтобы вспомнить: №, что за задача, код, дата, цена. Подробности — «Подробнее» в самой строке. -->
           <!-- Решения по работе — прямо в её строке (владелец 2026-10-25: два списка рядом — странно) -->
           <div
             class="hd-card px-3"
@@ -655,7 +645,7 @@ const rowItems = computed(() => {
               v-for="item in rowItems"
               :id="`row-${item.value}`"
               :key="item.value"
-              class="pub-row scroll-mt-3"
+              class="pub-row"
               :class="rowDecisionClass(item.task?.id)"
               :data-decision="item.task ? decisions?.[item.task.id] : undefined"
             >
@@ -664,28 +654,33 @@ const rowItems = computed(() => {
                 <span class="text-sm opacity-60 tabular-nums pt-0.5">{{ item.n }}</span>
                 <span class="min-w-0">
                   <span
-                    class="block text-base font-medium leading-snug pub-row-name"
+                    :id="`row-name-${item.value}`"
+                    class="block text-base font-medium leading-snug pub-row-name [overflow-wrap:anywhere]"
                     data-testid="public-row-name"
                   >{{ rowTitle(item.row.name) }}</span>
-                  <span class="block text-xs opacity-65 mt-0.5">
-                    {{ [rowCode(item.row.name), item.date ? `${item.state || 'поставлена'} ${date(item.date)}` : item.state].filter(Boolean).join(' · ') }}
+                  <span class="block text-xs opacity-65 mt-0.5 [overflow-wrap:anywhere]">
+                    {{ [rowCode(item.row.name), item.done ? '' : item.state, item.date ? date(item.date) : ''].filter(Boolean).join(' · ') }}
                   </span>
                 </span>
+                <!-- Телефон: сумма под названием, чтобы длинная сумма не сжимала его в ноль -->
                 <span
                   v-if="item.row.sum !== null"
-                  class="whitespace-nowrap font-semibold tabular-nums pub-row-sum"
+                  class="whitespace-nowrap font-semibold tabular-nums pub-row-sum max-sm:col-start-2 max-sm:row-start-2"
                 >{{ money(item.row.sum, invoice.currencyId) }}</span>
                 <span
                   v-else
-                  class="whitespace-nowrap text-sm opacity-65"
+                  class="whitespace-nowrap text-sm opacity-65 max-sm:col-start-2 max-sm:row-start-2"
                 >без строки</span>
 
-                <div class="col-start-2 col-span-2 flex flex-wrap items-center gap-2 pt-1">
+                <div
+                  v-if="(decisions && item.task) || item.done || !item.disabled"
+                  class="col-start-2 col-span-2 flex flex-wrap items-center gap-2 pt-1"
+                >
                   <div
                     v-if="decisions && item.task"
                     class="pub-seg"
                     role="group"
-                    aria-label="Решение по работе"
+                    :aria-labelledby="`row-name-${item.value}`"
                   >
                     <button
                       type="button"
@@ -710,27 +705,24 @@ const rowItems = computed(() => {
                       class="is-later"
                       :aria-pressed="decisions[item.task.id] === 'later'"
                       title="Решение по работе не сейчас"
+                      aria-haspopup="dialog"
                       data-testid="public-decide-later"
                       @click="postponeTask = item.task.id"
                     >
                       {{ decisions[item.task.id] === 'later' && invoice.approval?.postponed?.[item.task.id] ? `До ${date(invoice.approval.postponed[item.task.id]!)}` : 'Позже' }}
                     </button>
                   </div>
+                  <!-- Решение видно по нажатой кнопке; пилюля — только «принята» исполнителем (другой смысл, свой цвет) -->
                   <span
-                    v-if="item.task && decisions?.[item.task.id]"
-                    class="pub-pill"
-                    :class="`is-${decisions[item.task.id]}`"
-                    data-testid="public-decision-badge"
-                  >{{ decisions[item.task.id] === 'yes' ? 'Делаем' : decisions[item.task.id] === 'no' ? 'Не делаем' : 'Позже' }}</span>
-                  <span
-                    v-else-if="item.done"
-                    class="pub-pill is-yes"
+                    v-if="item.done"
+                    class="pub-pill is-done"
                   >принята</span>
                   <button
                     v-if="!item.disabled"
                     type="button"
-                    class="ms-auto text-sm text-(--tai-accent) hover:underline"
+                    class="ms-auto text-sm text-(--tai-accent) hover:underline px-2 py-2"
                     :aria-expanded="openRows.has(item.value)"
+                    :aria-controls="`row-details-${item.value}`"
                     data-testid="public-row"
                     @click="toggleRow(item.value)"
                   >
@@ -739,14 +731,15 @@ const rowItems = computed(() => {
                 </div>
               </div>
               <template v-if="openRows.has(item.value)">
-                <!-- Как карточка задачи в мобильном Б24: крупно, «Результат работы» карточкой, постановщик с аватаром -->
+                <!-- Подробности в строке (v2): результат зелёной чертой, задача, постановщик, что сделать -->
                 <div
                   v-if="item.task"
-                  class="pub-details space-y-3 text-base mb-3 ml-9"
+                  :id="`row-details-${item.value}`"
+                  class="pub-details space-y-3 text-base mb-3 sm:ml-9"
                 >
                   <div
                     v-if="lastResult(item.task)"
-                    class="pub-result p-4 space-y-2"
+                    class="pub-result space-y-2"
                     data-testid="public-task"
                   >
                     <div class="flex items-center gap-2 text-lg font-semibold">
@@ -789,7 +782,7 @@ const rowItems = computed(() => {
                   />
 
                   <!-- Задача исполнителя: её название и описание; описание задачи клиента не показываем (владелец 2026-10-25) -->
-                  <div class="pub-tile p-4 space-y-3">
+                  <div class="pub-tile space-y-3">
                     <div class="flex flex-wrap gap-2">
                       <B24Button
                         v-if="item.task.clientTaskUrl"
@@ -1121,10 +1114,7 @@ const rowItems = computed(() => {
 /* Подробности работы (дизайн v2): результат — зелёной чертой слева, без рамок */
 .pub-result {
   border-left: 3px solid var(--ui-color-accent-main-success, #1f8a4c);
-  padding: 2px 0 2px 12px !important;
-}
-.pub-tile {
-  padding: 0 !important;
+  padding: 2px 0 2px 12px;
 }
 
 /* Шапка, прогресс и липкая панель решений (дизайн v2) */
@@ -1223,6 +1213,8 @@ const rowItems = computed(() => {
   flex-wrap: wrap;
 }
 .pub-seg button {
+  min-height: 40px;
+  cursor: pointer;
   padding: 6px 14px;
   border-radius: 10px;
   border: 1px solid var(--tai-border);
@@ -1258,11 +1250,7 @@ const rowItems = computed(() => {
   font-size: 12px;
   background: var(--tai-surface-2);
 }
-.pub-pill.is-yes {
-  background: var(--tai-success-bg);
-  color: var(--tai-success);
-}
-.pub-pill.is-later {
+.pub-pill.is-done {
   background: var(--tai-accent-soft);
   color: var(--tai-accent);
 }

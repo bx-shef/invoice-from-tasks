@@ -48,3 +48,13 @@ export function ofWorksLabel(n: number): string {
 export function waitingLabel(n: number): string {
   return `${worksLabel(n)} ${n % 10 === 1 && n % 100 !== 11 ? 'ждёт' : 'ждут'} решения`
 }
+
+/** Код строки из приставки «[87-119884] » — мелко под названием. */
+export function rowCode(name: string): string {
+  return /^\[([^\]]*)\]/.exec(name)?.[1] ?? ''
+}
+
+/** Строка счёта без приставки «[87-119884] »; пустое название остаётся как есть. */
+export function rowTitle(name: string): string {
+  return name.replace(/^\[[^\]]*\]\s*/, '') || name
+}
