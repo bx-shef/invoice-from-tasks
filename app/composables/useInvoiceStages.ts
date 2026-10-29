@@ -1,4 +1,4 @@
-// Стадии счёта для вкладки «Публичная страница» (#34). Разбор — app/utils/invoiceStages.ts.
+// Стадии счёта для раздела «Публичная страница» (#34). Разбор — app/utils/invoiceStages.ts.
 
 import { collectOffsetPages } from '~/utils/paging'
 import { invoiceStageEntities, stageOptions, templateOptions, type StageOption, type TemplateOption } from '~/utils/invoiceStages'

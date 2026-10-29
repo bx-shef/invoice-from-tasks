@@ -26,7 +26,7 @@ export function useCatalog() {
     )
   }
 
-  /** Ставки НДС портала — варианты на вкладке «НДС» (активные; «Без НДС» добавляет вкладка). */
+  /** Ставки НДС портала — варианты на разделе «НДС» (активные; «Без НДС» добавляет раздел). */
   async function vatRates(): Promise<PortalVat[]> {
     const { method, params } = vatListCall()
     return parseVatRates(await b24.call<unknown>(method, params))

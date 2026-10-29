@@ -5,7 +5,7 @@
 import { INVOICE_ENTITY_TYPE_ID } from '#shared/domain/tasks'
 import { invoiceLinkUpdates, parseInvoiceLinkFields, publicInvoiceUrl, publicQrUrl, type InvoiceFieldOption } from '#shared/domain/invoiceLinks'
 
-/** Поля счёта на время страницы: вкладки настроек читают их трижды — запрос один. */
+/** Поля счёта на время страницы: разделы настроек читают их трижды — запрос один. */
 let fieldsCache: Promise<unknown> | null = null
 
 export function useInvoiceLinks() {
