@@ -34,7 +34,7 @@
     "@vueuse/nuxt": "^15.0.0",
     "markdown-it": "^15.0.3",
     "nuxt": "^4.6.3",
-    "openai": "^7.45.1",
+    "openai": "^7.52.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
     "tailwindcss": "^4.3.3"
