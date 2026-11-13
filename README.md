@@ -60,4 +60,4 @@ Node.js 22+, pnpm 10 (версия — в `packageManager`). Публичный 
 
 ## Лицензия
 
-MIT — [`LICENSE`](LICENSE).
+Права принадлежат ООО «БэИксШефБай» — [`LICENSE`](LICENSE).
