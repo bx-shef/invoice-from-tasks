@@ -3,7 +3,7 @@
   "type": "module",
   "private": true,
   "description": "Приложение Битрикс24: заполнение товарной части счёта по задачам и затраченному времени",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "author": "Igor Shevchik",
   "homepage": "https://github.com/bx-shef/invoice-from-tasks#readme",
   "repository": {
